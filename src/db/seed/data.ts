@@ -28,19 +28,30 @@ function at(d: number, h = 0) {
 	return new Date(epoch + d * 24 * HOUR + h * HOUR);
 }
 
-/** The ids the seed hands out: 5eed0000-0000-4000-8000-000000000001 onwards. */
+/**
+ * The nth seed id: xxxxxxxx-5eed-4000-8000-<n, 12 digits>. The first group is
+ * a multiplicative hash of n, so the 8-character short ids a UI shows differ
+ * row to row. "5eed" still marks a seeded row, the version nibble is 4 and the
+ * variant is 8, so every id is a valid v4 uuid. The last group keeps them unique.
+ */
+export function seedId(n: number): string {
+	const head = (Math.imul(n, 0x9e3779b1) >>> 0).toString(16).padStart(8, "0");
+	return `${head}-5eed-4000-8000-${String(n).padStart(12, "0")}`;
+}
+
+/** The ids the seed hands out: seedId(1) onwards. */
 export function seedIds(): IdGenerator {
 	let n = 0;
 	return {
 		next: () => {
 			n += 1;
-			return `5eed0000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+			return seedId(n);
 		},
 	};
 }
 
 /** The first id seedIds() hands out: the first client. Its presence means "already seeded". */
-export const SEED_MARKER_ID = "5eed0000-0000-4000-8000-000000000001";
+export const SEED_MARKER_ID = seedId(1);
 
 export const SEED_REQUEST_ID = "seed";
 
