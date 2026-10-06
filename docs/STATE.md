@@ -41,7 +41,7 @@ Legend: ⬜ not started · ◐ partly built · ✅ built.
 | 1 | Intake | ⬜ |
 | 2 | Repo read | ⬜ |
 | 3 | Mission planner | ⬜ |
-| 4 | Roles and roster | ⬜ |
+| 4 | Roles and roster | ⬜ catalog shapes published, unmounted |
 | 5 | Identity generator | ⬜ |
 | 6 | Dispatch and runner | ⬜ |
 | 7 | Sandbox rooms | ⬜ |
@@ -50,7 +50,7 @@ Legend: ⬜ not started · ◐ partly built · ✅ built.
 | 10 | Render | ⬜ |
 | 11 | Delivery | ⬜ |
 | 12 | Knowledge and metrics | ⬜ |
-| 13 | Surfaces | ⬜ |
+| 13 | Surfaces | ◐ read routes for missions and activity |
 | 14 | Proposals | ⬜ |
 
 **Module 0, built:** a Hono and ts-rest server with one route, `GET /api/health`, wrapped in the success envelope. The error vocabulary: one union of 21 codes (counted in the file on 2026-10-05; `GITHUB_REJECTED` was added after the union of 20 was first built), the success and error envelopes, cursor pagination, error middleware, and a request id on every response. Time and identifiers are injected through `src/lib/clock.ts` and `src/lib/ids.ts`, and `scripts/check-determinism.sh` enforces it. The database pipeline: a lazy client, `drizzle-zod`, migration 0000 enabling pgvector, column helpers with no database defaults, `live()`, and `withTx`. CI runs the docs check, the determinism check, typecheck, lint, and tests against `pgvector/pgvector:pg17`, one of them over a real node socket.
@@ -75,7 +75,6 @@ Legend: ⬜ not started · ◐ partly built · ✅ built.
 - **Canon chat (decided 2026-10-06) has no proposal kind yet.** `Proposal.kind` and the `proposal_kind` enum hold `next_module · calibration · post_delivery · intake_questions`. Chat suggestions need a kind, added in the same change as the code that writes them, not before. Proposals (module 14) come after the first mission (decided 2026-10-06), so the Canon chat stays not built until then.
 - **Agents cannot call the API yet.** The design was decided on 2026-10-06 and is specced: Dispatch, the firm roster, and a dispatch-scoped token (`DECISIONS-V2.md`, *Decided 2026-10-06: agents call the API*). The per-family table of what agents may do is specced too (`ROLES.md`, 2026-10-06). Unbuilt: all four, `Intake.drafted_by_dispatch_id`, and the error codes `DISPATCH_CLOSED` and `AGENT_NOT_PERMITTED`. Also unbuilt: the runner's `system` credential, `Finding.reported_by_dispatch_id`, and the idempotency keys on agent-reachable creates (`DATA-CONTRACTS-V2.md`, *Idempotency*). Until then, every route accepts only the operator. It is built before the first mission, the first of two exceptions to the 2026-10-05 schema freeze (decided 2026-10-06).
 - **Missions do not record their template.** `Mission.template_ref` and `template_version` are specced for module 3, before the first mission, the second freeze exception (decided 2026-10-06). The format of `template_version` is unspecified.
-- **No activity read route exists.** Decided 2026-10-06: one is added now, read-only, for the Activity page.
 - **Finding has no reference to the dispatch that wrote it.** `Finding.reported_by_dispatch_id` is specced (decided 2026-10-06) and built before module 9.
 - **avel-web still consumes the contract through a live `link:`** to a sibling checkout, which its CI cannot resolve. Decided 2026-10-06: it moves to a git dependency pinned to an avel-server commit. Both repos are private, so avel-web's CI needs a read token for avel-server, which the operator creates. The pin can point only at a pushed commit. `CLAUDE.md` still describes the live link; it changes when the pin lands.
 - **No delete routes exist.** Soft delete is exercised only in tests.
