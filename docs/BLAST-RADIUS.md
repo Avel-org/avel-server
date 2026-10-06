@@ -238,6 +238,7 @@ export const exportContract = c.router({
     }),
     responses: {
       201: exportSchema,           // dry_run: true, status: previewed
+      200: exportSchema,           // replay: same key and body; Idempotency-Replayed: true
       404: errorEnvelope,          // REPO_NOT_FOUND
       403: errorEnvelope,          // REPO_NO_ACCESS · POLICY_FORBIDS_TARGET
       422: errorEnvelope,          // PRECONDITION_FAILED · BLAST_RADIUS_VIOLATION
@@ -258,7 +259,8 @@ export const exportContract = c.router({
     }),
     responses: {
       201: exportSchema,
-      409: errorEnvelope,          // IDEMPOTENCY_REPLAY · PREVIEW_STALE
+      200: exportSchema,           // replay: same key and body; Idempotency-Replayed: true
+      409: errorEnvelope,          // IDEMPOTENCY_REPLAY (same key, different body) · PREVIEW_STALE
       422: errorEnvelope,          // PRECONDITION_FAILED · BLAST_RADIUS_VIOLATION
                                    //   · DETERMINISM_VIOLATION · PREVIEW_REQUIRED
       502: errorEnvelope,

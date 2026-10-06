@@ -585,7 +585,7 @@ The operator answered the module 0 question list on 2026-10-05. Shapes are in `D
 
 ### Stack
 
-- **The standing rule "no further stack or schema change before one mission runs" survives.** The changes below are recorded as decided before the first mission. After them the stack is frozen. This closes the open question about whether the repo split retired the rule. *Two exceptions, decided by the operator on 2026-10-06:* Dispatch, the firm roster, and their three foreign keys are built before the first mission (*Decided 2026-10-06: agents call the API*), and so are `Mission.template_ref` and `template_version` (*Decided 2026-10-06: build sync*). Nothing else is unfrozen.
+- **The standing rule "no further stack or schema change before one mission runs" survives.** The changes below are recorded as decided before the first mission. After them the stack is frozen. This closes the open question about whether the repo split retired the rule. *Two exceptions, decided by the operator on 2026-10-06:* Dispatch, the firm roster, and their three foreign keys are built before the first mission (*Decided 2026-10-06: agents call the API*), and so are `Mission.template_ref` and `template_version` (*Decided 2026-10-06: build sync*), with `Finding.reported_by_dispatch_id` as a fourth foreign key before module 9. Nothing else is unfrozen.
 - **Auth.js → Better Auth** (above). <!--allow-stale-->
 - **R2 is deferred.** The history in *Frozen bytes → R2 from the start* stands as written; a dated note there points here. When R2 returns, and where frozen bytes live until then, is open.
 - **Pino now, Sentry later.**
@@ -708,6 +708,12 @@ Agents retry on timeouts. A duplicate CompletionReport or Proposal corrupts attr
 - **The finding routes move to module 9.** Judges write `open` Findings during the gate, and confirming them is part of gating. Leaving the routes in module 12 would have put them after the first mission.
 - **Proposals (module 14) come after the first mission.** That mission runs with each next module dispatched by hand. The Canon chat shows as not built until then.
 - **An activity read route is added now,** read-only, as the missions read route was. The Activity page exists, and the dev seed already writes rows for it.
+
+### Three more, the same day
+
+- **avel-web pins the contract to an avel-server commit,** instead of linking a sibling checkout. CI checks out one repository, so a link it cannot resolve fails there. A pin also makes every contract change a deliberate step on the frontend: it arrives when the frontend moves the pin, and not before.
+- **A judge's Finding names its dispatch** through `Finding.reported_by_dispatch_id`, before module 9. Without it, the per-dispatch idempotency key had nothing to scope Findings by, and a judge's finding could not be traced to the run that wrote it. It is the fourth new foreign key under the freeze exceptions.
+- **An Export replay returns the original,** like the agent creates. A second rule for one operator route was a difference with no reason behind it.
 
 ---
 

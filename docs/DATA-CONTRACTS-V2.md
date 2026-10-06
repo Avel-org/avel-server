@@ -70,7 +70,7 @@ Every list uses keyset cursors, and a cursor from a different sort is 400. Searc
 
 **`apply` materializes.** `preset.apply` copies the preset into RosterEntries (copy-then-edit); the preset holds no mission state. The procedure name should make it obvious that applying is a write, not a reference.
 
-**Placement rule:** the contract lives in `avel-server` at `src/contract/`, and `avel-web` consumes it as a git dependency pinned to a commit. Neither side can change it without the other seeing the change.
+**Placement rule:** the contract lives in `avel-server` at `src/contract/`, and `avel-web` consumes it as a git dependency pinned to a commit. Neither side can change it without the other seeing the change. Reaffirmed by the operator on 2026-10-06. Until then avel-web used a live `link:` to a sibling checkout, which CI cannot resolve. A contract change reaches avel-web only when the frontend moves the pin. So a backend handoff names the commit to pin to. The export resolves only within `src/contract/`, which imports nothing outside itself but `zod` and `@ts-rest/core`.
 
 ## Route shape
 
@@ -92,7 +92,8 @@ export const exportContract = c.router({
     }),
     responses: {
       201: exportSchema,
-      409: errorEnvelope,                 // IDEMPOTENCY_REPLAY
+      200: exportSchema,                  // replay: same key and body; Idempotency-Replayed: true
+      409: errorEnvelope,                 // IDEMPOTENCY_REPLAY: same key, different body
       422: errorEnvelope,                 // PRECONDITION_FAILED
       502: errorEnvelope,                 // EXTERNAL_GITHUB
     },
@@ -104,13 +105,14 @@ export const exportContract = c.router({
 
 `[specced]` 2026-10-06. Agents retry on timeouts, and a duplicate CompletionReport or Proposal corrupts attribution.
 
-- **The key travels in an `Idempotency-Key` header,** a uuid, never in the body. Export's routes carry their key the same way (`BLAST-RADIUS.md`). Whether an Export replay also returns the original is `[unspecified]`; its spec still answers `409`.
+- **The key travels in an `Idempotency-Key` header,** a uuid, never in the body. Export's routes carry their key the same way (`BLAST-RADIUS.md`), and follow the same replay rule below (decided 2026-10-06).
 - **Every create an agent can reach takes one:** Proposal, Finding and the Intake draft.
 - **Same key and same body** returns the original record with `200` and the response header `Idempotency-Replayed: true`. Nothing is written twice.
 - **Same key with a different body** is `409 IDEMPOTENCY_REPLAY`. The server stores a hash of the request body beside the key so it can tell the two apart.
 - **Keys are unique per dispatch:** `(dispatch_id, idempotency_key)`. Another dispatch reusing a key cannot reach this dispatch's record, which keeps the 404 rule under *Dispatch*.
 - **A CompletionReport needs no key.** Its `dispatch_id` is unique, so a retry finds the report that already closed the dispatch.
-- **Operator creates are out for now:** clients and engagements take no key. Adding the optional header later breaks nothing. Export keeps its global `export.idempotency_key`.
+- **Operator creates are out for now:** clients and engagements take no key. Adding the optional header later breaks nothing.
+- **Export is the one operator create with a key.** It keeps its global `export.idempotency_key`, since an export has no dispatch, and replays the same way: the original export, or `409` for a different body.
 
 ## The envelope
 
@@ -403,6 +405,7 @@ subject                what it was found in
 severity               'critical' | 'high' | 'medium' | 'low'
 class
 caught_by              the check or role that found it
+reported_by_dispatch_id?  FK → Dispatch — [specced] 2026-10-06; set from the token when a judge writes it
 status                 'open' | 'confirmed' | 'dismissed'
 dismissed_reason?      required when status = 'dismissed'
 timestamps
@@ -414,7 +417,7 @@ timestamps
 
 **The finding routes land with module 9,** not 12 (decided 2026-10-06), because confirming a judge's finding is part of gating.
 
-**Open:** Finding has no reference to the dispatch that wrote it. The per-dispatch idempotency key (*Idempotency*) needs one, so does attributing a judge's finding to its run. The likely fix is `reported_by_dispatch_id?`, which would be a fourth new foreign key, outside the freeze exception. It is listed in `STATE.md` for the operator to decide.
+**A judge's finding names the run that wrote it** `[specced]`. `reported_by_dispatch_id?` is an FK to Dispatch. The server sets it from the token, and it is null when code or the operator records the finding. It carries the per-dispatch idempotency key (*Idempotency*), and it attributes a judge's finding to one run. Decided by the operator on 2026-10-06, built before module 9: the fourth new foreign key under the freeze exceptions.
 
 ### KnowledgeEntry
 
@@ -892,6 +895,7 @@ As built, from `drizzle/` (2026-10-05). Each table comes after every table its f
 **Specced 2026-10-06, not yet migrated:**
 - **Module 3:** `mission.template_ref` and `mission.template_version`, nullable, under their CHECK.
 - **Module 6:** `roster_entry.scope` with `mission_id` made nullable under its CHECK, plus the partial unique index on live firm entries per template. Then `dispatch`, with `token_sha256` unique. Then `completion_report.dispatch_id`, `proposal.proposed_by_dispatch_id` and `intake.drafted_by_dispatch_id`.
+- **Before module 9:** `finding.reported_by_dispatch_id`, nullable.
 - **With each agent-reachable create:** its `idempotency_key` and request hash, unique per dispatch (*Idempotency*).
 
 The new foreign keys on existing tables are added nullable, backfilled, then constrained, because a NOT NULL column added in one step fails on a table that already has rows.
