@@ -195,7 +195,7 @@ It also recovers two duties that were dropped when their agents were removed: ob
 ### Firm — between missions
 
 **Owns:** `Intake`, engagement records, research notes.
-**Checked by:** `intake` is checked mechanically before the operator sees it — every requirement maps to an acceptance criterion, and `open_questions` is empty or explicitly acknowledged. The operator approves after that check, never instead of it.
+**Checked by:** `intake` is checked mechanically before the operator sees it — every requirement maps to an acceptance criterion. At approval the check runs again, and every entry in `open_questions` must be explicitly acknowledged (`DATA-CONTRACTS-V2.md`, *Intake*). The operator approves after that check, never instead of it.
 
 | Role | Runtime | Produces | Consumes | Measured by |
 |---|---|---|---|---|

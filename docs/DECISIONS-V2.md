@@ -715,6 +715,13 @@ Agents retry on timeouts. A duplicate CompletionReport or Proposal corrupts attr
 - **A judge's Finding names its dispatch** through `Finding.reported_by_dispatch_id`, before module 9. Without it, the per-dispatch idempotency key had nothing to scope Findings by, and a judge's finding could not be traced to the run that wrote it. It is the fourth new foreign key under the freeze exceptions.
 - **An Export replay returns the original,** like the agent creates. A second rule for one operator route was a difference with no reason behind it.
 
+### Starting the build, the same day
+
+- **The brief shape is minimal:** a summary, numbered requirements, and acceptance criteria that cite them (`DATA-CONTRACTS-V2.md`, *Intake*). The intake check cannot exist without a shape, and a smaller shape is easier to extend than to cut back.
+- **Approval refuses until the cut is derived.** Letting the operator supply a cut would make "overridden" the normal path until module 2. That reverses the settled rule that the cut is derived, not chosen.
+- **Activity values that arrive with their mutation are routine,** not freeze exceptions. Every write logs, so each module's mutations add their actions, as migrations `0010` and `0011` did. The freeze covers new tables and columns.
+- **A roster changes only while its mission is a draft.** A team changed mid-mission muddies attribution, and the first mission exists to produce a clean number.
+
 ---
 
 ## Open questions

@@ -111,6 +111,7 @@ Fourteen known flaws in the agent design, all addressed in the specification and
 - **`cc-palette.html` is not in this repository.** `ROUTES.md` references it as the source of the tokens. It needs an owner doc and a location, or the reference goes.
 - **`avel-gates-diagram.html` and `avel-cc-shell.html` are not in this repository.** They are in the operator's frontend bundle, under `design/` (operator, 2026-10-05). `DOC-OWNERSHIP.md`, `STUDY-GUIDE.md` and `DAY-ONE-FRONTEND.md` reference them.
 - **No mobile doc is written, and none is needed now.** Offline capture is deferred (`DECISIONS-V2.md`, *Decided 2026-10-05*). `DAY-ONE-FRONTEND.md` still lists the old mobile doc as a blocker; that file belongs to another session.
+- **The Platform family has no Owns or Checked-by fields** (`ROLES.md`, *Open questions*). They were deferred to module 4, which is now starting. Module 4's code does not need them, so the doc is what's due.
 - **Two figures in `WHY-AVEL-EXISTS.md` are not fully verified.** See that doc's *Sources*.
 
 ---

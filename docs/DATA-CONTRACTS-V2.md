@@ -217,6 +217,20 @@ deleted_at · timestamps
 
 *Specced 2026-10-06:* an agent may write an Intake only while it is `draft` and only if its own dispatch drafted it. From `proposed` on, only the operator changes it.
 
+**The brief shape** (decided by the operator 2026-10-06, module 1). `proposed_brief`, and `Mission.brief` once approved:
+
+```
+summary              text
+requirements         [{ id: 'R1', text }]                         — at least one; ids unique and permanent
+acceptanceCriteria   [{ id: 'AC1', requirementId: 'R1', text }]   — ids unique; each cites an existing requirement
+```
+
+Module 3's planner extends this same list. It never starts a second one.
+
+**The mechanical check** runs at `propose` and again at `approve`. It requires a brief that parses, at least one requirement, unique ids, every criterion citing a requirement, and every requirement with at least one criterion. At `approve` it also requires every open question to be acknowledged: the approve body's `acknowledged[]` must equal `open_questions` as a set. The acknowledgements are recorded in the `intake.approved` ActivityLog payload, so the schema is unchanged.
+
+**Approval creates the Mission and refuses until the cut is derived.** The approve body carries `missionType` and `repoUrl`. While `derived_cut` is null, approval is `422 intake_cut_not_derived`, because the cut is derived, never chosen. Until module 2 reads repositories, nothing is approved for real.
+
 **`derived_cut`, `derived_conventions`, and `derived_boundaries` are all computed by reading the repository, not proposed by Canon.** One capability — read the client's tree — with three outputs. See the Canon decision in `DECISIONS-V2.md`.
 
 ```
