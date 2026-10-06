@@ -70,7 +70,7 @@ Delivery paths to exercise before any client sees them: zip · PR open · PR ret
 
 ## 4. Instrument cost on day one
 
-Cheapest thing to add now, most annoying to retrofit. Cost is captured as required fields, not a habit: `RosterEntry.estimated_tokens` at dispatch, `CompletionReport.actual_tokens` and `model` at close. Shapes are in `DATA-CONTRACTS-V2.md`. Until the runner exists, `COST-LOG.md` is the manual record.
+Cheapest thing to add now, most annoying to retrofit. Cost is captured as required fields, not a habit: `Dispatch.estimated_tokens` for every run, `CompletionReport.actual_tokens` and `model` at close. Shapes are in `DATA-CONTRACTS-V2.md`. Until the runner exists, `COST-LOG.md` is the manual record.
 
 You cannot answer *"which agent is expensive"* later from data you never captured.
 

@@ -323,6 +323,19 @@ Canon catching an ambiguous requirement before dispatch is worth more than any d
 
 ---
 
+### Canon is also the Command Center's chat agent — decided 2026-10-06
+
+The same Canon, not a second agent: the operator's conversational agent on the Command Center's home surface (`avel-web` names that page "Canon"). The operator asks it about missions, plans the next one with it, and sees what needs them. This falls under Canon's existing `strategy` role, which runs between missions, so no role is added.
+
+**Bounds, the same ones that let Canon be a model at all:**
+- **It reads; it does not write.** It may read mission, engagement, export and activity data through the same API the operator uses.
+- **Every suggestion becomes a `Proposal`** (module 14), which the operator approves or dismisses. Planning a mission produces an `Intake` draft or a proposal, never a Mission. It is the same pattern as its briefs.
+- **It never acts directly**, and it never runs in the render, freeze, gate or delivery path. Nothing it says decides whether work ships.
+
+A chat surface that could act would be an agent starting its own work: unbounded budget, no dispatch, no attribution. Module 14 exists to prevent that.
+
+---
+
 ## Five gate additions — resolved
 
 Each of these extends a mechanism that already exists rather than adding a new subsystem. Ordered by how directly the market evidence supports them; see `WHY-AVEL-EXISTS.md` for the underlying research.
@@ -521,7 +534,7 @@ The review's finding was *design judgment is ahead of evidence*. The response wa
 - **Versioning is counter-only.** Reproducibility comes from the frozen snapshot. No version-history table — deliberately.
 - **Soft delete** on anything an Export can reach; `live()` explicit in every query.
 - **ActivityLog `action`/`entity_type` are closed vocabularies.** Adding a mutation adds its action in the same change. The action prefix is a domain, not the entity_type.
-- **Auth is identity-only, single-user, no role seam.** Single-user does not mean open — the app can open PRs, so unauthenticated requests are rejected hard.
+- **Auth is identity-only, single-user, no role seam.** Single-user does not mean open — the app can open PRs, so unauthenticated requests are rejected hard. *Amended 2026-10-06 by the operator:* still one human user with no roles. Agents become a second kind of caller, each limited by its roles to the actions it may take (*Decided 2026-10-06: agents call the API*). The seam is for agents only; `User.role` stays unread.
 - **RepoPolicy defaults FALSE** — safe by absence.
 - **The block decision is a function, not an agent.** A pass-or-block verdict computed by inference is inference in the gate path, which the determinism rule forbids. `decide(findings) -> pass | block` is arithmetic over typed findings. Joins Blair and Plye as permanently code. See ROSTER-V2.md.
 - **The cut is derived, not chosen.** Read the repository's directory structure at mission setup. An override requires written rationale that renders into the delivery.
@@ -572,7 +585,7 @@ The operator answered the module 0 question list on 2026-10-05. Shapes are in `D
 
 ### Stack
 
-- **The standing rule "no further stack or schema change before one mission runs" survives.** The changes below are recorded as decided before the first mission. After them the stack is frozen. This closes the open question about whether the repo split retired the rule.
+- **The standing rule "no further stack or schema change before one mission runs" survives.** The changes below are recorded as decided before the first mission. After them the stack is frozen. This closes the open question about whether the repo split retired the rule. *One exception, decided by the operator on 2026-10-06:* Dispatch, the firm roster, and their three foreign keys are built before the first mission (*Decided 2026-10-06: agents call the API*). Nothing else is unfrozen.
 - **Auth.js → Better Auth** (above). <!--allow-stale-->
 - **R2 is deferred.** The history in *Frozen bytes → R2 from the start* stands as written; a dated note there points here. When R2 returns, and where frozen bytes live until then, is open.
 - **Pino now, Sentry later.**
@@ -597,6 +610,72 @@ The operator answered the module 0 question list on 2026-10-05. Shapes are in `D
 - **The verification receipt is held.** Not built until the operator decides.
 - **No mobile doc is needed now.** Offline capture is deferred. `MOBILE-PWA.md` is not written.
 
+## Decided 2026-10-06: agents call the API
+
+The operator decided on 2026-10-06 how agents take part in the Command Center. Shapes are in `DATA-CONTRACTS-V2.md` (*RosterEntry*, *Dispatch*, *Proposal*). The token boundary is in `SANDBOX.md`. This records why.
+
+### A chain of command where authority is the operator or code
+
+Orders flow down through code; reports and requests flow up as artifacts and proposals. No agent commands another.
+
+- **An agent that starts another agent has no ceiling the runner controls.** The budget rule in `SANDBOX.md` assumes every run was started by code.
+- **Attribution breaks.** If one agent's work was ordered by another, a bad result has two possible causes and no way to separate them.
+- **Who runs next would become a model's judgment,** which is inference in the control path. This is the same reason the ship decision is a function.
+- **It has failed here once.** The lead roles were cut for coordinating without producing an artifact (`ROSTER-V2.md`). The Atlas name was later reused for a builder.
+
+Canon is the closest thing to a commander. Under `strategy` it may recommend a whole plan: which modules, which order, which roster. It never dispatches anything.
+
+### An agent is another caller of the same contract
+
+Agents use the API the operator's surfaces use, with no back door and no screen scraping. The server enforces what each caller may do, as it does for the device classes (`COMMAND-CENTER.md`, module 13). Each module offers three verbs: **read** its state, **propose** a change, and **act** inside the agent's own artifacts. Approving, dispatching, delivering, and overriding a gate are never on an agent's list.
+
+### Dispatch becomes an entity
+
+A RosterEntry is "on the team", and a CompletionReport is "finished". The run between them had no record, and that left four gaps:
+
+- **The estimate rule could not be enforced.** "Required before dispatch" was `[attestation]` because no row existed to carry a NOT NULL.
+- **The runner had nowhere to count tokens** against the ceilings.
+- **One agent's several runs** on a mission shared one RosterEntry and could not be told apart.
+- **An access token had nothing to belong to.**
+
+One run is one Dispatch: one estimate, one count, one report, one token.
+
+### The agent token is opaque, scoped to its dispatch, and held by the runner
+
+- **Opaque, not self-describing.** The server looks up every request, so closing or halting a dispatch cuts access on the next request. A signed token that carried its own permissions would work until it expired.
+- **Permissions come from roles,** the same way rooms do, so they cannot drift from `ROLES.md`.
+- **The runner holds it, not the room.** Decided by the operator; reasons in `SANDBOX.md`.
+- **Fails closed.** The routes that exist today require an operator. A route opens to agents only when it declares a verb the agent's roles allow.
+
+### A firm roster for agents that work outside missions
+
+Canon, Trace and Uno work for the agency rather than inside one mission. The activity log can name an agent only through a RosterEntry, and RosterEntries belonged to missions. So Canon's chat suggestions would have been unattributable. A firm-scoped RosterEntry fixes that without changing the log.
+
+**A Canon chat session is a dispatch.** Decided by the operator. It gets a budget, a hard ceiling, an audit trail, and a token that dies when the session ends. Its proposals name the session through `Proposal.proposed_by_dispatch_id`. This extends the 2026-10-06 Canon chat decision above; it changes none of its bounds.
+
+### What agents may do is set per family, not per role
+
+The table is in `ROLES.md`, *What each family may do through the API*. A grid of every model role against every module and verb would have over a thousand cells, almost all of them "no", and nobody could keep it correct. It is also mostly unnecessary: a mission agent's work is files, and its room's mount already decides which files it may write. The API covers only what lies outside the repository. Each family already states what it owns, so the family is the unit. The operator agreed three choices on 2026-10-06:
+
+- **Builders and testers cannot propose.** Their only channel is `blockers` on their CompletionReport. Code already turns repeated provisioning-gap blockers into calibration proposals. Letting every agent propose would fill the queue with opinions and bury the judgments.
+- **`client-ops` proposes messages and never sends them.** Anything that reaches a client is outward-facing and goes through the operator. "Engagement records" in the Firm family means Intake drafts and research notes; no agent edits a Client or an Engagement.
+- **Judges record defects as `open` Findings, not proposals.** Finding already moves from `open` to `confirmed` or `dismissed` by operator decision. A proposal kind on top would be a second queue for the same thing.
+
+**"Its own" comes from the token.** The server fills in which dispatch, mission, and check a record belongs to. An agent that could name its own `caught_by` could claim another check's finding; one that could name a dispatch could close someone else's.
+
+### Built before the first mission
+
+An exception to the 2026-10-05 freeze (*Stack*), decided by the operator. The first mission exists to produce a number, and without Dispatch its numbers would not hold:
+- **The estimates would be `[attestation]`,** because nothing could require them.
+- **The runner would have no row to enforce the ceilings on.**
+- **Anything Canon proposed could not be attributed to an agent.**
+
+Running the first mission's dispatches by hand would measure a process the platform will never run.
+
+### Not yet decided
+
+- **Proposal kinds for agents,** such as a follow-up or a scope request. Each is added with the code that writes it, like the chat kind in `STATE.md`.
+
 ---
 
 ## Open questions
@@ -611,6 +690,8 @@ The operator answered the module 0 question list on 2026-10-05. Shapes are in `D
 **Resolved 2026-08-21:** mutation threshold (global + versioned) · mutation scope (changed per export, full at ship) · `gate_override` renders into the package and PR body · `computeCoherence` in `src/contract/` · `preset` route group added · `no-mistakes`: map its design, do not adopt it (`PRIOR-ART.md`).
 
 **Resolved 2026-10-05:** no mobile doc is needed now; offline capture is deferred · the stack rule survives, with the current changes recorded as decided before the first mission. See *Decided 2026-10-05: module 0*.
+
+**Resolved 2026-10-06:** Dispatch, the firm roster, and their three foreign keys are built before the first mission, the one exception to the schema freeze. See *Decided 2026-10-06: agents call the API*.
 
 **Resolved by the repo split:** TanStack Start for `avel-web` · the contract lives in `avel-server/src/contract/`, consumed as a git dependency.
 

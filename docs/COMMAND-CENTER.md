@@ -131,7 +131,7 @@ Web, desktop, and mobile — one backend, with desktop and mobile as Tauri build
 
 **Agents may propose anything. They may act only inside a dispatch and their mount.** Every proactive output is a proposal in the operator's queue, approved or dismissed by the operator — the same pattern as Canon's brief.
 
-Four sources:
+Five sources:
 
 | Proposal | Triggered by | Produced by | Approving it |
 |---|---|---|---|
@@ -139,8 +139,9 @@ Four sources:
 | **Calibration alert** | A pattern across completion reports — estimates repeatedly missed, blockers that are always provisioning gaps, a module that keeps crossing its soft ceiling | Code | Opens a change to a role definition or an estimate, for the operator to make |
 | **Post-delivery check** | A schedule | Code — dependency and security checks re-run against delivered repositories | Records the finding, and may wake the incident role |
 | **Intake questions** | Client notes arriving | Canon | Adds the questions to intake before the operator has read the notes |
+| **Chat suggestions** | The operator, in the Command Center's Canon chat | Canon | Becomes the proposed action (a next mission, an Intake draft); nothing happens until approved |
 
-Three of the four are code. Only intake questions involve a model, and it proposes questions — it decides nothing.
+Three of the five are code. Only intake questions and chat suggestions involve a model, and both propose; neither decides anything.
 
 **Why proposals rather than autonomy.** An agent that starts its own work has an unbounded budget, cannot be attributed to a dispatch, and drifts outside its module — exactly what the runner, the mounts, and the version hash exist to prevent. Proactive action would undo the architecture. Proactive proposals remove the operator as the only source of momentum without giving up control.
 

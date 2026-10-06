@@ -247,13 +247,24 @@ Which runner a step uses is a separate question from which tier it runs at. Tier
 
 ## The runner enforces budget, not the agent
 
-Every dispatch has two ceilings on its `RosterEntry`. The runner counts tokens as the agent works. At the **soft ceiling**, 1.5× the estimate, it warns and records that the ceiling was crossed, and the work continues. At the **hard ceiling**, 3× the estimate, it halts the dispatch. It also halts the whole mission when attributed spend reaches `Mission.spend_ceiling_usd`, and any dispatch that passes a wall-clock limit. A halted dispatch closes with `status: 'halted'` and a reason.
+Every dispatch carries two ceilings on its `Dispatch` row, copied from its `RosterEntry`'s defaults (`DATA-CONTRACTS-V2.md`; specced 2026-10-06, before which the ceilings sat on the `RosterEntry` itself). The runner counts tokens as the agent works. At the **soft ceiling**, 1.5× the estimate, it warns and records that the ceiling was crossed, and the work continues. At the **hard ceiling**, 3× the estimate, it halts the dispatch. It also halts the whole mission when attributed spend reaches `Mission.spend_ceiling_usd`, and any dispatch that passes a wall-clock limit. A halted dispatch closes with `status: 'halted'` and a reason.
 
 The hard ceiling is deliberately loose. Runaway loops overshoot by an order of magnitude, not by a margin, so a loose hard stop catches all of them without killing a task that merely ran long. The multiples are `[hypothesis]` and get set from recorded data after roughly ten runs.
 
 **This lives in the runner because it cannot live in the agent.** An agent told to watch its own budget is judging its own performance, and an agent stuck in a loop is by definition not judging well. The limit must sit outside the thing it limits — the same principle as the credential never entering the runner.
 
 **Halting is not failure.** A halted dispatch is a finding about the estimate, the task, or the agent, and it is recorded as data. Three halts on the same role say the estimate is wrong or the role is struggling; the completion reports say which.
+
+## The agent's API token never enters a room
+
+`[specced]` 2026-10-06. Each dispatch has an access token for AVEL's own API (`DATA-CONTRACTS-V2.md`, *Dispatch*). It is held by the dispatch runner, outside every room. An agent's tools call the runner over a local channel, and the runner makes the API call with the token.
+
+- **The room where agent-written code runs has no network,** so a token inside it could not reach the API anyway. Keeping it in the runner means no room needs an exception to reach the API.
+- **Code an agent writes can never read the token,** because the token is not in any environment the agent's code executes in. This is the same principle as the GitHub credential living only in the delivery room.
+- **The runner sees every call an agent makes,** so it can count and log them alongside tokens used.
+- **The token dies with the dispatch.** Closing or halting the dispatch makes it resolve to nothing on the next request. Nothing has to be revoked separately.
+
+This is a different credential from the GitHub token. The agent token reaches only AVEL's API, under the agent's allowed actions, and the dispatch runner may hold it. The GitHub credential reaches client repositories, and only the delivery room holds it.
 
 ## What must not wait for Tier 1
 

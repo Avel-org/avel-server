@@ -226,6 +226,52 @@ Billing was removed. Cost per dispatch is recorded on `CompletionReport` as `act
 
 ---
 
+## What each family may do through the API
+
+`[specced]` 2026-10-06. An agent reaches AVEL's API with its dispatch's token (`DATA-CONTRACTS-V2.md`, *Dispatch*). What it may do there follows from its family, not from its individual role.
+
+**Most agent work never touches the API.** A mission agent's artifacts are files, and its room's mount decides which files it may write. The API covers only what sits outside the repository: reading what it was asked to do, reporting back, and, for judges, recording a defect.
+
+Three verbs:
+
+| Verb | Means |
+|---|---|
+| **Read** | See state |
+| **Act** | Write a record that belongs to the agent's own dispatch |
+| **Propose** | Ask the operator for something; nothing happens until it is approved |
+
+| Family | Read | Act | Propose |
+|---|---|---|---|
+| Foundation | Its own dispatch: brief, identity, conventions, boundaries | Its own CompletionReport | Nothing |
+| Build | Its own dispatch | Its own CompletionReport | Nothing |
+| Verify | Its own dispatch | Its own CompletionReport | Nothing |
+| Review | Its own dispatch | Its own CompletionReport, and an `open` Finding on its own mission | Nothing |
+| Operate | The delivered mission: exports, findings, activity | Its own CompletionReport | A follow-up |
+| Firm | Across missions: missions, engagements, exports, activity | `intake` only: Intake drafts | `intake`: questions · `strategy`: chat suggestions and next missions · `client-ops`: a client message |
+
+`code` roles have no agent and no token. `foundations` is the operator.
+
+**An agent covering several roles gets all of them.** That is safe because roles merge only within a side (`ROSTER-V2.md`, *Merging roles into agents*). An agent that can write source can never also write findings.
+
+**Builders and testers cannot propose.** They raise a problem through the `blockers` field of their CompletionReport. Code turns repeated provisioning-gap blockers into calibration proposals, so the operator's queue holds judgments rather than every agent's opinion.
+
+**Judges record a defect as an `open` Finding,** not as a proposal. A Finding already moves from `open` to `confirmed` or `dismissed` by operator decision, which is a proposal queue under another name.
+
+**`client-ops` never sends.** It may propose a message; the operator sends it. The Firm family's "engagement records" means Intake drafts and research notes. No agent edits a Client or an Engagement.
+
+**Never on any agent's list,** whatever this table says, because each requires an operator in code:
+- approving or dismissing a proposal, or approving an Intake
+- confirming or dismissing a Finding
+- creating or starting a dispatch, or issuing a token
+- overriding a gate, rendering, or delivering
+- writing a Client, an Engagement, a Connection, a RepoPolicy, a roster, an AgentTemplate, a Skill, or a Playbook
+
+The last item follows from *Improving roles*: an agent never edits its own instructions.
+
+**Generated where it can be.** Each model role's family is read from the headings of this catalog, and a role without a family row is refused everything. The six family rows are the one hand-written piece: reviewed code, with a test that every model role here has one.
+
+---
+
 ## Counts
 
 | Family | Total | model | code | human |
@@ -267,7 +313,7 @@ Nothing was lost. Every original duty maps to at least one role.
 | Fenn | `deploy`, `recovery` |
 | Neil | `observability` |
 | Grim | `ship-decision`, `incident-response` |
-| Canon | `intake`, `strategy` |
+| Canon | `intake`, `strategy`. Also the Command Center's chat agent under `strategy`: it reads, proposes, never acts (`DECISIONS-V2.md`) |
 | Trace | `research` |
 | Uno | `client-ops` |
 | Blair | `knowledge` |

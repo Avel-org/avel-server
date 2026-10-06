@@ -115,15 +115,17 @@ Three deliberate exceptions:
 
 # Part 2 — The Schema
 
-## The eighteen core entities
+## The nineteen core entities
 
-**Client · Engagement · AgentTemplate · Skill · KnowledgeEntry · Finding · Intake · Mission · Playbook · RosterEntry · CompletionReport · RosterPreset · Export · RepoPolicy · Connection · ActivityLog · User · Proposal**
+**Client · Engagement · AgentTemplate · Skill · KnowledgeEntry · Finding · Intake · Mission · Playbook · RosterEntry · Dispatch · CompletionReport · RosterPreset · Export · RepoPolicy · Connection · ActivityLog · User · Proposal**
 
 Plus **SkillSource** (supporting catalog). Deferred: PromptFragment (V1.5). Session is not an AVEL entity: Better Auth owns sessions, in its `session`, `account` and `verification` tables (see *User*).
 
 **Two names, two things.** `Finding` is the entity below: a defect recorded against a mission. `GateFinding` is the typed result a gate check produces and `decide()` reads (`COMMAND-CENTER.md` module 9). Its shape is decided in module 9.
 
 Up from twelve. `Client` and `Engagement` close the agency layer, `Intake` holds Canon's proposal before an operator approves it into a Mission, `Finding` turns a confirmed defect from one mission into an executable check on every mission after it, `CompletionReport` makes cost and edge consumption required fields rather than habits, and `Proposal` is how anything proactive reaches the operator without acting on its own.
+
+`Dispatch` joined on 2026-10-06 `[specced]`, built with module 6. It is the run itself: one agent, one piece of work, one budget, one access token. Before it, nothing sat between "on the team" (`RosterEntry`) and "finished" (`CompletionReport`).
 
 ---
 
@@ -166,6 +168,7 @@ derived_cut_evidence?       text — the directory structure that decided it
 derived_conventions?        jsonb ConventionSet — extracted from the repo, see below
 derived_boundaries?         jsonb Boundary[] — the feature/layer split found in the tree
 suggested_preset_id?        FK → RosterPreset — follows from the cut
+drafted_by_dispatch_id?     FK → Dispatch — [specced] 2026-10-06; the firm session that drafted it, null when the operator did
 approved_by?                FK → User
 approved_at?
 mission_id?                 FK → Mission, set on approval
@@ -173,6 +176,8 @@ deleted_at · timestamps
 ```
 
 *As built 2026-10-05:* the four `derived_*` fields and `proposed_brief` are nullable until the repository is read and Canon has written. A CHECK requires `approved_by`, `approved_at` and `mission_id` when `status = 'approved'`.
+
+*Specced 2026-10-06:* an agent may write an Intake only while it is `draft` and only if its own dispatch drafted it. From `proposed` on, only the operator changes it.
 
 **`derived_cut`, `derived_conventions`, and `derived_boundaries` are all computed by reading the repository, not proposed by Canon.** One capability — read the client's tree — with three outputs. See the Canon decision in `DECISIONS-V2.md`.
 
@@ -335,6 +340,7 @@ Anything proactive — from code or from a model — reaches the operator as a p
 id
 kind                   'next_module' | 'calibration' | 'post_delivery' | 'intake_questions'
 source                 'code' | 'model'
+proposed_by_dispatch_id?  FK → Dispatch — [specced] 2026-10-06; required exactly when source = 'model'
 engagement_id? · mission_id?
 summary                one line the operator reads in the queue
 payload                jsonb — exactly what approving it would do
@@ -346,13 +352,15 @@ decided_at?
 timestamps             created_at, updated_at (as built 2026-10-05); status and decided_at change after creation
 ```
 
+**A model proposal names the run that made it.** `proposed_by_dispatch_id` leads to the agent, its version hash and its budget, so a Canon chat suggestion is attributable to one session. A CHECK ties it to `source = 'model'`.
+
 **Approving a proposal starts its action through the normal path.** A `next_module` proposal still creates a dispatch that needs its estimate, its room, and its ceilings. Approval skips nothing.
 
 **A proposal expires when its premise stops being true.** If the gate result a next-module proposal followed is reversed, the proposal becomes `expired` and cannot be approved. Stale proposals are the queue's version of a stale preview.
 
 ### Finding
 
-A defect recorded against a mission. Confirmed findings are what `verification.findings` checks every later mission against. Not the same thing as a `GateFinding` (see *The eighteen core entities*).
+A defect recorded against a mission. Confirmed findings are what `verification.findings` checks every later mission against. Not the same thing as a `GateFinding` (see *The nineteen core entities*).
 
 ```
 id · mission_id        FK → Mission
@@ -435,10 +443,11 @@ Gate vocabulary is closed: `phase1-close · alignment · qa · security · rollb
 **References a preset; never lists agents.** Squad composition is RosterPreset's; the Playbook owns process.
 
 ### RosterEntry
-One agent customized for one mission.
+One agent customized for one mission, or one standing agent of the firm.
 
 ```
-id · mission_id · agent_template_id
+id · mission_id? · agent_template_id
+scope                  'mission' | 'firm'   — [specced] 2026-10-06
 active · waves
 customized_md?
 writable_paths?        overrides the template's, per mission
@@ -451,15 +460,69 @@ absorbed_boundaries    text[] — when grain is 'merged', the boundaries it owns
 deleted_at · timestamps         deleted_at added 2026-10-05, as built
 ```
 
-*As built 2026-10-05:* the three token fields are nullable. A RosterEntry exists before it is dispatched, and no dispatch entity exists yet to carry a NOT NULL. Until one does, "required before dispatch" is `[attestation]`.
+*As built 2026-10-05:* the three token fields are nullable. A RosterEntry exists before it is dispatched, and no dispatch entity exists yet to carry a NOT NULL. Until one does, "required before dispatch" is `[attestation]`. *Specced 2026-10-06:* `Dispatch` carries the binding estimate and ceilings as NOT NULL. These three fields stay as the planning default a dispatch is created from.
 
 Whether an agent is on a mission = whether its RosterEntry exists and is active. Skills are a relation.
+
+**The firm roster** `[specced]`. Canon, Trace and Uno work for the agency between missions rather than inside one, so their entries have `scope = 'firm'` and no mission. A CHECK requires `mission_id` exactly when `scope = 'mission'`. A firm entry has no `territory`, `writable_paths`, or `absorbed_boundaries`: firm agents write no files. Without a firm entry, an agent working outside a mission could not be named by `ActivityLog.actor_roster_entry_id`, and its actions could not be attributed.
+
+### Dispatch
+
+`[specced]` 2026-10-06, built with module 6. One run of one agent on one piece of work. A RosterEntry is dispatched many times: once per module, again after a fix.
+
+```
+id · roster_entry_id   FK → RosterEntry
+mission_id?            FK → Mission — required exactly when the RosterEntry is mission-scoped
+brief_ref?             the module and requirement IDs this run is for; null for a firm session
+status                 'queued' | 'running' | 'complete' | 'blocked' | 'failed' | 'halted'
+halt_reason?           'token_hard_ceiling' | 'spend_ceiling' | 'wall_clock' — when halted
+estimated_tokens       integer NOT NULL
+token_soft_ceiling     integer NOT NULL — default 1.5× estimate
+token_hard_ceiling     integer NOT NULL — default 3× estimate
+tokens_used            integer NOT NULL — the runner's running count, starts at 0
+agent_version_sha256   NOT NULL — frozen when the dispatch starts
+skills_sha256          NOT NULL — frozen when the dispatch starts
+model?                 set when it starts
+token_sha256?          SHA-256 of the dispatch's access token; never the token itself
+idempotency_key        unique — a retried start cannot run twice
+started_at? · closed_at?
+timestamps
+```
+
+**The estimate becomes a constraint.** A dispatch cannot be inserted without `estimated_tokens` and both ceilings, which closes the `[attestation]` on RosterEntry. The ceilings are copied from the RosterEntry's defaults and may be changed per dispatch before it starts.
+
+**The runner owns `tokens_used`.** It adds to it as the agent works, records a soft-ceiling crossing, and sets `halted` with its reason at the hard ceiling. No agent-reachable route writes it.
+
+**A dispatch closes with exactly one CompletionReport,** through `CompletionReport.dispatch_id`. `closed_at` is set in the same transaction, and from then on the access token resolves to nothing.
+
+**A firm session is a dispatch.** A Canon chat session is a dispatch of Canon's firm RosterEntry, with no mission and no brief, under its own estimate and ceilings. Chat therefore has a budget, an audit trail, and a token that dies when the session ends, like every other agent.
+
+**Agent access.** An agent reaches the API with its dispatch's token, sent as `Authorization: Bearer`. The token is random and opaque. The server stores only its hash and resolves every request to a caller:
+
+```
+token → token_sha256 → Dispatch
+  closed, halted, or not found      → 401 DISPATCH_CLOSED
+  RosterEntry → AgentTemplate.roles → allowed actions for this route's module and verb
+  verb not allowed                  → 403 AGENT_NOT_PERMITTED
+  data outside the dispatch's mission → 404 NOT_FOUND
+```
+
+- **Two callers, one middleware.** A request resolves to `{ kind: 'operator', operator }` or `{ kind: 'agent', dispatch, rosterEntry, roles }`. Every route declares the resource, the verb (`read`, `propose`, `act`), and what "its own" means for it, e.g. `{ resource: 'completion_report', verb: 'act', own: 'dispatch' }`. A route with no declaration refuses every agent.
+- **Approval, dispatch, delivery, gate overrides and token issue require an operator in code,** not through the per-family table. An error in that table cannot grant them. The full list is in `ROLES.md`.
+- **What each agent may do comes from its families,** per `ROLES.md`, *What each family may do through the API*. Until that table is built, it is empty and every route refuses an agent.
+- **"Its own" is derived from the token, never supplied by the agent.** The server sets `CompletionReport.dispatch_id`, `Finding.caught_by` and `Finding.mission_id`, and `Intake.drafted_by_dispatch_id` from the dispatch. A body that names a different dispatch or mission is refused.
+- **Agent writes log as `actor_kind = 'agent'`** with `actor_roster_entry_id` set from the dispatch, under the existing actor CHECKs.
+- **Data outside the mission answers 404, not 403,** so an agent cannot learn which other missions exist. A firm dispatch reads across missions, and is held to `read` and `propose`.
+- `DISPATCH_CLOSED` and `AGENT_NOT_PERMITTED` join the error union when module 6 builds this.
+
+Where the token is held is a sandbox boundary: see `SANDBOX.md`.
 
 ### CompletionReport
 What an agent produced, and the evidence it consumed. Required to close a dispatch.
 
 ```
 id · roster_entry_id     FK -> RosterEntry
+dispatch_id              FK -> Dispatch, unique — [specced] 2026-10-06; one report closes one dispatch
 mission_id
 status                   'complete' | 'blocked' | 'failed' | 'halted'
 halt_reason?             'token_hard_ceiling' | 'spend_ceiling' | 'wall_clock' — when halted
@@ -480,7 +543,7 @@ deleted_at · timestamps           deleted_at added 2026-10-05, as built
 
 A CHECK requires `halt_reason` exactly when `status = 'halted'`.
 
-**Two fields are required, not optional, and that is the point.** `RosterEntry.estimated_tokens` cannot be null at dispatch. `CompletionReport.actual_tokens` cannot be null at close. Cost logging has been a stated rule since the first mission and has produced zero rows across three, because a rule you have to remember keeps failing. A dispatch that cannot be created without an estimate, and a mission that cannot close without an actual, turns the cost log from a habit into a query.
+**Two fields are required, not optional, and that is the point.** `Dispatch.estimated_tokens` cannot be null (specced 2026-10-06; until it is built, the rule sits on `RosterEntry.estimated_tokens` as `[attestation]`). `CompletionReport.actual_tokens` cannot be null at close. Cost logging has been a stated rule since the first mission and has produced zero rows across three, because a rule you have to remember keeps failing. A dispatch that cannot be created without an estimate, and a mission that cannot close without an actual, turns the cost log from a habit into a query.
 
 **`artifacts_read` enforces the edge graph.** Every consumer records the hash of what it read. The ownership check compares each hash against the producer's `artifacts_written`. A mismatch means the consumer worked from a different version of the interface than the producer wrote — the inter-agent-misunderstanding failure, caught mechanically.
 
@@ -533,7 +596,7 @@ agents                 jsonb [{ agent_template_id, waves, territory?,
 version · deleted_at · timestamps
 ```
 
-**A preset's `estimated_tokens` is a default only.** Every mission re-estimates; `RosterEntry.estimated_tokens` is still required before dispatch.
+**A preset's `estimated_tokens` is a default only.** Every mission re-estimates; `Dispatch.estimated_tokens` is still required for every run.
 
 ### Export
 
@@ -773,5 +836,7 @@ As built, from `drizzle/` (2026-10-05). Each table comes after every table its f
 `0001`–`0006` create 24 tables: 2 + 3 + 8 + 4 + 6 + 1.
 
 `Mission` has no foreign key to `Playbook`. They join on `Playbook.mission_type`.
+
+**Specced 2026-10-06, not yet migrated** (module 6): `roster_entry.scope` with `mission_id` made nullable under its CHECK, then `dispatch`, then `completion_report.dispatch_id`, `proposal.proposed_by_dispatch_id` and `intake.drafted_by_dispatch_id`. The new foreign keys on existing tables are added nullable, backfilled, then constrained, because a NOT NULL column added in one step fails on a table that already has rows.
 
 Forward-only. One migration per change. Never edit an applied one.

@@ -2,7 +2,7 @@
 
 *The single source of truth for build status, counts, and gaps. **No other document may state build status, entity counts, or agent counts.** They link here.*
 
-**Last updated:** 2026-10-05
+**Last updated:** 2026-10-06
 
 ---
 
@@ -17,7 +17,7 @@
 | Thing | Count |
 |---|---|
 | Command Center modules (`COMMAND-CENTER.md`) | **15**, numbered 0–14 |
-| Core entities | **18** + SkillSource (supporting catalog). Every one has a field list (`DATA-CONTRACTS-V2.md`). |
+| Core entities | **19** + SkillSource (supporting catalog): 18 built, and `Dispatch` specced 2026-10-06 for module 6. Every one has a field list (`DATA-CONTRACTS-V2.md`). |
 | Database tables built | **24** — the 18 entities, SkillSource, `role_skills`, `mission_skills`, and Better Auth's `session`, `account` and `verification`. Migrations `0000`–`0010` applied. |
 | Error codes in `src/contract/shared/errors.ts` | **21** — 6 generic · 2 route · 12 `BLAST-RADIUS.md` · `GITHUB_REJECTED` |
 | Roles (`ROLES.md`) | **35** — 23 model · 11 code · 1 human |
@@ -68,9 +68,11 @@ Legend: ⬜ not started · ◐ partly built · ✅ built.
 ### Blocking
 
 - **`[attestation]` until a mechanism exists** (`DATA-CONTRACTS-V2.md`):
-  - `RosterEntry.estimated_tokens` and its two ceilings are nullable. "Required before dispatch" holds only by convention until a dispatch entity can carry a NOT NULL.
+  - `RosterEntry.estimated_tokens` and its two ceilings are nullable. "Required before dispatch" holds only by convention until a dispatch entity can carry a NOT NULL. `Dispatch` is specced (2026-10-06) and closes this when module 6 builds it.
   - `role_skills` holds only `role`-layer skills, and `mission_skills` only `stack` and `domain`. No trigger enforces either.
 - **The API test harness runs the app on one rolled-back transaction**, so a handler that wrote through `deps.db()` instead of its own transaction would not be caught by the atomicity tests. `logActivity` accepts only a `Tx`, which covers the log rows but not the mutation writes.
+- **Canon chat (decided 2026-10-06) has no proposal kind yet.** `Proposal.kind` and the `proposal_kind` enum hold `next_module · calibration · post_delivery · intake_questions`. Chat suggestions need a kind, added in the same change as the code that writes them, not before.
+- **Agents cannot call the API yet.** The design was decided on 2026-10-06 and is specced: Dispatch, the firm roster, and a dispatch-scoped token (`DECISIONS-V2.md`, *Decided 2026-10-06: agents call the API*). The per-family table of what agents may do is specced too (`ROLES.md`, 2026-10-06). Unbuilt: all four, `Intake.drafted_by_dispatch_id`, and the error codes `DISPATCH_CLOSED` and `AGENT_NOT_PERMITTED`. Until then, every route accepts only the operator. It is built before the first mission, the one exception to the 2026-10-05 schema freeze (decided 2026-10-06).
 - **No delete routes exist.** Soft delete is exercised only in tests.
 - **The `auth.signed_in` row is written in its own transaction, before Better Auth inserts the session.** If that insert then fails, a log row remains for a session that does not exist. Sign-in fails closed when the log write fails.
 - **Better Auth stamps its own times.** Its tables have snake_case columns, uuid ids from the injected `IdGenerator`, and no database defaults, but `created_at`, `updated_at` and `expires_at` come from Better Auth's clock, not the injected `Clock` (`src/auth/index.ts`). This is an exception to `CLAUDE.md`'s determinism rule, recorded rather than fixed.
