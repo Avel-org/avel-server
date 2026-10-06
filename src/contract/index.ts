@@ -5,6 +5,7 @@ import { engagementContract } from "./engagement";
 import { missionContract } from "./mission";
 import { errorEnvelope, successEnvelope } from "./shared/envelope";
 
+export * from "./agent-template";
 export * from "./client";
 export * from "./engagement";
 export * from "./mission";
@@ -12,6 +13,8 @@ export * from "./shared/envelope";
 export * from "./shared/errors";
 export * from "./shared/pagination";
 export * from "./shared/status";
+export * from "./skill";
+export * from "./skill-source";
 
 /**
  * The contract between avel-server and every client: web, desktop, mobile.
