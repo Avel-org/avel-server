@@ -165,6 +165,7 @@ describe.skipIf(!url)(
 					auth,
 					db: () => closer.db,
 					webOrigins: [],
+					preview: false,
 				}),
 				creator: createApp({
 					clock,
@@ -173,6 +174,7 @@ describe.skipIf(!url)(
 					auth,
 					db: () => creator.db,
 					webOrigins: [],
+					preview: false,
 				}),
 			};
 			const { cookie } = await signInWithGitHub(apps.creator, OPERATOR);

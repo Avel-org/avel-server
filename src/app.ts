@@ -13,6 +13,7 @@ import type { IdGenerator } from "./lib/ids";
 import type { Logger } from "./lib/logger";
 import {
 	type AuthVariables,
+	previewHeader,
 	requireOperator,
 	requireTrustedOrigin,
 } from "./middleware/auth";
@@ -28,6 +29,7 @@ import { requestId } from "./middleware/request-id";
 import { clientRoutes } from "./routes/clients";
 import { engagementRoutes } from "./routes/engagements";
 import { health } from "./routes/health";
+import { missionRoutes } from "./routes/missions";
 import type { RequestContext } from "./routes/shared";
 
 export type AppDeps = {
@@ -39,6 +41,8 @@ export type AppDeps = {
 	db: () => Executor;
 	/** Origins allowed credentialed CORS (the Tauri builds). Empty means none. */
 	webOrigins: readonly string[];
+	/** Dev preview (src/auth/preview.ts): sessionless reads. False everywhere but a local _dev run. */
+	preview: boolean;
 };
 
 /**
@@ -53,18 +57,21 @@ export function createApp(deps: AppDeps) {
 	const report = loggerReporter(deps.logger);
 	const routeDeps = { db: deps.db, clock: deps.clock, ids: deps.ids };
 	const router = tsr.platformContext<RequestContext>().router(contract, {
-		health: health(deps.clock),
+		health: health(deps.clock, deps.preview),
 		clients: clientRoutes(routeDeps),
 		engagements: engagementRoutes(routeDeps),
+		missions: missionRoutes(routeDeps),
 	});
 
 	const app = new Hono<{ Variables: AuthVariables }>();
 
 	// First, so a preflight is answered before auth can refuse it.
+	// Outermost, so every /api response carries it, errors included.
+	if (deps.preview) app.use("/api/*", previewHeader());
 	app.use("/api/*", corsFor(deps.webOrigins));
 	app.use("/api/*", requestId(deps.ids));
 	// After the request id, so a refusal still carries one.
-	app.use("/api/*", requireOperator(deps.auth));
+	app.use("/api/*", requireOperator(deps.auth, { preview: deps.preview }));
 
 	app.use("/api/auth/*", requireTrustedOrigin(deps.auth.trustedOrigins));
 	// Better Auth's own routes: sign-in, the OAuth callback, session, sign-out.
@@ -81,7 +88,7 @@ export function createApp(deps: AppDeps) {
 		const id = ctx.get("requestId");
 		const req = ctx.req.raw;
 		return fetchRequestHandler({
-			request: await platformRequest(req),
+			request: withRepeatedArrayParams(await platformRequest(req)),
 			contract,
 			router,
 			platformContext: { requestId: id, operator: ctx.get("operator") },
@@ -155,6 +162,42 @@ async function platformRequest(
 	return new Request(raw.url, {
 		...init,
 		body: hasBody ? raw.body : null,
+		duplex: "half",
+	});
+}
+
+/**
+ * ts-rest's client sends an array query param indexed (status[0]=a&status[1]=b),
+ * but its server parses the query with URLSearchParams, which only collects
+ * repeated keys (status=a&status=b) into arrays. An indexed key reached the
+ * contract as an unknown key, was stripped, and the filter silently vanished.
+ * Rewriting `name[N]=v` to repeated `name=v`, in index order, accepts both
+ * forms. Only bare numeric indexes are rewritten; anything else is left as sent.
+ */
+function withRepeatedArrayParams(request: Request): Request {
+	const url = new URL(request.url);
+	const indexed: Array<{ name: string; index: number; value: string }> = [];
+	const kept: Array<[string, string]> = [];
+	for (const [key, value] of url.searchParams) {
+		const match = /^(.+)\[(\d+)\]$/.exec(key);
+		if (match?.[1] !== undefined && match[2] !== undefined) {
+			indexed.push({ name: match[1], index: Number(match[2]), value });
+		} else {
+			kept.push([key, value]);
+		}
+	}
+	if (indexed.length === 0) return request;
+	indexed.sort((a, b) =>
+		a.name === b.name ? a.index - b.index : a.name < b.name ? -1 : 1,
+	);
+	const params = new URLSearchParams(kept);
+	for (const { name, value } of indexed) params.append(name, value);
+	url.search = params.toString();
+	return new Request(url, {
+		method: request.method,
+		headers: request.headers,
+		body: request.body,
+		signal: request.signal,
 		duplex: "half",
 	});
 }

@@ -16,6 +16,11 @@ export type AuthConfig = {
 	 * same-origin only.
 	 */
 	webOrigins: readonly string[];
+	/**
+	 * Dev preview only, when started without GitHub credentials: the GitHub
+	 * sign-in and callback endpoints are switched off (src/auth/preview.ts).
+	 */
+	signInDisabled?: true;
 };
 
 export const AUTH_ENV = {

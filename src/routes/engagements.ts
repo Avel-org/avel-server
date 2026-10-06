@@ -45,6 +45,7 @@ export function engagementRoutes(deps: RouteDeps) {
 						query.clientId
 							? eq(engagement.clientId, query.clientId)
 							: undefined,
+						query.status ? eq(engagement.status, query.status) : undefined,
 						after(engagement, query.cursor),
 					),
 				)
@@ -206,9 +207,15 @@ export function engagementRoutes(deps: RouteDeps) {
 						revokedConnectionIds: revoked.map((r) => r.id),
 					},
 				});
-				return closed;
+				return { closed, revokedConnections: revoked.length };
 			});
-			return { status: 200, body: ok(toWire(row)) };
+			return {
+				status: 200,
+				body: ok({
+					...toWire(row.closed),
+					revokedConnections: row.revokedConnections,
+				}),
+			};
 		},
 	});
 }

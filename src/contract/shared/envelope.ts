@@ -1,18 +1,42 @@
 import { z } from "zod";
-import { type ErrorCode, errorCode } from "./errors";
+import {
+	type ErrorCode,
+	type ErrorDetailsArgs,
+	errorCode,
+	preconditionDetails,
+	TYPED_DETAIL_CODES,
+	validationDetails,
+} from "./errors";
 
 /**
  * Every JSON response under /api/* is one of two envelopes, told apart by
  * `success`. The frontend switches on `error.code`, never on `message`.
+ *
+ * The error is a discriminated union on `code`: PRECONDITION_FAILED and
+ * VALIDATION_FAILED carry typed details (TYPED_DETAIL_CODES); every other
+ * code keeps details open.
  */
+const errorFields = { message: z.string(), requestId: z.string() };
+
 export const errorEnvelope = z.object({
 	success: z.literal(false),
-	error: z.object({
-		code: errorCode,
-		message: z.string(),
-		details: z.unknown().optional(),
-		requestId: z.string(),
-	}),
+	error: z.discriminatedUnion("code", [
+		z.object({
+			code: z.literal("PRECONDITION_FAILED"),
+			...errorFields,
+			details: preconditionDetails,
+		}),
+		z.object({
+			code: z.literal("VALIDATION_FAILED"),
+			...errorFields,
+			details: validationDetails.optional(),
+		}),
+		z.object({
+			code: errorCode.exclude([...TYPED_DETAIL_CODES]),
+			...errorFields,
+			details: z.unknown().optional(),
+		}),
+	]),
 });
 
 export type ErrorEnvelope = z.infer<typeof errorEnvelope>;
@@ -42,11 +66,15 @@ export function ok<T>(data: T, meta?: EnvelopeMeta): SuccessEnvelope<T> {
 		: { success: true, data, meta };
 }
 
-export function fail(
-	code: ErrorCode,
+/**
+ * Builds an error envelope. Its details argument is typed by `code`, so a
+ * wrong shape is a compile error; the schema above checks it again in tests.
+ */
+export function fail<C extends ErrorCode>(
+	code: C,
 	message: string,
 	requestId: string,
-	details?: unknown,
+	...[details]: ErrorDetailsArgs<C>
 ): ErrorEnvelope {
 	return {
 		success: false,
@@ -54,5 +82,5 @@ export function fail(
 			details === undefined
 				? { code, message, requestId }
 				: { code, message, details, requestId },
-	};
+	} as ErrorEnvelope;
 }

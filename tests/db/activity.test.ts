@@ -70,6 +70,36 @@ describe.skipIf(!process.env.DATABASE_URL)("activity_log", () => {
 		});
 	});
 
+	it("accepts the mission and export actions the seed writes ahead of their mutations", async () => {
+		await inRollback(async (tx, ids) => {
+			const entries = [
+				["mission.created", "mission"],
+				["mission.status_changed", "mission"],
+				["export.created", "export"],
+				["export.status_changed", "export"],
+			] as const;
+			for (const [action, entityType] of entries) {
+				await logActivity(
+					tx,
+					{ clock, ids },
+					{
+						actorKind: "system",
+						action,
+						entityType,
+						entityId: ids.next(),
+						requestId: "req-mission-export",
+						payload: {},
+					},
+				);
+			}
+			const rows = await tx
+				.select()
+				.from(activityLog)
+				.where(eq(activityLog.requestId, "req-mission-export"));
+			expect(rows.map((r) => r.action)).toEqual(entries.map(([a]) => a));
+		});
+	});
+
 	it("refuses UPDATE", async () => {
 		await inRollback(async (tx, ids) => {
 			const { logId } = await createClient(tx, ids, "req-update");

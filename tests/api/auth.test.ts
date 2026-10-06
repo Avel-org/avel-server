@@ -9,23 +9,26 @@ describe.skipIf(!process.env.DATABASE_URL)("sign-in against Postgres", () => {
 	afterAll(closeDb);
 
 	it("writes user, account and session through the Drizzle adapter, and logs auth.signed_in", async () => {
-		await withApi(async ({ tx, signIn }) => {
+		await withApi(async ({ tx, signIn, ns, operator: profile }) => {
 			await signIn();
 			const users = await tx.select().from(user);
 			expect(users).toHaveLength(1);
 			const [operator] = users;
 			expect(operator).toMatchObject({
-				githubId: "1001",
+				githubId: String(profile.id),
 				githubLogin: "operator",
-				email: "operator@example.com",
+				email: profile.email,
 			});
-			expect(operator?.id).toMatch(/^aaaaaaaa-0000-4000-8000-\d{12}$/);
+			expect(operator?.id).toMatch(/^[0-9a-f]{8}-0000-4000-8000-\d{12}$/);
 
 			const [linked] = await tx
 				.select()
 				.from(account)
 				.where(eq(account.userId, operator?.id ?? ""));
-			expect(linked).toMatchObject({ providerId: "github", accountId: "1001" });
+			expect(linked).toMatchObject({
+				providerId: "github",
+				accountId: String(profile.id),
+			});
 			expect(linked?.accessToken).not.toContain("gho_test_token");
 
 			expect(
@@ -46,7 +49,7 @@ describe.skipIf(!process.env.DATABASE_URL)("sign-in against Postgres", () => {
 				entityType: "user",
 				entityId: operator?.id,
 				// The callback is the app's second request.
-				requestId: "00000000-0000-4000-8000-000000000002",
+				requestId: `${ns}-0000-4000-8000-000000000002`,
 			});
 		});
 	});

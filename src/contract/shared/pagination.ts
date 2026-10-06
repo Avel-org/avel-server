@@ -25,6 +25,12 @@ export type PageQuery = z.infer<typeof pageQuery>;
 
 export const pageMeta = z.object({
 	nextCursor: z.string().nullable(),
+	/**
+	 * The exact number of rows the list's filters match, the same on every
+	 * page (the cursor does not narrow it). Optional: a route where an exact
+	 * count is expensive omits it.
+	 */
+	total: z.number().int().nonnegative().optional(),
 });
 
 export type PageMeta = z.infer<typeof pageMeta>;
@@ -41,6 +47,11 @@ export function pageEnvelope<T extends z.ZodTypeAny>(item: T) {
 export function page<T>(
 	items: T[],
 	nextCursor: string | null,
+	total?: number,
 ): { success: true; data: T[]; meta: PageMeta } {
-	return { success: true, data: items, meta: { nextCursor } };
+	return {
+		success: true,
+		data: items,
+		meta: total === undefined ? { nextCursor } : { nextCursor, total },
+	};
 }

@@ -70,6 +70,10 @@ export function buildApp(
 		clock?: Clock;
 		ids?: IdGenerator;
 		operators?: string[];
+		/** Dev preview on. */
+		preview?: boolean;
+		/** Preview started without GitHub credentials: sign-in endpoints off. */
+		signInDisabled?: boolean;
 		/** Replaces the fake auth.signed_in recorder, for example with one that throws. */
 		recordSignIn?: (entry: SignIn) => Promise<void>;
 	} = {},
@@ -82,7 +86,10 @@ export function buildApp(
 		account: [],
 		verification: [],
 	} as Record<string, Array<Record<string, unknown>>>;
-	const config = testAuthConfig(options.operators ?? [String(OPERATOR.id)]);
+	const config = {
+		...testAuthConfig(options.operators ?? [String(OPERATOR.id)]),
+		...(options.signInDisabled ? { signInDisabled: true as const } : {}),
+	};
 	const auth = createAuth({
 		config,
 		database: memoryAdapter(memory),
@@ -104,6 +111,7 @@ export function buildApp(
 			throw new Error("unit tests have no database; use tests/api");
 		},
 		webOrigins: config.webOrigins,
+		preview: options.preview ?? false,
 	});
 	return { app, auth, memory, logs: lines, signIns };
 }

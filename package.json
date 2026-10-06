@@ -20,7 +20,8 @@
 		"determinism:check": "bash scripts/check-determinism.sh",
 		"check": "pnpm docs:check && pnpm determinism:check && pnpm typecheck && pnpm lint && pnpm test",
 		"db:generate": "drizzle-kit generate",
-		"db:migrate": "drizzle-kit migrate"
+		"db:migrate": "drizzle-kit migrate",
+		"db:seed": "tsx src/db/seed/run.ts"
 	},
 	"dependencies": {
 		"@hono/node-server": "^1.19.0",

@@ -20,6 +20,7 @@ describe("GET /api/health", () => {
 				ok: true,
 				service: "avel-server",
 				time: "2026-10-03T12:00:00.000Z",
+				preview: false,
 			},
 		});
 	});

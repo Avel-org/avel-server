@@ -2,10 +2,12 @@ import { initContract } from "@ts-rest/core";
 import { z } from "zod";
 import { clientContract } from "./client";
 import { engagementContract } from "./engagement";
+import { missionContract } from "./mission";
 import { errorEnvelope, successEnvelope } from "./shared/envelope";
 
 export * from "./client";
 export * from "./engagement";
+export * from "./mission";
 export * from "./shared/envelope";
 export * from "./shared/errors";
 export * from "./shared/pagination";
@@ -26,6 +28,8 @@ export const healthResponse = z.object({
 	ok: z.literal(true),
 	service: z.literal("avel-server"),
 	time: z.string().datetime(),
+	/** True while dev preview lets sessionless reads through (AVEL_DEV_PREVIEW). */
+	preview: z.boolean(),
 });
 
 export const contract = c.router(
@@ -38,6 +42,7 @@ export const contract = c.router(
 		},
 		clients: clientContract,
 		engagements: engagementContract,
+		missions: missionContract,
 	},
 	{
 		// One entry per ERROR_STATUSES value. Written out, not mapped, so ts-rest

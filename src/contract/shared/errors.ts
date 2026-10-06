@@ -12,6 +12,9 @@ export const errorCode = z.enum([
 	"VALIDATION_FAILED",
 	"UNAUTHENTICATED",
 	"FORBIDDEN",
+	// A live session whose GitHub id has left the operator allowlist. Distinct
+	// from FORBIDDEN so a client can show sign-out without guessing.
+	"NOT_OPERATOR",
 	"NOT_FOUND",
 	"CONFLICT",
 	"INTERNAL",
@@ -50,3 +53,73 @@ export type ErrorCode = z.infer<typeof errorCode>;
 export const ERROR_STATUSES = [400, 401, 403, 404, 409, 422, 500, 502] as const;
 
 export type ErrorStatus = (typeof ERROR_STATUSES)[number];
+
+/**
+ * Typed details. A code listed here carries a details schema in the error
+ * envelope, and ApiError's constructor refuses, at compile time, details that
+ * do not match it. Every other code keeps details open (unknown, optional).
+ */
+
+/** Why a state precondition failed. Closed: it grows only by an edit here, with a heads-up. */
+export const PRECONDITION_REASONS = [
+	"client_not_found",
+	"client_closed",
+	"client_has_active_engagements",
+] as const;
+
+export const preconditionReason = z.enum(PRECONDITION_REASONS);
+
+export type PreconditionReason = z.infer<typeof preconditionReason>;
+
+/** PRECONDITION_FAILED: always present. */
+export const preconditionDetails = z
+	.object({
+		reason: preconditionReason,
+		/** The client the precondition was about, where there is one. */
+		clientId: z.string().uuid().optional(),
+	})
+	.strict();
+
+export type PreconditionDetails = z.infer<typeof preconditionDetails>;
+
+export const validationIssue = z
+	.object({
+		path: z.array(z.union([z.string(), z.number()])),
+		message: z.string(),
+		/** The validator's issue code, where one exists (Zod's, for contract validation). */
+		code: z.string().optional(),
+	})
+	.strict();
+
+export type ValidationIssue = z.infer<typeof validationIssue>;
+
+/** VALIDATION_FAILED: optional, absent when the body was not JSON at all. */
+export const validationDetails = z
+	.object({
+		params: z.array(validationIssue).optional(),
+		headers: z.array(validationIssue).optional(),
+		query: z.array(validationIssue).optional(),
+		body: z.array(validationIssue).optional(),
+	})
+	.strict();
+
+export type ValidationDetails = z.infer<typeof validationDetails>;
+
+/** The codes that carry a details schema. */
+export const TYPED_DETAIL_CODES = [
+	"PRECONDITION_FAILED",
+	"VALIDATION_FAILED",
+] as const;
+
+/** The details type for a code. */
+export type ErrorDetails<C extends ErrorCode> = C extends "PRECONDITION_FAILED"
+	? PreconditionDetails
+	: C extends "VALIDATION_FAILED"
+		? ValidationDetails
+		: unknown;
+
+/** The details argument for a code: required where the schema requires it. */
+export type ErrorDetailsArgs<C extends ErrorCode> =
+	C extends "PRECONDITION_FAILED"
+		? [details: PreconditionDetails]
+		: [details?: ErrorDetails<C>];

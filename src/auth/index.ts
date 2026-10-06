@@ -3,6 +3,7 @@ import {
 	type BetterAuthPlugin,
 	betterAuth,
 } from "better-auth";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import type { IdGenerator } from "../lib/ids";
 import type { Logger } from "../lib/logger";
 import { UNAVAILABLE_REQUEST_ID } from "../middleware/errors";
@@ -23,7 +24,6 @@ export const DISABLED_PATHS = [
 	"/change-password",
 	"/request-password-reset",
 	"/reset-password",
-	"/reset-password/:token",
 	"/send-verification-email",
 	"/verify-email",
 	"/verify-password",
@@ -38,6 +38,14 @@ export const DISABLED_PATHS = [
 	"/get-access-token",
 	"/refresh-token",
 ];
+
+/**
+ * Endpoints with a route parameter. disabledPaths compares the request path
+ * by exact string, so it can never match these; a before-hook refuses them
+ * by route pattern instead. tests/unit/auth-disabled-paths.test.ts proves
+ * every entry in both lists with a real request.
+ */
+export const DISABLED_ROUTES = ["/reset-password/:token"];
 
 export type AuthDeps = {
 	config: AuthConfig;
@@ -108,7 +116,16 @@ export function createAuth(deps: AuthDeps) {
 			database: { generateId: () => deps.ids.next() },
 		},
 		emailAndPassword: { enabled: false },
-		disabledPaths: DISABLED_PATHS,
+		hooks: {
+			before: createAuthMiddleware(async (ctx) => {
+				if (DISABLED_ROUTES.includes(ctx.path)) {
+					throw new APIError("NOT_FOUND", { message: "Not Found" });
+				}
+			}),
+		},
+		disabledPaths: deps.config.signInDisabled
+			? [...DISABLED_PATHS, "/sign-in/social", "/callback/github"]
+			: DISABLED_PATHS,
 		user: {
 			// Set from GitHub's profile by mapProfileToUser. Better Auth drops
 			// `input: false` fields from a provider profile too, so these are

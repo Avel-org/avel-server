@@ -2,6 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import {
 	clientSchema,
+	closedEngagementSchema,
 	engagementSchema,
 	engagementStatus,
 	errorEnvelope,
@@ -20,6 +21,7 @@ import type { Tx } from "../../src/db/tx";
 import { type ApiHarness, clock, idsFailingAt, withApi } from "./support";
 
 const one = successEnvelope(engagementSchema);
+const closed = successEnvelope(closedEngagementSchema);
 const list = pageEnvelope(engagementSchema);
 
 async function newClient(call: ApiHarness["call"], name = "Meridian") {
@@ -126,6 +128,29 @@ describe.skipIf(!process.env.DATABASE_URL)("/api/engagements", () => {
 					.from(activityLog)
 					.where(eq(activityLog.action, "engagement.created")),
 			).toHaveLength(0);
+		});
+	});
+
+	it("filters the list by status, alone or with clientId", async () => {
+		await withApi(async ({ signIn, call }) => {
+			await signIn();
+			const a = await newClient(call, "A");
+			const b = await newClient(call, "B");
+			const aOpen = await newEngagement(call, a, "A open");
+			const aDone = await newEngagement(call, a, "A done");
+			const bOpen = await newEngagement(call, b, "B open");
+			await call(`/api/engagements/${aDone.id}/close`, { method: "POST" });
+
+			const ids = async (query: string) =>
+				list
+					.parse(await (await call(`/api/engagements?${query}`)).json())
+					.data.map((e) => e.id);
+			expect((await ids("status=active")).sort()).toEqual(
+				[aOpen.id, bOpen.id].sort(),
+			);
+			expect(await ids("status=closed")).toEqual([aDone.id]);
+			expect(await ids(`status=active&clientId=${a}`)).toEqual([aOpen.id]);
+			expect((await call("/api/engagements?status=archived")).status).toBe(400);
 		});
 	});
 
@@ -237,10 +262,12 @@ describe.skipIf(!process.env.DATABASE_URL)("/api/engagements", () => {
 					method: "POST",
 				});
 				expect(res.status).toBe(200);
-				expect(one.parse(await res.json()).data).toMatchObject({
+				const closedBody = await res.json();
+				expect(one.parse(closedBody).data).toMatchObject({
 					status: "closed",
 					closedAt: clock.now().toISOString(),
 				});
+				expect(closed.parse(closedBody).data.revokedConnections).toBe(0);
 				expect((await logRows(e.id)).map((r) => r.action)).toContain(
 					"engagement.closed",
 				);
@@ -278,6 +305,8 @@ describe.skipIf(!process.env.DATABASE_URL)("/api/engagements", () => {
 					method: "POST",
 				});
 				expect(res.status).toBe(200);
+				// active and expired were revoked; the other four were not touched.
+				expect(closed.parse(await res.json()).data.revokedConnections).toBe(2);
 
 				const rows = await tx
 					.select()

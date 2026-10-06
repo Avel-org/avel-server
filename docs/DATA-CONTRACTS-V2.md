@@ -54,6 +54,17 @@ src/contract/
 
 **A route group is added with the module that uses it.** No route group exists without a module behind it. The six groups added 2026-10-05 (`client` through `proposal` above) each land with the module named beside it, in `COMMAND-CENTER.md`'s numbering.
 
+**Built so far** (the code in `src/contract/` is authoritative for exact shapes):
+
+| Group | Routes | List query |
+|---|---|---|
+| `health` | `GET /api/health` (public; `data.preview` reports dev preview) | — |
+| `clients` | list · get · create · update. Closing a client with an active engagement is refused (422 `client_has_active_engagements`) | `q` (name or primary contact, case-insensitive, LIKE-escaped) · cursor · `meta.total` |
+| `engagements` | list · get · create · update · close. Close revokes the engagement's live Connections and returns `revokedConnections` | `clientId` · `status` · cursor |
+| `missions` | list · get, read-only, for the Missions surface (module 13). Created through Intake approval once module 1 lands | `origin` (required, never both) · `status` · `q` · `sort` (`lastActivity` · `sprint` · `client`) with `direction` (nulls sort lowest) · `includeArchived` · `needsYou` · `quietBefore` (no activity since, or none) · `lastExportStatus` · cursor · `meta.total` (required here; follows every filter) · `meta.counts` (ignores the status-like filters) |
+
+Every list uses keyset cursors, and a cursor from a different sort is 400. Search escapes `\ % _` through one helper, `containsPattern()` in `src/routes/shared.ts`.
+
 **JSON on the wire is camelCase; database columns are snake_case.** The entity blocks below use the column names. The contract's Zod shapes carry the camelCase form of the same fields.
 
 **`apply` materializes.** `preset.apply` copies the preset into RosterEntries (copy-then-edit); the preset holds no mission state. The procedure name should make it obvious that applying is a write, not a reference.
@@ -95,9 +106,16 @@ error:    { success: false, error: { code, message, details?, requestId } }
 
 **The frontend switches on `error.code`. It never parses `message`.** The code union lives in `contract/shared/errors.ts`; both sides import it.
 
+**`details` is typed per code.** The error envelope is a discriminated union on `code`. Two codes carry a strict schema, and the other twenty keep `details` optional and untyped:
+
+- `PRECONDITION_FAILED`: `{ reason, clientId? }`, required. `reason` is the closed list `PRECONDITION_REASONS`: `client_not_found · client_closed · client_has_active_engagements`. A new reason is an edit to that list, announced to `avel-web` first.
+- `VALIDATION_FAILED`: `{ params?, headers?, query?, body? }`, each an array of `{ path, message, code? }`, optional because an unparseable body has no issues.
+
+A thrower cannot attach details that don't match its code: `ApiError` is typed per code, so a wrong reason fails to compile. Decided 2026-10-06.
+
 **Both envelopes are in the contract's response schemas,** not only in the handlers. Each route's success response is declared as the success envelope around its data shape, and each error response as the error envelope, so `avel-web` gets both through its pinned dependency. The error envelope's `code` is the closed error-code union.
 
-**The union** is the generic codes `VALIDATION_FAILED · UNAUTHENTICATED · FORBIDDEN · NOT_FOUND · CONFLICT · INTERNAL`, the route codes `IDEMPOTENCY_REPLAY · PRECONDITION_FAILED`, the codes in `BLAST-RADIUS.md` *Error cases*, and `GITHUB_REJECTED` (decided 2026-10-05: GitHub refused the request, not retryable; `EXTERNAL_GITHUB` stays the retryable failure). Whether the code matches this is in `STATE.md`.
+**The union** is the generic codes `VALIDATION_FAILED · UNAUTHENTICATED · FORBIDDEN · NOT_FOUND · CONFLICT · INTERNAL`, `NOT_OPERATOR` (403: a live session whose GitHub id is no longer on the operator allowlist, so the client shows sign-out; `FORBIDDEN` stays for per-resource denials, decided 2026-10-05), the route codes `IDEMPOTENCY_REPLAY · PRECONDITION_FAILED`, the codes in `BLAST-RADIUS.md` *Error cases*, and `GITHUB_REJECTED` (decided 2026-10-05: GitHub refused the request, not retryable; `EXTERNAL_GITHUB` stays the retryable failure). Whether the code matches this is in `STATE.md`.
 
 **Statuses:** a request whose shape fails validation is `400 VALIDATION_FAILED`. A request that is well formed but not allowed in the current state is `422`. Unknown routes and wrong methods are `404 NOT_FOUND`.
 
@@ -606,6 +624,7 @@ idempotency_key (unique)
 target_kind            'zip' | 'github_pr' | 'github_push'
 connection_id?         FK → Connection    what authorizes this; null only for target_kind 'zip' (CHECK)
 status                 see Lifecycle below
+status_changed_at      when the export entered its current status; set from the clock in the same write that changes status. Trigger 0013 refuses a status change that does not move it forward; a CHECK keeps it at or after created_at
 pr_status?             free text
 dry_run                boolean, default false
 preview_export_id?     FK → Export — the preview this was approved from
@@ -754,7 +773,7 @@ payload                  jsonb
 | `activity_action` | `client.created` · `client.updated` · `engagement.created` · `engagement.updated` · `engagement.closed` · `auth.signed_in` · `connection.revoked` |
 | `activity_entity_type` | `client` · `engagement` · `user` · `connection` |
 
-**`connection.revoked` and `connection` were added in migration `0010`.** Closing an engagement revokes its Connections in the same transaction, and writes one `connection.revoked` row per revoked Connection. The other values are as built.
+**`mission.created`, `mission.status_changed`, `export.created` and `export.status_changed` (with entity types `mission` and `export`) were added in migration `0011`, ahead of the mutations that will write them.** This is an exception to "an action enters the enum with its mutation": the dev seed writes them, so mission lists show real activity before the mission and export mutation routes exist. Decided 2026-10-05. **`connection.revoked` and `connection` were added in migration `0010`.** Closing an engagement revokes its Connections in the same transaction, and writes one `connection.revoked` row per revoked Connection. The other values are as built.
 
 Each later mutation adds its action, and its entity type if new, in the same change.
 
@@ -832,6 +851,9 @@ As built, from `drizzle/` (2026-10-05). Each table comes after every table its f
 | `0008` | Export gate-override CHECK | Rejects a null justification, which the first version of the CHECK let through |
 | `0009` | Mission engagement CHECK | `engagement_id` nullable; required for `client`, null for `internal` |
 | `0010` | ActivityLog enum values | Adds `connection.revoked` and `connection`. `ADD VALUE` runs inside the migration transaction, so no migration in the same batch may use a newly added value |
+| `0011` | ActivityLog enum values | Adds `mission.created`, `mission.status_changed`, `export.created`, `export.status_changed`, and entity types `mission`, `export` |
+| `0012` | `export.status_changed_at` | Added nullable, backfilled from `created_at`, then NOT NULL. CHECK `status_changed_at >= created_at` |
+| `0013` | Export status trigger | Refuses any status change that does not move `status_changed_at` forward |
 
 `0001`–`0006` create 24 tables: 2 + 3 + 8 + 4 + 6 + 1.
 

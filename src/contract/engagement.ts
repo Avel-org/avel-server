@@ -27,6 +27,13 @@ export const engagementSchema = z.object({
 
 export type Engagement = z.infer<typeof engagementSchema>;
 
+/** What close answers: the engagement, and how many of its connections it revoked. */
+export const closedEngagementSchema = engagementSchema.extend({
+	revokedConnections: z.number().int().nonnegative(),
+});
+
+export type ClosedEngagement = z.infer<typeof closedEngagementSchema>;
+
 /**
  * A new engagement is active, under an active client. `startedAt` defaults to
  * the server's clock.
@@ -53,6 +60,7 @@ export const updateEngagementBody = z
 
 export const engagementListQuery = pageQuery.extend({
 	clientId: z.string().uuid().optional(),
+	status: engagementStatus.optional(),
 });
 
 const byId = z.object({ id: z.string().uuid() });
@@ -89,7 +97,7 @@ export const engagementContract = c.router({
 		path: "/api/engagements/:id/close",
 		pathParams: byId,
 		body: c.noBody(),
-		responses: { 200: successEnvelope(engagementSchema) },
+		responses: { 200: successEnvelope(closedEngagementSchema) },
 		summary:
 			"Sets status closed and closedAt from the server's clock. Closing twice is 409 CONFLICT.",
 	},

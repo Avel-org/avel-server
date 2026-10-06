@@ -3,7 +3,13 @@ import {
 	TsRestHttpError,
 } from "@ts-rest/serverless/fetch";
 import type { ZodError } from "zod";
-import { type ErrorCode, type ErrorEnvelope, fail } from "../contract";
+import {
+	type ErrorCode,
+	type ErrorDetails,
+	type ErrorEnvelope,
+	fail,
+	type ValidationDetails,
+} from "../contract";
 import type { Logger } from "../lib/logger";
 
 /**
@@ -15,6 +21,7 @@ export const statusFor: Record<ErrorCode, number> = {
 	VALIDATION_FAILED: 400,
 	UNAUTHENTICATED: 401,
 	FORBIDDEN: 403,
+	NOT_OPERATOR: 403,
 	NOT_FOUND: 404,
 	CONFLICT: 409,
 	INTERNAL: 500,
@@ -35,25 +42,40 @@ export const statusFor: Record<ErrorCode, number> = {
 	GITHUB_REJECTED: 502,
 };
 
+/** ApiError's options. A code with required details (PRECONDITION_FAILED) requires them. */
+export type ApiErrorOptions<C extends ErrorCode> = {
+	status?: number;
+} & (C extends "PRECONDITION_FAILED"
+	? { details: ErrorDetails<C> }
+	: { details?: ErrorDetails<C> });
+
 /**
  * The one error a handler throws on purpose. Its code and message reach the
  * client. Anything else thrown reaches the client only as INTERNAL.
  */
-export class ApiError extends Error {
-	readonly code: ErrorCode;
+export class ApiError<C extends ErrorCode = ErrorCode> extends Error {
+	readonly code: C;
 	readonly status: number;
-	readonly details: unknown;
+	readonly details: ErrorDetails<C> | undefined;
 
+	/**
+	 * The details are typed by code: a PRECONDITION_FAILED with an unknown
+	 * reason, or VALIDATION_FAILED issues in the wrong shape, do not compile
+	 * (tests/unit/error-types.test.ts).
+	 */
 	constructor(
-		code: ErrorCode,
+		code: C,
 		message: string,
-		options: { status?: number; details?: unknown } = {},
+		...[options]: C extends "PRECONDITION_FAILED"
+			? [options: ApiErrorOptions<C>]
+			: [options?: ApiErrorOptions<C>]
 	) {
 		super(message);
 		this.name = "ApiError";
 		this.code = code;
-		this.status = options.status ?? statusFor[code];
-		this.details = options.details;
+		this.status = options?.status ?? statusFor[code];
+		// The constructor's parameter type already ties details to code.
+		this.details = options?.details as ErrorDetails<C> | undefined;
 	}
 }
 
@@ -115,7 +137,11 @@ export function isRouteNotFound(err: unknown): boolean {
 	return err instanceof TsRestHttpError && err.statusCode === 404;
 }
 
-function issuesOf(part: string, error: ZodError | null) {
+/** One request part's issues. `part` is typed, so a misnamed part does not compile. */
+function issuesOf(
+	part: keyof ValidationDetails,
+	error: ZodError | null,
+): ValidationDetails {
 	if (!error) return {};
 	return {
 		[part]: error.issues.map((issue) => ({

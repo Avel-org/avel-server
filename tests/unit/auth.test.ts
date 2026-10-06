@@ -154,7 +154,9 @@ describe("auth middleware", () => {
 			headers: { cookie: cookie ?? "" },
 		});
 		expect(res.status).toBe(403);
-		expect(errorEnvelope.parse(await res.json()).error.code).toBe("FORBIDDEN");
+		expect(errorEnvelope.parse(await res.json()).error.code).toBe(
+			"NOT_OPERATOR",
+		);
 	});
 
 	it("leaves /api/health public", async () => {

@@ -51,13 +51,18 @@ export const updateClientBody = z
 		message: "Give at least one field to change",
 	});
 
+export const clientListQuery = pageQuery.extend({
+	/** Case-insensitive substring of the name or primary contact. meta.total respects it. */
+	q: z.string().trim().min(1).max(200).optional(),
+});
+
 const byId = z.object({ id: z.string().uuid() });
 
 export const clientContract = c.router({
 	list: {
 		method: "GET",
 		path: "/api/clients",
-		query: pageQuery,
+		query: clientListQuery,
 		responses: { 200: pageEnvelope(clientSchema) },
 		summary: "Clients, newest first",
 	},

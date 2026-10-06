@@ -1,0 +1,699 @@
+import { fixedClock } from "../../lib/clock";
+import type { IdGenerator } from "../../lib/ids";
+import type {
+	activityLog,
+	agentTemplate,
+	client,
+	connection,
+	engagement,
+	exportTable,
+	mission,
+	playbook,
+	rosterEntry,
+	rosterPreset,
+} from "../schema";
+
+/**
+ * The dev seed's rows. Pure: the same ids and the same epoch give the same
+ * rows, byte for byte. Every name is fictional; there is no client data here.
+ */
+
+/** Day 0 of the seed. Every time is a fixed offset from it, never "now". */
+export const SEED_EPOCH = "2026-09-07T09:00:00.000Z";
+const epoch = fixedClock(SEED_EPOCH).now().getTime();
+const HOUR = 3_600_000;
+
+/** A time `d` days and `h` hours after the epoch. */
+function at(d: number, h = 0) {
+	return new Date(epoch + d * 24 * HOUR + h * HOUR);
+}
+
+/** The ids the seed hands out: 5eed0000-0000-4000-8000-000000000001 onwards. */
+export function seedIds(): IdGenerator {
+	let n = 0;
+	return {
+		next: () => {
+			n += 1;
+			return `5eed0000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+		},
+	};
+}
+
+/** The first id seedIds() hands out: the first client. Its presence means "already seeded". */
+export const SEED_MARKER_ID = "5eed0000-0000-4000-8000-000000000001";
+
+export const SEED_REQUEST_ID = "seed";
+
+type Row<T extends { $inferInsert: unknown }> = T["$inferInsert"];
+
+export interface SeedRows {
+	client: Row<typeof client>[];
+	engagement: Row<typeof engagement>[];
+	connection: Row<typeof connection>[];
+	agentTemplate: Row<typeof agentTemplate>[];
+	rosterPreset: Row<typeof rosterPreset>[];
+	playbook: Row<typeof playbook>[];
+	mission: Row<typeof mission>[];
+	rosterEntry: Row<typeof rosterEntry>[];
+	export: Row<typeof exportTable>[];
+	activityLog: Row<typeof activityLog>[];
+}
+
+type MissionStatus = Row<typeof mission>["status"];
+type ExportStatus = Row<typeof exportTable>["status"];
+
+export function buildSeed(ids: IdGenerator): SeedRows {
+	const rows: SeedRows = {
+		client: [],
+		engagement: [],
+		connection: [],
+		agentTemplate: [],
+		rosterPreset: [],
+		playbook: [],
+		mission: [],
+		rosterEntry: [],
+		export: [],
+		activityLog: [],
+	};
+
+	const log = (
+		when: Date,
+		action: Row<typeof activityLog>["action"],
+		entityType: Row<typeof activityLog>["entityType"],
+		entityId: string,
+		payload: Record<string, unknown>,
+		scope: { missionId?: string | null; engagementId?: string | null } = {},
+	) => {
+		rows.activityLog.push({
+			id: ids.next(),
+			at: when,
+			actorKind: "system",
+			action,
+			entityType,
+			entityId,
+			missionId: scope.missionId ?? null,
+			engagementId: scope.engagementId ?? null,
+			requestId: SEED_REQUEST_ID,
+			payload: { seed: true, ...payload },
+		});
+	};
+
+	// Clients. The first id is SEED_MARKER_ID.
+	const addClient = (
+		name: string,
+		status: "active" | "closed",
+		day: number,
+		closedDay?: number,
+	) => {
+		const id = ids.next();
+		rows.client.push({
+			id,
+			name,
+			status,
+			primaryContact: null,
+			notesMd: null,
+			createdAt: at(day),
+			updatedAt: at(closedDay ?? day),
+		});
+		log(at(day), "client.created", "client", id, { name });
+		return id;
+	};
+	const halvorsen = addClient("Halvorsen & Pike", "active", 0);
+	const brightwater = addClient("Brightwater Clinics", "active", 0);
+	const larchmont = addClient("Larchmont Freight", "closed", 0, 20);
+
+	// Engagements. One closed, which revokes its connection.
+	const addEngagement = (
+		clientId: string,
+		name: string,
+		day: number,
+		closedDay?: number,
+	) => {
+		const id = ids.next();
+		rows.engagement.push({
+			id,
+			clientId,
+			name,
+			scopeMd: null,
+			status: closedDay === undefined ? "active" : "closed",
+			startedAt: at(day),
+			closedAt: closedDay === undefined ? null : at(closedDay),
+			createdAt: at(day),
+			updatedAt: at(closedDay ?? day),
+		});
+		log(
+			at(day, 1),
+			"engagement.created",
+			"engagement",
+			id,
+			{ name },
+			{ engagementId: id },
+		);
+		return id;
+	};
+	const portal = addEngagement(halvorsen, "Client portal", 0);
+	const billing = addEngagement(halvorsen, "Billing rebuild", 3);
+	const booking = addEngagement(brightwater, "Booking app", 1);
+	const routes = addEngagement(larchmont, "Route planner", 0, 20);
+	log(
+		at(20),
+		"engagement.closed",
+		"engagement",
+		routes,
+		{},
+		{ engagementId: routes },
+	);
+
+	// Connections. The token is never stored; credential_ref names an env var.
+	const addConnection = (
+		engagementId: string | null,
+		label: string,
+		scopeType: "owner" | "repo",
+		scopeValue: string,
+		revokedDay?: number,
+	) => {
+		const id = ids.next();
+		rows.connection.push({
+			id,
+			service: "github",
+			label,
+			scopeType,
+			scopeValue,
+			credentialRef: "GITHUB_TOKEN",
+			status: revokedDay === undefined ? "active" : "revoked",
+			engagementId,
+			expiresAt: null,
+			lastRotatedAt: null,
+			revokedAt: revokedDay === undefined ? null : at(revokedDay),
+			createdAt: at(0),
+			updatedAt: at(revokedDay ?? 0),
+		});
+		return id;
+	};
+	const portalRepo = addConnection(
+		portal,
+		"Halvorsen portal",
+		"repo",
+		"halvorsen-pike/portal",
+	);
+	addConnection(billing, "Halvorsen billing", "repo", "halvorsen-pike/billing");
+	const bookingRepo = addConnection(
+		booking,
+		"Brightwater booking",
+		"repo",
+		"brightwater-clinics/booking",
+	);
+	const routesRepo = addConnection(
+		routes,
+		"Larchmont routes",
+		"repo",
+		"larchmont-freight/routes",
+		20,
+	);
+	addConnection(null, "AVEL internal", "owner", "avel-org");
+	log(
+		at(20, 1),
+		"connection.revoked",
+		"connection",
+		routesRepo,
+		{ reason: "engagement closed" },
+		{ engagementId: routes },
+	);
+
+	// Agent templates: the operator plus four agents.
+	const addTemplate = (
+		slug: string,
+		name: string,
+		kind: "horizontal" | "feature",
+		roles: Row<typeof agentTemplate>["roles"],
+		waves: Row<typeof agentTemplate>["waveDefaults"],
+		writablePaths: string[],
+	) => {
+		const id = ids.next();
+		rows.agentTemplate.push({
+			id,
+			slug,
+			name,
+			kind,
+			roles,
+			engagementId: null,
+			waveDefaults: waves,
+			identityMd: `# ${name}\n`,
+			depthMd: "",
+			writablePaths,
+			version: 1,
+			createdAt: at(0),
+			updatedAt: at(0),
+		});
+		return id;
+	};
+	const operator = addTemplate(
+		"operator",
+		"Operator",
+		"horizontal",
+		["foundations"],
+		["A"],
+		["**"],
+	);
+	const atlas = addTemplate(
+		"atlas",
+		"Atlas",
+		"horizontal",
+		["schema", "contract"],
+		["A"],
+		["src/db/**", "src/contract/**"],
+	);
+	const nemi = addTemplate(
+		"nemi",
+		"Nemi",
+		"feature",
+		["domain", "api-surface"],
+		["B"],
+		["src/routes/**", "src/services/**"],
+	);
+	const fenn = addTemplate(
+		"fenn",
+		"Fenn",
+		"horizontal",
+		["backend-tests", "frontend-tests"],
+		["C"],
+		["tests/**"],
+	);
+	const zane = addTemplate(
+		"zane",
+		"Zane",
+		"horizontal",
+		["spec-judgment", "security-review"],
+		["D"],
+		["reviews/**"],
+	);
+
+	// The full-build playbook and its default preset.
+	const preset = ids.next();
+	rows.rosterPreset.push({
+		id: preset,
+		name: "Full build · vertical",
+		description: "Foundations, one feature builder, tests and review.",
+		cut: "vertical",
+		agents: [
+			{ agent_template_id: atlas, waves: ["A"], estimated_tokens: 80_000 },
+			{ agent_template_id: nemi, waves: ["B"], estimated_tokens: 150_000 },
+			{ agent_template_id: fenn, waves: ["C"], estimated_tokens: 90_000 },
+			{ agent_template_id: zane, waves: ["D"], estimated_tokens: 40_000 },
+		],
+		version: 1,
+		createdAt: at(0),
+		updatedAt: at(0),
+	});
+	rows.playbook.push({
+		id: ids.next(),
+		missionType: "full-build",
+		name: "Full build",
+		wavesApplicable: ["A", "B", "C", "D", "E"],
+		gates: [
+			{ gate: "phase1-close", policy: "mandatory" },
+			{ gate: "qa", policy: "mandatory" },
+			{ gate: "security", policy: "warn" },
+			{ gate: "acceptance", policy: "mandatory" },
+		],
+		deliverable: "pr",
+		requiredFields: ["brief", "repo_url"],
+		defaultPresetId: preset,
+		version: 1,
+		createdAt: at(0),
+		updatedAt: at(0),
+	});
+
+	// Missions: every status, both origins. Internal missions have no engagement.
+	const addMission = (m: {
+		engagementId: string | null;
+		repo: string;
+		sprint: number;
+		summary: string;
+		created: number;
+		/** Status changes after draft, as [status, day]. */
+		path: [MissionStatus, number][];
+		deletedDay?: number;
+		spendCeilingUsd?: string;
+	}) => {
+		const id = ids.next();
+		const last = m.path.at(-1);
+		const status: MissionStatus = last ? last[0] : "draft";
+		const touched = m.deletedDay ?? (last ? last[1] : m.created);
+		rows.mission.push({
+			id,
+			engagementId: m.engagementId,
+			origin: m.engagementId === null ? "internal" : "client",
+			type: "full-build",
+			brief: { summary: m.summary },
+			sprintN: m.sprint,
+			status,
+			cut: "vertical",
+			cutSource: "derived",
+			cutRationale: null,
+			repoUrl: `https://github.com/${m.repo}`,
+			spendCeilingUsd: m.spendCeilingUsd ?? null,
+			deletedAt: m.deletedDay === undefined ? null : at(m.deletedDay),
+			createdAt: at(m.created),
+			updatedAt: at(touched),
+		});
+		const scope = { missionId: id, engagementId: m.engagementId };
+		log(
+			at(m.created, 2),
+			"mission.created",
+			"mission",
+			id,
+			{ sprint: m.sprint },
+			scope,
+		);
+		let from: MissionStatus = "draft";
+		for (const [to, day] of m.path) {
+			log(
+				at(day, 3),
+				"mission.status_changed",
+				"mission",
+				id,
+				{ from, to },
+				scope,
+			);
+			from = to;
+		}
+		return id;
+	};
+	const portal1 = addMission({
+		engagementId: portal,
+		repo: "halvorsen-pike/portal",
+		sprint: 1,
+		summary: "Sign-in and account pages.",
+		created: 1,
+		path: [
+			["active", 2],
+			["shipped", 9],
+		],
+	});
+	const portal2 = addMission({
+		engagementId: portal,
+		repo: "halvorsen-pike/portal",
+		sprint: 2,
+		summary: "Document upload and sharing.",
+		created: 10,
+		path: [["active", 11]],
+	});
+	addMission({
+		engagementId: portal,
+		repo: "halvorsen-pike/portal",
+		sprint: 3,
+		summary: "Notifications.",
+		created: 24,
+		path: [],
+	});
+	addMission({
+		engagementId: billing,
+		repo: "halvorsen-pike/billing",
+		sprint: 1,
+		summary: "Invoice generation.",
+		created: 5,
+		path: [
+			["active", 6],
+			["halted", 15],
+		],
+		spendCeilingUsd: "250.00",
+	});
+	const booking1 = addMission({
+		engagementId: booking,
+		repo: "brightwater-clinics/booking",
+		sprint: 1,
+		summary: "Appointment booking.",
+		created: 2,
+		path: [
+			["active", 3],
+			["shipped", 12],
+		],
+	});
+	const booking2 = addMission({
+		engagementId: booking,
+		repo: "brightwater-clinics/booking",
+		sprint: 2,
+		summary: "Reminders and rescheduling.",
+		created: 13,
+		path: [["active", 14]],
+	});
+	const routes1 = addMission({
+		engagementId: routes,
+		repo: "larchmont-freight/routes",
+		sprint: 1,
+		summary: "Route import.",
+		created: 1,
+		path: [
+			["active", 2],
+			["shipped", 10],
+			["archived", 21],
+		],
+	});
+	addMission({
+		engagementId: routes,
+		repo: "larchmont-freight/routes",
+		sprint: 2,
+		summary: "Driver assignment.",
+		created: 11,
+		path: [
+			["active", 12],
+			["shipped", 18],
+		],
+	});
+	const internal1 = addMission({
+		engagementId: null,
+		repo: "avel-org/template-booking",
+		sprint: 1,
+		summary: "Booking template build.",
+		created: 0,
+		path: [
+			["active", 1],
+			["shipped", 6],
+		],
+	});
+	const internal2 = addMission({
+		engagementId: null,
+		repo: "avel-org/template-booking",
+		sprint: 2,
+		summary: "Template: payments.",
+		created: 16,
+		path: [["active", 17]],
+	});
+	addMission({
+		engagementId: null,
+		repo: "avel-org/template-crm",
+		sprint: 1,
+		summary: "CRM template.",
+		created: 26,
+		path: [],
+	});
+	addMission({
+		engagementId: null,
+		repo: "avel-org/template-crm",
+		sprint: 1,
+		summary: "CRM template spike.",
+		created: 19,
+		path: [
+			["active", 19],
+			["halted", 20],
+		],
+	});
+	// Soft-deleted: no list may show it.
+	addMission({
+		engagementId: portal,
+		repo: "halvorsen-pike/portal",
+		sprint: 3,
+		summary: "Duplicate of sprint 3.",
+		created: 22,
+		path: [],
+		deletedDay: 23,
+	});
+
+	// Roster entries, some inactive.
+	const addEntries = (
+		missionId: string,
+		day: number,
+		entries: [
+			string,
+			Row<typeof rosterEntry>["waves"],
+			boolean,
+			number | null,
+		][],
+	) => {
+		for (const [templateId, waves, active, estimate] of entries) {
+			rows.rosterEntry.push({
+				id: ids.next(),
+				missionId,
+				agentTemplateId: templateId,
+				active,
+				waves,
+				customizedMd: null,
+				writablePaths: null,
+				territory: null,
+				estimatedTokens: estimate,
+				tokenSoftCeiling: estimate === null ? null : Math.round(estimate * 1.5),
+				tokenHardCeiling: estimate === null ? null : estimate * 3,
+				grain: "default",
+				absorbedBoundaries: [],
+				createdAt: at(day),
+				updatedAt: at(day),
+			});
+		}
+	};
+	addEntries(portal1, 1, [
+		[atlas, ["A"], true, 80_000],
+		[nemi, ["B"], true, 150_000],
+		[fenn, ["C"], true, 90_000],
+		[zane, ["D"], true, 40_000],
+	]);
+	addEntries(portal2, 10, [
+		[atlas, ["A"], true, 60_000],
+		[nemi, ["B"], true, 160_000],
+		[fenn, ["C"], true, 90_000],
+		[zane, ["D"], false, null],
+	]);
+	addEntries(booking2, 13, [
+		[atlas, ["A"], true, 70_000],
+		[nemi, ["B"], true, 140_000],
+		[fenn, ["C"], false, null],
+		[zane, ["D"], true, 40_000],
+	]);
+	addEntries(internal2, 16, [
+		[operator, ["A"], true, null],
+		[atlas, ["A"], true, 50_000],
+		[nemi, ["B"], true, 120_000],
+	]);
+
+	// Exports: previewed, pr-open, done, failed and closed.
+	const addExport = (x: {
+		missionId: string;
+		sprint: number;
+		target: Row<typeof exportTable>["targetKind"];
+		connectionId: string | null;
+		status: ExportStatus;
+		day: number;
+		endDay: number;
+		dryRun?: boolean;
+		previewOf?: string;
+		prStatus?: string;
+		rendered?: string;
+	}) => {
+		const id = ids.next();
+		rows.export.push({
+			id,
+			missionId: x.missionId,
+			sprintN: x.sprint,
+			idempotencyKey: `seed-${id}`,
+			targetKind: x.target,
+			connectionId: x.connectionId,
+			status: x.status,
+			// The same moment as its export.status_changed activity row below.
+			statusChangedAt: at(x.endDay, 5),
+			prStatus: x.prStatus ?? null,
+			dryRun: x.dryRun ?? false,
+			previewExportId: x.previewOf ?? null,
+			baseRef: x.target === "zip" ? null : "main",
+			baseCommitSha: x.target === "zip" ? null : "0".repeat(40),
+			packageSha256: x.rendered === undefined ? null : x.rendered.repeat(64),
+			packageHashVersion: x.rendered === undefined ? null : 1,
+			createdAt: at(x.day),
+			updatedAt: at(x.endDay, 5),
+		});
+		const scope = { missionId: x.missionId, engagementId: null };
+		log(
+			at(x.day, 4),
+			"export.created",
+			"export",
+			id,
+			{ target: x.target },
+			scope,
+		);
+		log(
+			at(x.endDay, 5),
+			"export.status_changed",
+			"export",
+			id,
+			{ to: x.status },
+			scope,
+		);
+		return id;
+	};
+	const portal1Preview = addExport({
+		missionId: portal1,
+		sprint: 1,
+		target: "github_pr",
+		connectionId: portalRepo,
+		status: "previewed",
+		day: 8,
+		endDay: 8,
+		dryRun: true,
+		rendered: "a",
+	});
+	addExport({
+		missionId: portal1,
+		sprint: 1,
+		target: "github_pr",
+		connectionId: portalRepo,
+		status: "done",
+		day: 8,
+		endDay: 9,
+		previewOf: portal1Preview,
+		prStatus: "merged",
+		rendered: "a",
+	});
+	addExport({
+		missionId: portal2,
+		sprint: 2,
+		target: "github_pr",
+		connectionId: portalRepo,
+		status: "previewed",
+		day: 24,
+		endDay: 24,
+		dryRun: true,
+		rendered: "b",
+	});
+	addExport({
+		missionId: booking1,
+		sprint: 1,
+		target: "github_pr",
+		connectionId: bookingRepo,
+		status: "pr-open",
+		day: 12,
+		endDay: 12,
+		prStatus: "open",
+		rendered: "c",
+	});
+	addExport({
+		missionId: booking2,
+		sprint: 2,
+		target: "github_pr",
+		connectionId: bookingRepo,
+		status: "failed",
+		day: 25,
+		endDay: 25,
+	});
+	addExport({
+		missionId: routes1,
+		sprint: 1,
+		target: "github_pr",
+		connectionId: routesRepo,
+		status: "closed",
+		day: 9,
+		endDay: 10,
+		prStatus: "closed",
+		rendered: "d",
+	});
+	addExport({
+		missionId: internal1,
+		sprint: 1,
+		target: "zip",
+		connectionId: null,
+		status: "done",
+		day: 6,
+		endDay: 6,
+		rendered: "e",
+	});
+
+	return rows;
+}

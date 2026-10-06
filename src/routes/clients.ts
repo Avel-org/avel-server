@@ -5,6 +5,8 @@ import {
 	desc,
 	eq,
 	getTableName,
+	ilike,
+	or,
 	type SQL,
 	sql,
 	type Table,
@@ -17,6 +19,7 @@ import { type Executor, withTx } from "../db/tx";
 import { ApiError } from "../middleware/errors";
 import {
 	after,
+	containsPattern,
 	notFound,
 	operatorOf,
 	type RequestContext,
@@ -99,15 +102,36 @@ async function findLive(db: Executor, id: string): Promise<Row | undefined> {
 export function clientRoutes(deps: RouteDeps) {
 	return tsr.platformContext<RequestContext>().router(clientContract, {
 		list: async ({ query }) => {
-			const rows = await deps
-				.db()
-				.select(withCounts)
-				.from(client)
-				.where(and(live(client), after(client, query.cursor)))
-				.orderBy(desc(client.createdAt), desc(client.id))
-				.limit(query.limit + 1);
+			const db = deps.db();
+			const pattern = query.q ? containsPattern(query.q) : undefined;
+			const filters = and(
+				live(client),
+				pattern
+					? or(
+							ilike(client.name, pattern),
+							ilike(client.primaryContact, pattern),
+						)
+					: undefined,
+			);
+			// The page and the total in one round. The total uses the list's
+			// filters without the cursor, so it is the same on every page.
+			const [rows, [counted]] = await Promise.all([
+				db
+					.select(withCounts)
+					.from(client)
+					.where(and(filters, after(client, query.cursor)))
+					.orderBy(desc(client.createdAt), desc(client.id))
+					.limit(query.limit + 1),
+				db
+					.select({ total: sql<number>`count(*)`.mapWith(Number) })
+					.from(client)
+					.where(filters),
+			]);
 			const { items, nextCursor } = toPage(rows, query.limit);
-			return { status: 200, body: page(items.map(toWire), nextCursor) };
+			return {
+				status: 200,
+				body: page(items.map(toWire), nextCursor, counted?.total ?? 0),
+			};
 		},
 
 		get: async ({ params }) => {

@@ -30,6 +30,12 @@ export const activityAction = pgEnum("activity_action", [
 	"engagement.closed",
 	"auth.signed_in",
 	"connection.revoked",
+	// Exception to "add with the mutation": the dev seed writes these before the
+	// mission and export mutations exist, so lists have real activity to show.
+	"mission.created",
+	"mission.status_changed",
+	"export.created",
+	"export.status_changed",
 ]);
 
 export const activityEntityType = pgEnum("activity_entity_type", [
@@ -37,6 +43,8 @@ export const activityEntityType = pgEnum("activity_entity_type", [
 	"engagement",
 	"user",
 	"connection",
+	"mission",
+	"export",
 ]);
 
 /**

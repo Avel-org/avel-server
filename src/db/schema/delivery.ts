@@ -102,6 +102,9 @@ export const exportTable = pgTable(
 		targetKind: exportTargetKind("target_kind").notNull(),
 		connectionId: uuid("connection_id").references(() => connection.id),
 		status: exportStatus("status").notNull(),
+		// When the export entered its current status. Every write that changes
+		// status sets this in the same statement, from the clock.
+		statusChangedAt: at("status_changed_at").notNull(),
 		prStatus: text("pr_status"),
 		verification: jsonb("verification"),
 		// The gate override, flattened so its author is a real foreign key.
@@ -131,6 +134,10 @@ export const exportTable = pgTable(
 	(t) => [
 		uniqueIndex("export_idempotency_key_uq").on(t.idempotencyKey),
 		index("export_mission_id_idx").on(t.missionId),
+		check(
+			"export_status_changed_after_created",
+			sql`${t.statusChangedAt} >= ${t.createdAt}`,
+		),
 		check(
 			"export_connection_unless_zip",
 			sql`${t.targetKind} = 'zip' or ${t.connectionId} is not null`,

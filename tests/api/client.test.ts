@@ -62,6 +62,18 @@ describe.skipIf(!process.env.DATABASE_URL)("/api/clients", () => {
 		});
 	});
 
+	it("keeps a JSON body intact when the query carries an indexed array param", async () => {
+		await withApi(async ({ signIn, call }) => {
+			await signIn();
+			const res = await call("/api/clients?tag[0]=a&tag[1]=b", {
+				method: "POST",
+				body: { name: "Indexed" },
+			});
+			expect(res.status).toBe(201);
+			expect(one.parse(await res.json()).data.name).toBe("Indexed");
+		});
+	});
+
 	it("gets one client and updates it, logging client.updated with the changes", async () => {
 		await withApi(async ({ signIn, call, logRows }) => {
 			await signIn();
@@ -121,6 +133,100 @@ describe.skipIf(!process.env.DATABASE_URL)("/api/clients", () => {
 			);
 			expect(second.data.map((c) => c.name)).toEqual(["A"]);
 			expect(second.meta.nextCursor).toBeNull();
+		});
+	});
+
+	it("searches name and primary contact case-insensitively, LIKE metacharacters literal, total included", async () => {
+		await withApi(async ({ signIn, call, tx }) => {
+			await signIn();
+			const make = async (name: string, primaryContact?: string) =>
+				one.parse(
+					await (
+						await call("/api/clients", {
+							method: "POST",
+							body: { name, primaryContact },
+						})
+					).json(),
+				).data.id;
+			const meridian = await make("Meridian Health", "Ana Ruiz");
+			const acme = await make("Acme 100%", "Bo_Chen");
+			const larch = await make("Larchmont", "Meri Watts");
+			const gone = await make("Meridian Old");
+			await tx.update(client).set(remove(clock)).where(eq(client.id, gone));
+
+			const search = async (q: string) => {
+				const res = await call(`/api/clients?q=${encodeURIComponent(q)}`);
+				expect(res.status, q).toBe(200);
+				const body = list.parse(await res.json());
+				return {
+					ids: body.data.map((c) => c.id).sort(),
+					total: body.meta.total,
+				};
+			};
+			expect(await search("MERI")).toEqual({
+				ids: [meridian, larch].sort(),
+				total: 2,
+			});
+			expect(await search("ruiz")).toEqual({ ids: [meridian], total: 1 });
+			expect(await search("%")).toEqual({ ids: [acme], total: 1 });
+			expect(await search("_")).toEqual({ ids: [acme], total: 1 });
+			// Unescaped, "a_r" would match "Ana Ruiz" ("a R"); escaped it matches nothing.
+			expect(await search("a_r")).toEqual({ ids: [], total: 0 });
+
+			const paged = list.parse(
+				await (await call("/api/clients?q=meri&limit=1")).json(),
+			);
+			expect(paged.meta.total).toBe(2);
+			const rest = list.parse(
+				await (
+					await call(
+						`/api/clients?q=meri&limit=1&cursor=${paged.meta.nextCursor}`,
+					)
+				).json(),
+			);
+			expect([...paged.data, ...rest.data].map((c) => c.id).sort()).toEqual(
+				[meridian, larch].sort(),
+			);
+			expect(rest.meta.nextCursor).toBeNull();
+
+			expect((await call(`/api/clients?q=${"x".repeat(201)}`)).status).toBe(
+				400,
+			);
+			expect((await call("/api/clients?q=")).status).toBe(400);
+		});
+	});
+
+	it("reports the same exact total on every page, excluding soft-deleted clients", async () => {
+		await withApi(async ({ signIn, call, tx }) => {
+			await signIn();
+			const ids: string[] = [];
+			for (const name of ["A", "B", "C", "D", "E"]) {
+				const res = await call("/api/clients", {
+					method: "POST",
+					body: { name },
+				});
+				ids.push(one.parse(await res.json()).data.id);
+			}
+			await tx
+				.update(client)
+				.set(remove(clock))
+				.where(eq(client.id, ids[0] ?? ""));
+
+			const first = list.parse(
+				await (await call("/api/clients?limit=2")).json(),
+			);
+			expect(first.meta.total).toBe(4);
+			let cursor = first.meta.nextCursor;
+			let pages = 1;
+			while (cursor) {
+				const page = list.parse(
+					await (await call(`/api/clients?limit=2&cursor=${cursor}`)).json(),
+				);
+				expect(page.meta.total).toBe(4);
+				cursor = page.meta.nextCursor;
+				pages += 1;
+			}
+			expect(pages).toBe(2);
 		});
 	});
 

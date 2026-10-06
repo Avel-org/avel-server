@@ -99,6 +99,14 @@ export function toPage<T extends Position>(rows: T[], limit: number) {
 	};
 }
 
+/**
+ * A case-insensitive substring pattern for ILIKE, with the user's text taken
+ * literally: \ % and _ are escaped, so "100%" matches only "100%".
+ */
+export function containsPattern(q: string): string {
+	return `%${q.replace(/[\\%_]/g, "\\$&")}%`;
+}
+
 export function notFound(entity: string, id: string): ApiError {
 	return new ApiError("NOT_FOUND", `No ${entity} with id ${id}`);
 }

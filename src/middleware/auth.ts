@@ -5,6 +5,14 @@ import type { RequestIdVariables } from "./request-id";
 
 export type AuthVariables = RequestIdVariables & { operator: Operator };
 
+/** Marks every /api response while dev preview is on, errors included. */
+export function previewHeader(): MiddlewareHandler {
+	return async (ctx, next) => {
+		await next();
+		ctx.header("x-avel-preview", "1");
+	};
+}
+
 /** Paths under /api/* that answer without a session. Everything else requires one. */
 export function isPublicPath(path: string): boolean {
 	return path === "/api/health" || path.startsWith("/api/auth/");
@@ -17,14 +25,30 @@ export function isPublicPath(path: string): boolean {
  */
 export function requireOperator(
 	auth: Auth,
+	options: { preview: boolean },
 ): MiddlewareHandler<{ Variables: AuthVariables }> {
 	return async (ctx, next) => {
 		if (isPublicPath(ctx.req.path)) return next();
 		const result = await auth.operatorFor(ctx.req.raw.headers);
+		// Dev preview (src/auth/preview.ts): a read with no session passes,
+		// as nobody. No operator is set, so a handler that writes refuses on
+		// its own (operatorOf). A real session never takes this path: it
+		// still gets the allowlist check below.
+		if (
+			options.preview &&
+			"refused" in result &&
+			result.refused === "no_session" &&
+			(ctx.req.method === "GET" || ctx.req.method === "HEAD")
+		) {
+			return next();
+		}
 		if ("refused" in result) {
 			throw result.refused === "no_session"
 				? new ApiError("UNAUTHENTICATED", "Sign in to continue")
-				: new ApiError("FORBIDDEN", "This GitHub account is not an operator");
+				: new ApiError(
+						"NOT_OPERATOR",
+						"This GitHub account is not an operator",
+					);
 		}
 		ctx.set("operator", result.operator);
 		await next();
