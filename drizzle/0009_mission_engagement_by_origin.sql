@@ -1,0 +1,2 @@
+ALTER TABLE "mission" ALTER COLUMN "engagement_id" DROP NOT NULL;--> statement-breakpoint
+ALTER TABLE "mission" ADD CONSTRAINT "mission_engagement_matches_origin" CHECK (("mission"."origin" = 'client' and "mission"."engagement_id" is not null) or ("mission"."origin" = 'internal' and "mission"."engagement_id" is null));

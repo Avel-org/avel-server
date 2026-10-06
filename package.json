@@ -1,0 +1,45 @@
+{
+	"name": "avel-server",
+	"private": true,
+	"type": "module",
+	"packageManager": "pnpm@10.34.6",
+	"engines": {
+		"node": ">=22"
+	},
+	"exports": {
+		"./contract": "./src/contract/index.ts"
+	},
+	"scripts": {
+		"dev": "tsx watch src/index.ts",
+		"start": "tsx src/index.ts",
+		"typecheck": "tsc --noEmit",
+		"lint": "biome check .",
+		"format": "biome format --write .",
+		"test": "vitest run",
+		"docs:check": "bash scripts/check-docs.sh docs",
+		"determinism:check": "bash scripts/check-determinism.sh",
+		"check": "pnpm docs:check && pnpm determinism:check && pnpm typecheck && pnpm lint && pnpm test",
+		"db:generate": "drizzle-kit generate",
+		"db:migrate": "drizzle-kit migrate"
+	},
+	"dependencies": {
+		"@hono/node-server": "^1.19.0",
+		"@ts-rest/core": "^3.52.1",
+		"@ts-rest/serverless": "^3.52.1",
+		"better-auth": "^1.7.7",
+		"drizzle-orm": "^0.45.2",
+		"drizzle-zod": "^0.8.3",
+		"hono": "^4.13.0",
+		"pino": "^10.4.0",
+		"postgres": "^3.4.9",
+		"zod": "^3.25.76"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.4.5",
+		"@types/node": "^24.13.3",
+		"drizzle-kit": "^0.31.10",
+		"tsx": "^4.23.12",
+		"typescript": "^6.0.2",
+		"vitest": "^4.1.11"
+	}
+}

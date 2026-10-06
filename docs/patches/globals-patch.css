@@ -1,0 +1,391 @@
+/* ============================================================================
+   AVEL — globals.css patch
+   ----------------------------------------------------------------------------
+   Additive. No existing token is renamed or removed, so the landing is
+   untouched. Apply in this order:
+
+     1. Replace the html/body scrollbar block (section 6 below)
+     2. Append sections 1–5 to the existing @theme
+     3. Append the .light overrides
+     4. Add the utilities at the bottom
+
+   Every ratio quoted was computed against the brand tokens, not estimated.
+   ========================================================================== */
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   APPEND TO @theme  — these are theme-independent, so they live once
+   ══════════════════════════════════════════════════════════════════════════ */
+@theme {
+
+  /* ── 1 · RADIUS ─────────────────────────────────────────────────────────
+     Was: one hardcoded 2px on the focus ring, nothing else.
+     Radius encodes hierarchy — the larger the container, the larger the
+     corner. Nothing off the scale, and never mixed radii on one element. */
+  --radius-xs:   4px;    /* chips, tags, inputs, focus ring                */
+  --radius-sm:   6px;    /* buttons, list rows, small controls             */
+  --radius-md:  10px;    /* cards, panels, tables                          */
+  --radius-lg:  14px;    /* windows, popovers, sheets                      */
+  --radius-xl:  18px;    /* modals, the app frame                          */
+  --radius-full: 999px;  /* pills, status badges, avatars                  */
+
+
+  /* ── 2 · ELEVATION ──────────────────────────────────────────────────────
+     Was: "surface-elevated + shadow at the component level", which means
+     every component invents its own shadow. Four named steps instead.
+
+     Elevation is lightness FIRST, shadow second. On the dark theme a shadow
+     against a dark surface is nearly invisible, so the surface step is doing
+     most of the work and the shadow only confirms it. */
+  --shadow-e0: none;
+  --shadow-e1: 0 1px 2px rgb(0 0 0 / 0.40);                              /* resting card   */
+  --shadow-e2: 0 4px 14px rgb(0 0 0 / 0.45);                             /* popover, drag  */
+  --shadow-e3: 0 16px 44px rgb(0 0 0 / 0.55);                            /* modal, sheet   */
+
+  /* Elevation also has a border component. A raised surface gets a stronger
+     border, not just a shadow — this is what makes flat solid surfaces read
+     as layered without gradients or blur. */
+  --elevation-border-rest:    var(--color-border);
+  --elevation-border-raised:  var(--color-border-strong);
+
+
+  /* ── 3 · INTERACTION STATES ─────────────────────────────────────────────
+     Was: nothing, so every interactive element picks its own overlay.
+
+     These are translucent overlays rather than fixed colours, so one token
+     works on every surface in both themes. Never hardcode a hover colour. */
+  --color-state-hover:    rgb(255 255 255 / 0.035);
+  --color-state-active:   rgb(255 255 255 / 0.060);
+  --color-state-selected: rgb(0 146 202 / 0.120);   /* accent-soft, reused  */
+  --color-state-drag:     rgb(0 146 202 / 0.060);
+
+  /* Disabled is opacity, not a colour — a disabled danger button must stay
+     recognisably danger. */
+  --opacity-disabled: 0.35;
+
+
+  /* ── 4 · Z-INDEX ────────────────────────────────────────────────────────
+     Was: nothing. In a windowing environment that becomes a stack of 9999s
+     within a month. Windows get a 100–199 band because they stack against
+     each other; everything else is a single fixed layer. */
+  --z-base:      0;
+  --z-raised:   10;   /* sticky table headers, in-flow raised elements     */
+  --z-window:  100;   /* 100–199 — the desktop window stack                */
+  --z-dock:    200;   /* dock, app chrome, sidebar                         */
+  --z-popover: 300;   /* dropdowns, tooltips, command palette              */
+  --z-modal:   400;   /* modals and their scrim                            */
+  --z-toast:   500;   /* transient notifications — above everything        */
+
+
+  /* ── 5 · MOTION ─────────────────────────────────────────────────────────
+     Referenced by the logo/motion brief. Nothing bouncy: overshoot reads as
+     playful, and this brand is deliberate. */
+  --duration-micro:  120ms;   /* hover, focus, small toggles               */
+  --duration-state:  200ms;   /* panel state change, stamp                 */
+  --duration-enter:  320ms;   /* entrances, draw-on                        */
+  --ease-avel: cubic-bezier(0.2, 0.7, 0.3, 1);
+
+
+  /* ── 6 · APP SURFACES ───────────────────────────────────────────────────
+     A ROLE remap, not new values. Every hex below is already in the system.
+
+     The app was using --color-surface (#393e46) as the card colour. That is
+     the third step of the scale and it is why danger-on-a-card measured
+     2.86:1 — a failure. Moving the card down one step fixes it for free:
+
+       danger #ef4444 on #393e46 ......... 2.86:1  FAIL
+       danger #ef4444 on #2a2e36 ......... 3.62:1  ok
+
+     and it also gives quieter layering (1.24x steps rather than 1.57x).
+     The landing keeps using --color-surface directly and is unaffected.
+
+     Measured in L* (perceptually uniform) the steps are 8.15, 7.18, 7.74 —
+     even and comfortably visible without being loud. */
+  --color-app-bg:       #1a1d23;   /* = bg               · the desktop      */
+  --color-app-recessed: #1a1d23;   /* = bg               · wells, inputs    */
+  --color-app-panel:    #2a2e36;   /* = surface-muted    · cards, panels    */
+  --color-app-raised:   #393e46;   /* = surface          · hover, active row*/
+  --color-app-float:    #4a5058;   /* = surface-elevated · popover, modal   */
+
+
+  /* ── 7 · SKELETON + DENSITY ─────────────────────────────────────────────
+     Verification can run for an hour. Skeletons need their own surface,
+     distinct from panel, or the pulse does not read. */
+  --color-skeleton: #333842;
+
+  --row-comfortable: 12px;   /* reading                                    */
+  --row-compact:      6px;   /* scanning a 40-row gate result              */
+
+
+  /* ── 8 · GATE STATES ────────────────────────────────────────────────────
+     Triples, not single hues. A single hue forces whoever builds the
+     component to invent a background, and invented backgrounds are how
+     contrast breaks.
+
+     pending and stale are NEUTRAL by design. The brand rule is one chromatic
+     colour, and a blue "pending" would collide with the cyan on exactly the
+     screen where that matters most. */
+  --color-gate-pass:         #22c55e;
+  --color-gate-pass-soft:    rgb(34 197 94 / 0.12);
+  --color-gate-pass-line:    rgb(34 197 94 / 0.35);
+
+  --color-gate-block:        #ef4444;
+  --color-gate-block-soft:   rgb(239 68 68 / 0.12);
+  --color-gate-block-line:   rgb(239 68 68 / 0.35);
+
+  --color-gate-warn:         #f59e0b;
+  --color-gate-warn-soft:    rgb(245 158 11 / 0.12);
+  --color-gate-warn-line:    rgb(245 158 11 / 0.35);
+
+  --color-gate-pending:      #a0a8b0;                 /* = text-muted      */
+  --color-gate-pending-soft: rgb(160 168 176 / 0.12);
+
+  --color-gate-stale:        #8b939e;                 /* 4.39:1 on panel   */
+  --color-gate-stale-soft:   rgb(139 147 158 / 0.12);
+
+
+  /* ── 9 · DIFF STATES ────────────────────────────────────────────────────
+     Blast radius describes what a delivery would DO, not whether it may
+     proceed. Aliased so the mapping is one line rather than a decision
+     repeated in every component — and so nobody reaches for --gate-block
+     to mean "overwrite", which would say an overwrite is a failure. */
+  --color-diff-create:    var(--color-gate-pass);
+  --color-diff-overwrite: var(--color-gate-warn);
+  --color-diff-unchanged: var(--color-text-muted);
+  --color-diff-preserve:  var(--color-text-subtle);
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   APPEND TO .light
+   ══════════════════════════════════════════════════════════════════════════ */
+.light {
+
+  /* ── FIX · semantic feedback was identical in both modes ────────────────
+     That comment in the original file was the defect. Measured on #f4f5f7:
+
+       success #22c55e ... 2.09:1   fails everything
+       warning #f59e0b ... 1.97:1   fails everything
+       danger  #ef4444 ... 3.45:1   AA-large only
+
+     Dark values are unchanged and already pass. Only light shifts — the same
+     way --color-accent-text already shifts to #0078ab for AA on light. That
+     pattern existed; it just was never extended to the feedback set. */
+  --color-success: #15803d;   /* 5.02:1 on white */
+  --color-warning: #a16207;   /* 4.92:1 on white */
+  --color-danger:  #b91c1c;   /* 6.47:1 on white */
+
+
+  /* ── FIX · light mode had no elevation, and it cannot have it upward ───
+     --color-surface and --color-surface-elevated were both #ffffff, so a
+     popover over a card had zero lightness separation.
+
+     Measured in L* (perceptually uniform — WCAG ratio is the wrong tool for
+     adjacent surfaces), the dark scale steps 8.15, 7.18, 7.74. Comfortable.
+
+     Light cannot match that going up, because the panel is already white.
+     There is no headroom. So the extra steps go DOWNWARD: drop the desktop
+     and add a recessed level, then accept that above the panel, elevation is
+     carried by border and shadow alone.
+
+       bg #eaedf0 -> recessed #f2f4f6   ΔL* 2.49
+       recessed   -> panel #ffffff      ΔL* 3.91
+       panel      -> raised             ΔL* 0.00  (border + shadow only)
+
+     This is a real constraint of light mode, not a shortcut. Worth stating
+     so nobody later "fixes" it by making cards grey. */
+  --color-surface-recessed: #f2f4f6;   /* wells, table stripes, inputs      */
+  --color-surface-elevated: #ffffff;   /* white, with --elevation-border-raised */
+
+
+  /* App surfaces — light. Desktop drops to create headroom for the panel. */
+  --color-app-bg:       #eaedf0;
+  --color-app-recessed: #f2f4f6;
+  --color-app-panel:    #ffffff;
+  --color-app-raised:   #ffffff;   /* + elevation-border-raised + shadow-e2 */
+  --color-app-float:    #ffffff;   /* + elevation-border-raised + shadow-e3 */
+
+  /* Elevation — light shadows are far softer; the border does more work. */
+  --shadow-e1: 0 1px 2px  rgb(26 29 35 / 0.07);
+  --shadow-e2: 0 4px 14px rgb(26 29 35 / 0.10);
+  --shadow-e3: 0 16px 44px rgb(26 29 35 / 0.14);
+
+  /* Interaction overlays invert */
+  --color-state-hover:    rgb(26 29 35 / 0.035);
+  --color-state-active:   rgb(26 29 35 / 0.060);
+  --color-state-selected: rgb(0 146 202 / 0.100);
+  --color-state-drag:     rgb(0 146 202 / 0.060);
+
+  --color-skeleton: #eeeeee;
+
+  /* Gate states — light */
+  --color-gate-pass:  #15803d;
+  --color-gate-block: #b91c1c;
+  --color-gate-warn:  #a16207;
+  --color-gate-pending: #393e46;
+  --color-gate-stale:   #6e7681;   /* 4.59:1 on white — passes as-is */
+
+  --color-gate-pass-soft:    rgb(21 128 61 / 0.10);
+  --color-gate-pass-line:    rgb(21 128 61 / 0.30);
+  --color-gate-block-soft:   rgb(185 28 28 / 0.10);
+  --color-gate-block-line:   rgb(185 28 28 / 0.30);
+  --color-gate-warn-soft:    rgb(161 98 7 / 0.10);
+  --color-gate-warn-line:    rgb(161 98 7 / 0.30);
+  --color-gate-pending-soft: rgb(57 62 70 / 0.08);
+  --color-gate-stale-soft:   rgb(110 118 129 / 0.10);
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   REPLACE the existing html/body scrollbar block with this
+   --------------------------------------------------------------------------
+   Was:  html, body { scrollbar-width: none !important; ... }
+
+   That is correct for the landing and wrong for the command center. A forty-
+   row gate result with no scroll affordance is a list that looks complete
+   when it is not — which is, precisely, the failure this product exists to
+   prevent. Scope the hide to the landing instead of the document.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+html,
+body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  overflow-x: hidden;
+}
+
+/* Landing only — opt in on the page wrapper, not on <html>. */
+.landing,
+.landing * {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.landing::-webkit-scrollbar,
+.landing *::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+  background: transparent !important;
+}
+
+/* Command center — a real, quiet scrollbar. Visible enough to signal there
+   is more, quiet enough not to compete with content. */
+.app-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
+}
+.app-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+.app-scroll::-webkit-scrollbar-track { background: transparent; }
+.app-scroll::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: var(--radius-full);
+  border: 3px solid var(--color-app-bg);   /* inset, so it reads as a rail */
+}
+.app-scroll::-webkit-scrollbar-thumb:hover { background: var(--color-text-subtle); }
+
+/* Still keep .no-scrollbar available for individual elements that need it. */
+.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.no-scrollbar::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   FOCUS — now on the radius scale rather than a hardcoded 2px
+   ══════════════════════════════════════════════════════════════════════════ */
+*:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   APP UTILITIES
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Anything a machine produced — hashes, paths, slugs, counts — must align in
+   a column so a changed value is visible without being read. */
+.app,
+.tabular { font-variant-numeric: tabular-nums; }
+
+/* Density, set on the container not the row. */
+.density-comfortable { --row-pad: var(--row-comfortable); }
+.density-compact     { --row-pad: var(--row-compact); }
+
+/* Elevation helpers — lightness AND border, never shadow alone. */
+@utility elev-1 {
+  background: var(--color-app-panel);
+  border: 1px solid var(--elevation-border-rest);
+  box-shadow: var(--shadow-e1);
+}
+@utility elev-2 {
+  background: var(--color-app-float);
+  border: 1px solid var(--elevation-border-raised);
+  box-shadow: var(--shadow-e2);
+}
+@utility elev-3 {
+  background: var(--color-app-float);
+  border: 1px solid var(--elevation-border-raised);
+  box-shadow: var(--shadow-e3);
+}
+
+/* Interaction — one definition, every surface, both themes. */
+/* A @utility name cannot carry a variant, so the states nest inside it. */
+@utility interactive {
+  transition: background var(--duration-micro) var(--ease-avel),
+              border-color var(--duration-micro) var(--ease-avel);
+  &:hover  { background: var(--color-state-hover); }
+  &:active { background: var(--color-state-active); }
+}
+
+/* Skeleton */
+@keyframes avelPulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.4 } }
+@utility skeleton {
+  background: var(--color-skeleton);
+  border-radius: var(--radius-full);
+  animation: avelPulse 1.6s var(--ease-avel) infinite;
+}
+
+/* The one signature loop — the period in the wordmark. Use once per page,
+   never adjacent to another animated element. See LOGO-BRIEF.md. */
+@keyframes avelPeriod { 0%, 100% { opacity: 1 } 50% { opacity: 0.85 } }
+@utility animate-period { animation: avelPeriod 3s var(--ease-avel) infinite; }
+
+/* The product moment — a gate passing. Lands and stops. */
+@keyframes avelStamp {
+  from { opacity: 0; transform: scale(1.15) }
+  to   { opacity: 1; transform: scale(1) }
+}
+@utility animate-stamp {
+  animation: avelStamp var(--duration-state) var(--ease-avel) both;
+}
+
+/* Refusal — one displacement, no shake, no flash. */
+@keyframes avelRefuse {
+  0%, 100% { transform: translateX(0) }
+  50%      { transform: translateX(-2px) }
+}
+@utility animate-refuse { animation: avelRefuse 120ms var(--ease-avel) 1; }
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   OUTSTANDING — one token still fails and needs a decision
+   --------------------------------------------------------------------------
+   --color-text-subtle #6e7681 measures 2.96:1 on the app panel (#2a2e36).
+
+   It is used for eyebrows, source labels, and timestamps — things you scan
+   but never decide on — so 3:1 is arguably the right bar. It misses even
+   that. Two options:
+
+     Measured candidates on #2a2e36:
+
+       #6e7681  2.96   current, fails
+       #828b96  3.94   clears 3:1 only
+       #8b939e  4.39   near AA
+       #949ca6  4.90   clears AA
+
+   Recommended: #8b939e, scoped to .app so the landing is untouched. It clears
+   the 3:1 bar for non-essential text with margin, and stays visibly subordinate
+   to --color-text-muted (5.65:1) rather than collapsing into it.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.app { --color-text-subtle: #8b939e; }

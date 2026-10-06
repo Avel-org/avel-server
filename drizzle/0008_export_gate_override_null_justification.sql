@@ -1,0 +1,3 @@
+ALTER TABLE "export" DROP CONSTRAINT "export_gate_override_complete";--> statement-breakpoint
+ALTER TABLE "export" ADD CONSTRAINT "export_gate_override_complete" CHECK (("export"."gate_override_gate" is null and "export"."gate_override_justification" is null and "export"."gate_override_by" is null and "export"."gate_override_at" is null)
+				or ("export"."gate_override_gate" is not null and "export"."gate_override_justification" is not null and btrim("export"."gate_override_justification") <> '' and "export"."gate_override_by" is not null and "export"."gate_override_at" is not null));
