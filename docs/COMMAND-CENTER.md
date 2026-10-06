@@ -127,6 +127,8 @@ Web, desktop, and mobile — one backend, with desktop and mobile as Tauri build
 
 **Decision:** the server enforces what each surface may do. A rule that only hides a button is not a rule.
 
+Agents are a second kind of caller, and the server enforces what they may do the same way. An agent calls the same contract with its dispatch's token, limited by its role family. The runner is a third caller, the `system` actor. See `DECISIONS-V2.md`, *Decided 2026-10-06: agents call the API*.
+
 ### 14. Proposals
 
 **Agents may propose anything. They may act only inside a dispatch and their mount.** Every proactive output is a proposal in the operator's queue, approved or dismissed by the operator — the same pattern as Canon's brief.

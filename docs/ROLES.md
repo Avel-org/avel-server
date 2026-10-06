@@ -247,7 +247,7 @@ Three verbs:
 | Verify | Its own dispatch | Its own CompletionReport | Nothing |
 | Review | Its own dispatch | Its own CompletionReport, and an `open` Finding on its own mission | Nothing |
 | Operate | The delivered mission: exports, findings, activity | Its own CompletionReport | A follow-up |
-| Firm | Across missions: missions, engagements, exports, activity | `intake` only: Intake drafts | `intake`: questions · `strategy`: chat suggestions and next missions · `client-ops`: a client message |
+| Firm | Across missions: clients, missions, engagements, exports, activity. Never connections, repo policies or credentials | `intake` only: Intake drafts | `intake`: questions · `strategy`: chat suggestions and next missions · `client-ops`: a client message |
 
 `code` roles have no agent and no token. `foundations` is the operator.
 

@@ -229,9 +229,9 @@ export const exportContract = c.router({
   preview: {
     method: 'POST',
     path: '/exports/preview',
+    headers: z.object({ 'idempotency-key': z.string().uuid() }),   // header, decided 2026-10-06
     body: z.object({
       missionId: z.string().uuid(),
-      idempotencyKey: z.string().uuid(),
       target: exportTargetKind,
       repoUrl: z.string().url().optional(),
       ref: z.string().optional(),
@@ -248,9 +248,9 @@ export const exportContract = c.router({
   create: {
     method: 'POST',
     path: '/exports',
+    headers: z.object({ 'idempotency-key': z.string().uuid() }),
     body: z.object({
       missionId: z.string().uuid(),
-      idempotencyKey: z.string().uuid(),
       previewExportId: z.string().uuid().optional(),   // required for github_push; refused with PREVIEW_REQUIRED
       target: exportTargetKind,
       repoUrl: z.string().url().optional(),

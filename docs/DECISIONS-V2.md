@@ -585,7 +585,7 @@ The operator answered the module 0 question list on 2026-10-05. Shapes are in `D
 
 ### Stack
 
-- **The standing rule "no further stack or schema change before one mission runs" survives.** The changes below are recorded as decided before the first mission. After them the stack is frozen. This closes the open question about whether the repo split retired the rule. *One exception, decided by the operator on 2026-10-06:* Dispatch, the firm roster, and their three foreign keys are built before the first mission (*Decided 2026-10-06: agents call the API*). Nothing else is unfrozen.
+- **The standing rule "no further stack or schema change before one mission runs" survives.** The changes below are recorded as decided before the first mission. After them the stack is frozen. This closes the open question about whether the repo split retired the rule. *Two exceptions, decided by the operator on 2026-10-06:* Dispatch, the firm roster, and their three foreign keys are built before the first mission (*Decided 2026-10-06: agents call the API*), and so are `Mission.template_ref` and `template_version` (*Decided 2026-10-06: build sync*). Nothing else is unfrozen.
 - **Auth.js → Better Auth** (above). <!--allow-stale-->
 - **R2 is deferred.** The history in *Frozen bytes → R2 from the start* stands as written; a dated note there points here. When R2 returns, and where frozen bytes live until then, is open.
 - **Pino now, Sentry later.**
@@ -676,6 +676,39 @@ Running the first mission's dispatches by hand would measure a process the platf
 
 - **Proposal kinds for agents,** such as a follow-up or a scope request. Each is added with the code that writes it, like the chat kind in `STATE.md`.
 
+## Decided 2026-10-06: build sync
+
+The operator decided nine questions that the backend and frontend sessions raised while agreeing a build order. Shapes are in `DATA-CONTRACTS-V2.md`; the read scope is in `ROLES.md`.
+
+### Closing the gaps in Dispatch
+
+- **The runner files the report for a halted or failed run.** The agent's token stops working when the run stops, so the agent cannot. The agent still files it for `complete` and `blocked`.
+- **The token works only while the dispatch is `running`.** One rule covers every other status, with no list of exceptions to keep correct.
+- **The runner is the `system` actor, with its own credential.** It writes token counts and halts, which no agent may write. Giving it the operator's session would make every halt look like an operator action.
+- **`token_sha256` is unique,** because it is looked up on every request.
+- **At most one live firm entry per agent template.** Two Canons would split one agent's chat history and budget across two records.
+
+### Canon reads clients, read-only
+
+Canon drafts intake and suggests next missions, and both need to know who the client is. It never reads connections, repo policies or credentials. Those control what reaches a client's repository, and a firm agent has no reason to see them.
+
+### Missions record their template
+
+`Mission.template_ref` and `template_version` go in before the first mission. They are the second exception to the freeze. The evaluation loop in `TEMPLATES.md` compares rebuilds of the same template. Without these fields the comparison cannot be queried, and the first mission could not be part of it later.
+
+### Idempotency for creates an agent can reach
+
+Agents retry on timeouts. A duplicate CompletionReport or Proposal corrupts attribution.
+- **A replay returns the original record.** A `409` would leave a timed-out agent without the id of what it created. A key reused with a different body is still `409 IDEMPOTENCY_REPLAY`.
+- **Keys are scoped per dispatch,** so one dispatch's replay can never return another's record.
+- **The key goes in a header.** Clients and engagements are left out for now, and a header can be added to them later without a breaking change. Export's spec moves its key to the header too.
+
+### Order
+
+- **The finding routes move to module 9.** Judges write `open` Findings during the gate, and confirming them is part of gating. Leaving the routes in module 12 would have put them after the first mission.
+- **Proposals (module 14) come after the first mission.** That mission runs with each next module dispatched by hand. The Canon chat shows as not built until then.
+- **An activity read route is added now,** read-only, as the missions read route was. The Activity page exists, and the dev seed already writes rows for it.
+
 ---
 
 ## Open questions
@@ -691,7 +724,7 @@ Running the first mission's dispatches by hand would measure a process the platf
 
 **Resolved 2026-10-05:** no mobile doc is needed now; offline capture is deferred · the stack rule survives, with the current changes recorded as decided before the first mission. See *Decided 2026-10-05: module 0*.
 
-**Resolved 2026-10-06:** Dispatch, the firm roster, and their three foreign keys are built before the first mission, the one exception to the schema freeze. See *Decided 2026-10-06: agents call the API*.
+**Resolved 2026-10-06:** Dispatch, the firm roster, and their three foreign keys are built before the first mission, the first exception to the schema freeze. See *Decided 2026-10-06: agents call the API*. `Mission.template_ref` and `template_version` are the second. See *Decided 2026-10-06: build sync*.
 
 **Resolved by the repo split:** TanStack Start for `avel-web` · the contract lives in `avel-server/src/contract/`, consumed as a git dependency.
 

@@ -27,23 +27,24 @@ Under ts-rest the contract is a first-class artifact: a shared object of routes,
 ```
 src/contract/
   index.ts            the assembled contract (this is THE artifact)
-  mission.ts          route group per domain
-  roster.ts
-  export.ts
-  agent-template.ts
-  skill.ts
-  playbook.ts
-  preset.ts           RosterPreset — list · get · create · update · apply
-  skill-source.ts
-  repo-policy.ts
-  connection.ts
-  activity.ts
   client.ts           module 0
   engagement.ts       module 0
+  mission.ts          module 13 (read, built); writes with modules 1 and 3
+  activity.ts         module 13 (read only)
   intake.ts           module 1
+  playbook.ts         module 3
+  agent-template.ts   module 4; identity versions with module 5
+  skill.ts            module 4
+  skill-source.ts     module 4
+  roster.ts           module 4
+  preset.ts           module 4 — RosterPreset: list · get · create · update · apply
+  dispatch.ts         module 6
   completion-report.ts  module 8
-  finding.ts          module 12
-  proposal.ts         module 14
+  finding.ts          module 9 (moved from 12 on 2026-10-06)
+  export.ts           modules 10 and 11
+  repo-policy.ts      module 11
+  connection.ts       module 11
+  proposal.ts         module 14, after the first mission
   shared/
     envelope.ts       success/error response envelope
     errors.ts         the error code union
@@ -52,7 +53,7 @@ src/contract/
     coherence.ts      computeCoherence — pure, imported by both sides
 ```
 
-**A route group is added with the module that uses it.** No route group exists without a module behind it. The six groups added 2026-10-05 (`client` through `proposal` above) each land with the module named beside it, in `COMMAND-CENTER.md`'s numbering.
+**A route group is added with the module that uses it.** No route group exists without a module behind it. Every group above lands with the module named beside it, in `COMMAND-CENTER.md`'s numbering (labeled 2026-10-06). The two module 13 groups, `mission` reads and `activity`, are read-only routes for surfaces that exist before the modules that write their rows.
 
 **Built so far** (the code in `src/contract/` is authoritative for exact shapes):
 
@@ -81,9 +82,11 @@ export const exportContract = c.router({
   create: {
     method: 'POST',
     path: '/exports',
+    headers: z.object({
+      'idempotency-key': z.string().uuid(),
+    }),
     body: z.object({
       missionId: z.string().uuid(),
-      idempotencyKey: z.string().uuid(),
       target: exportTargetKind,           // zip | github_pr | github_push
       repoUrl: z.string().url().optional(),
     }),
@@ -96,6 +99,18 @@ export const exportContract = c.router({
   },
 })
 ```
+
+## Idempotency
+
+`[specced]` 2026-10-06. Agents retry on timeouts, and a duplicate CompletionReport or Proposal corrupts attribution.
+
+- **The key travels in an `Idempotency-Key` header,** a uuid, never in the body. Export's routes carry their key the same way (`BLAST-RADIUS.md`). Whether an Export replay also returns the original is `[unspecified]`; its spec still answers `409`.
+- **Every create an agent can reach takes one:** Proposal, Finding and the Intake draft.
+- **Same key and same body** returns the original record with `200` and the response header `Idempotency-Replayed: true`. Nothing is written twice.
+- **Same key with a different body** is `409 IDEMPOTENCY_REPLAY`. The server stores a hash of the request body beside the key so it can tell the two apart.
+- **Keys are unique per dispatch:** `(dispatch_id, idempotency_key)`. Another dispatch reusing a key cannot reach this dispatch's record, which keeps the 404 rule under *Dispatch*.
+- **A CompletionReport needs no key.** Its `dispatch_id` is unique, so a retry finds the report that already closed the dispatch.
+- **Operator creates are out for now:** clients and engagements take no key. Adding the optional header later breaks nothing. Export keeps its global `export.idempotency_key`.
 
 ## The envelope
 
@@ -397,6 +412,10 @@ timestamps
 
 **A finding is never deleted.** Findings are evidence, so the table has no `deleted_at`. Removing one is `status = 'dismissed'` with a written `dismissed_reason`, enforced by a CHECK constraint. Decided 2026-10-05.
 
+**The finding routes land with module 9,** not 12 (decided 2026-10-06), because confirming a judge's finding is part of gating.
+
+**Open:** Finding has no reference to the dispatch that wrote it. The per-dispatch idempotency key (*Idempotency*) needs one, so does attributing a judge's finding to its run. The likely fix is `reported_by_dispatch_id?`, which would be a fourth new foreign key, outside the freeze exception. It is listed in `STATE.md` for the operator to decide.
+
 ### KnowledgeEntry
 
 ```
@@ -427,8 +446,12 @@ cut_source             'derived' | 'overridden'
 cut_rationale          text — required when overridden, renders into delivery
 repo_url               a DEFAULT, not the binding destination
 spend_ceiling_usd?     numeric(12,2), nullable; the runner halts the mission when attributed spend reaches it
+template_ref?          [specced] 2026-10-06, module 3 — the template slug it was built from, e.g. 'template-booking'; null when none
+template_version?      [specced] 2026-10-06, module 3 — which version of that template; required exactly when template_ref is set (CHECK); format [unspecified]
 deleted_at · timestamps
 ```
+
+**`template_ref` makes the evaluation loop a query.** `TEMPLATES.md` improves a role by rebuilding the same template and comparing, and `ROSTER-V2.md` compares outcome measures only within the same template. Neither can be queried unless a mission records its template. Built before the first mission so that mission is comparable; the second exception to the schema freeze (`DECISIONS-V2.md`).
 
 `spend_ceiling_usd` is modeled now so cost governance is a gate check rather than a migration later.
 
@@ -482,7 +505,7 @@ deleted_at · timestamps         deleted_at added 2026-10-05, as built
 
 Whether an agent is on a mission = whether its RosterEntry exists and is active. Skills are a relation.
 
-**The firm roster** `[specced]`. Canon, Trace and Uno work for the agency between missions rather than inside one, so their entries have `scope = 'firm'` and no mission. A CHECK requires `mission_id` exactly when `scope = 'mission'`. A firm entry has no `territory`, `writable_paths`, or `absorbed_boundaries`: firm agents write no files. Without a firm entry, an agent working outside a mission could not be named by `ActivityLog.actor_roster_entry_id`, and its actions could not be attributed.
+**The firm roster** `[specced]`. Canon, Trace and Uno work for the agency between missions rather than inside one, so their entries have `scope = 'firm'` and no mission. A CHECK requires `mission_id` exactly when `scope = 'mission'`. A firm entry has no `territory`, `writable_paths`, or `absorbed_boundaries`: firm agents write no files. A partial unique index allows at most one live firm entry per `agent_template_id` (decided 2026-10-06), so there is one Canon. Without a firm entry, an agent working outside a mission could not be named by `ActivityLog.actor_roster_entry_id`, and its actions could not be attributed.
 
 ### Dispatch
 
@@ -501,7 +524,7 @@ tokens_used            integer NOT NULL — the runner's running count, starts a
 agent_version_sha256   NOT NULL — frozen when the dispatch starts
 skills_sha256          NOT NULL — frozen when the dispatch starts
 model?                 set when it starts
-token_sha256?          SHA-256 of the dispatch's access token; never the token itself
+token_sha256?          SHA-256 of the dispatch's access token; never the token itself. Unique: it is the lookup key on every request
 idempotency_key        unique — a retried start cannot run twice
 started_at? · closed_at?
 timestamps
@@ -511,7 +534,14 @@ timestamps
 
 **The runner owns `tokens_used`.** It adds to it as the agent works, records a soft-ceiling crossing, and sets `halted` with its reason at the hard ceiling. No agent-reachable route writes it.
 
-**A dispatch closes with exactly one CompletionReport,** through `CompletionReport.dispatch_id`. `closed_at` is set in the same transaction, and from then on the access token resolves to nothing.
+**A dispatch closes with exactly one CompletionReport,** through `CompletionReport.dispatch_id`. `closed_at` is set in the same transaction. Decided 2026-10-06:
+
+| Ends as | Who files the report |
+|---|---|
+| `complete`, `blocked` | The agent, with its token, while the dispatch is `running` |
+| `halted`, `failed` | The runner, as the `system` actor, because the agent's token no longer works |
+
+**The token works only while the dispatch is `running`.** `queued`, `complete`, `blocked`, `failed` and `halted` all answer `401 DISPATCH_CLOSED`.
 
 **A firm session is a dispatch.** A Canon chat session is a dispatch of Canon's firm RosterEntry, with no mission and no brief, under its own estimate and ceilings. Chat therefore has a budget, an audit trail, and a token that dies when the session ends, like every other agent.
 
@@ -519,18 +549,18 @@ timestamps
 
 ```
 token → token_sha256 → Dispatch
-  closed, halted, or not found      → 401 DISPATCH_CLOSED
+  not running, or not found         → 401 DISPATCH_CLOSED
   RosterEntry → AgentTemplate.roles → allowed actions for this route's module and verb
   verb not allowed                  → 403 AGENT_NOT_PERMITTED
   data outside the dispatch's mission → 404 NOT_FOUND
 ```
 
-- **Two callers, one middleware.** A request resolves to `{ kind: 'operator', operator }` or `{ kind: 'agent', dispatch, rosterEntry, roles }`. Every route declares the resource, the verb (`read`, `propose`, `act`), and what "its own" means for it, e.g. `{ resource: 'completion_report', verb: 'act', own: 'dispatch' }`. A route with no declaration refuses every agent.
+- **Three callers, one middleware.** A request resolves to `{ kind: 'operator', operator }`, `{ kind: 'agent', dispatch, rosterEntry, roles }`, or `{ kind: 'system' }` for the runner. The runner has its own credential, held by the runner process and never in a room. It writes only what the runner owns: `tokens_used`, status and halt changes, and the report for a halted or failed dispatch. It logs as `actor_kind = 'system'` (decided 2026-10-06). Every route declares the resource, the verb (`read`, `propose`, `act`), and what "its own" means for it, e.g. `{ resource: 'completion_report', verb: 'act', own: 'dispatch' }`. A route with no declaration refuses every agent.
 - **Approval, dispatch, delivery, gate overrides and token issue require an operator in code,** not through the per-family table. An error in that table cannot grant them. The full list is in `ROLES.md`.
 - **What each agent may do comes from its families,** per `ROLES.md`, *What each family may do through the API*. Until that table is built, it is empty and every route refuses an agent.
 - **"Its own" is derived from the token, never supplied by the agent.** The server sets `CompletionReport.dispatch_id`, `Finding.caught_by` and `Finding.mission_id`, and `Intake.drafted_by_dispatch_id` from the dispatch. A body that names a different dispatch or mission is refused.
 - **Agent writes log as `actor_kind = 'agent'`** with `actor_roster_entry_id` set from the dispatch, under the existing actor CHECKs.
-- **Data outside the mission answers 404, not 403,** so an agent cannot learn which other missions exist. A firm dispatch reads across missions, and is held to `read` and `propose`.
+- **Data outside the mission answers 404, not 403,** so an agent cannot learn which other missions exist. A firm dispatch reads across missions, and is held to `read` and `propose`. It may read clients, engagements, missions, exports and activity. It never reads connections, repo policies or any credential (decided 2026-10-06; `ROLES.md`).
 - `DISPATCH_CLOSED` and `AGENT_NOT_PERMITTED` join the error union when module 6 builds this.
 
 Where the token is held is a sandbox boundary: see `SANDBOX.md`.
@@ -859,6 +889,11 @@ As built, from `drizzle/` (2026-10-05). Each table comes after every table its f
 
 `Mission` has no foreign key to `Playbook`. They join on `Playbook.mission_type`.
 
-**Specced 2026-10-06, not yet migrated** (module 6): `roster_entry.scope` with `mission_id` made nullable under its CHECK, then `dispatch`, then `completion_report.dispatch_id`, `proposal.proposed_by_dispatch_id` and `intake.drafted_by_dispatch_id`. The new foreign keys on existing tables are added nullable, backfilled, then constrained, because a NOT NULL column added in one step fails on a table that already has rows.
+**Specced 2026-10-06, not yet migrated:**
+- **Module 3:** `mission.template_ref` and `mission.template_version`, nullable, under their CHECK.
+- **Module 6:** `roster_entry.scope` with `mission_id` made nullable under its CHECK, plus the partial unique index on live firm entries per template. Then `dispatch`, with `token_sha256` unique. Then `completion_report.dispatch_id`, `proposal.proposed_by_dispatch_id` and `intake.drafted_by_dispatch_id`.
+- **With each agent-reachable create:** its `idempotency_key` and request hash, unique per dispatch (*Idempotency*).
+
+The new foreign keys on existing tables are added nullable, backfilled, then constrained, because a NOT NULL column added in one step fails on a table that already has rows.
 
 Forward-only. One migration per change. Never edit an applied one.

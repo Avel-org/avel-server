@@ -39,7 +39,12 @@ Twelve links in three groups, per ruling 3 of `avel-web/design/AVEL-DESIGN.md` (
 | | Playbooks `/playbooks` | |
 
 - **Agent templates** is read-only. Identity files are generated from roles, so the page shows each generated version and its hash.
-- Proposals, Findings, Roles and Templates are not in the sidebar. Where they surface instead is open; see *Open* below.
+- Proposals, Findings, Roles and Templates are not in the sidebar. Decided 2026-10-06, except Templates:
+  - **Proposals:** the top-bar inbox, and proposal cards in the Canon chat. They arrive with module 14, after the first mission; until then the Canon chat renders not-built.
+  - **Roles:** the per-family table of what agents may do (`ROLES.md`) is shown read-only on Agent templates, `/catalog/agents`.
+  - **Findings:** in mission detail, where the operator confirms or dismisses the `open` Findings that judges write. The finding routes land with module 9.
+  - **Templates:** open; see *Open* below.
+- No Runs page until two missions run at once.
 
 **Every link exists in the route tree, and every route in the tree is reachable from somewhere.** A sidebar link to a missing page, or a page nothing links to, is a defect the first build's navigation tests were written to catch; keep them.
 
@@ -291,4 +296,4 @@ Then:
 | TanStack Start vs. Vite + TanStack Router | No — the route tree is identical either way |
 | Mobile approve: full pre-flight read-only, or a condensed summary? | Before `/exports/:exportId` |
 | `MOBILE-PWA.md` does not exist | **Yes — blocks all 📱 offline work** |
-| Where Proposals (module 14), Findings, Roles and Templates surface now that they are out of the sidebar | Before the first screen for any of them |
+| Where Templates surface. Proposals, Findings and Roles were placed on 2026-10-06 (*The sidebar*). Suggested: its own Catalog page once template-booking exists | Before the first Templates screen |
