@@ -26,6 +26,7 @@ import {
 	UNAVAILABLE_REQUEST_ID,
 } from "./middleware/errors";
 import { requestId } from "./middleware/request-id";
+import { activityRoutes } from "./routes/activity";
 import { clientRoutes } from "./routes/clients";
 import { engagementRoutes } from "./routes/engagements";
 import { health } from "./routes/health";
@@ -61,6 +62,7 @@ export function createApp(deps: AppDeps) {
 		clients: clientRoutes(routeDeps),
 		engagements: engagementRoutes(routeDeps),
 		missions: missionRoutes(routeDeps),
+		activity: activityRoutes(routeDeps),
 	});
 
 	const app = new Hono<{ Variables: AuthVariables }>();
