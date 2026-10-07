@@ -18,21 +18,24 @@ import {
 	type SkillListQuery,
 	skillContract,
 } from "../contract";
+import { logActivity } from "../db/activity";
 import { skill, skillSource } from "../db/schema";
-import { live } from "../db/schema/columns";
-import type { Executor } from "../db/tx";
+import { live, stamp, touch } from "../db/schema/columns";
+import { type Executor, type Tx, withTx } from "../db/tx";
+import { skillContentSha256 } from "../lib/skill-hash";
 import { ApiError } from "../middleware/errors";
 import {
 	after,
 	containsPattern,
 	notFound,
+	operatorOf,
 	type RequestContext,
 	type RouteDeps,
 	toPage,
 } from "./shared";
 
 /** Everything a list item carries. The text columns are left out of list reads. */
-const listColumns = {
+export const skillListColumns = {
 	id: skill.id,
 	slug: skill.slug,
 	name: skill.name,
@@ -55,7 +58,7 @@ const listColumns = {
 };
 
 const fullColumns = {
-	...listColumns,
+	...skillListColumns,
 	contentMd: skill.contentMd,
 	avelEnhancementMd: skill.avelEnhancementMd,
 };
@@ -109,7 +112,7 @@ function variant(row: ListRow) {
 	};
 }
 
-function toListItem(row: ListRow): SkillListItem {
+export function toSkillListItem(row: ListRow): SkillListItem {
 	return {
 		id: row.id,
 		slug: row.slug,
@@ -131,7 +134,7 @@ function toListItem(row: ListRow): SkillListItem {
 
 function toWire(row: FullRow): Skill {
 	return {
-		...toListItem(row),
+		...toSkillListItem(row),
 		contentMd: row.contentMd,
 		avelEnhancementMd: row.avelEnhancementMd,
 	};
@@ -169,6 +172,78 @@ async function findLive(
 	return row;
 }
 
+/**
+ * The source a skill names, locked for share so it cannot be deleted between
+ * this check and the write (skill-source remove locks it for update).
+ */
+async function requireLiveSource(tx: Tx, sourceId: string): Promise<void> {
+	const [row] = await tx
+		.select({ id: skillSource.id })
+		.from(skillSource)
+		.where(and(eq(skillSource.id, sourceId), live(skillSource)))
+		.for("share");
+	if (!row) {
+		throw new ApiError(
+			"PRECONDITION_FAILED",
+			"The skill source does not exist",
+			{
+				details: { reason: "skill_source_not_found" },
+			},
+		);
+	}
+}
+
+function slugTaken(slug: string): ApiError {
+	return new ApiError("CONFLICT", `A live skill already has the slug ${slug}`);
+}
+
+async function requireFreeSlug(tx: Tx, slug: string): Promise<void> {
+	const [taken] = await tx
+		.select({ id: skill.id })
+		.from(skill)
+		.where(and(eq(skill.slug, slug), live(skill)))
+		.limit(1);
+	if (taken) throw slugTaken(slug);
+}
+
+/**
+ * Two writes racing on one slug both pass requireFreeSlug; the partial
+ * unique index stops the second. Postgres aborts the transaction on that
+ * error, so it is translated outside withTx, never caught inside it.
+ */
+function isSlugViolation(err: unknown): boolean {
+	for (let e = err; e instanceof Error; e = e.cause) {
+		const pg = e as Error & { code?: string; constraint_name?: string };
+		if (pg.code === "23505" && pg.constraint_name === "skill_slug_live_uq") {
+			return true;
+		}
+	}
+	return false;
+}
+
+async function translatingSlug<T>(
+	slug: string | undefined,
+	run: () => Promise<T>,
+): Promise<T> {
+	try {
+		return await run();
+	} catch (err) {
+		if (slug && isSlugViolation(err)) throw slugTaken(slug);
+		throw err;
+	}
+}
+
+/** The skill, locked for the rest of the transaction, so transitions run one at a time. */
+async function lockSkill(tx: Tx, id: string) {
+	const [row] = await tx
+		.select()
+		.from(skill)
+		.where(and(eq(skill.id, id), live(skill)))
+		.for("update");
+	if (!row) throw notFound("skill", id);
+	return row;
+}
+
 export function skillRoutes(deps: RouteDeps) {
 	return tsr.platformContext<RequestContext>().router(skillContract, {
 		list: async ({ query }) => {
@@ -176,7 +251,7 @@ export function skillRoutes(deps: RouteDeps) {
 			const filters = filtersFor(query);
 			const [rows, [counted]] = await Promise.all([
 				db
-					.select(listColumns)
+					.select(skillListColumns)
 					.from(skill)
 					.innerJoin(skillSource, eq(skillSource.id, skill.sourceId))
 					.where(and(filters, after(skill, query.cursor)))
@@ -190,7 +265,7 @@ export function skillRoutes(deps: RouteDeps) {
 			const { items, nextCursor } = toPage(rows, query.limit);
 			return {
 				status: 200,
-				body: page(items.map(toListItem), nextCursor, counted?.total ?? 0),
+				body: page(items.map(toSkillListItem), nextCursor, counted?.total ?? 0),
 			};
 		},
 
@@ -206,6 +281,230 @@ export function skillRoutes(deps: RouteDeps) {
 			if (!row) {
 				throw new ApiError("NOT_FOUND", `No skill with slug ${params.slug}`);
 			}
+			return { status: 200, body: ok(toWire(row)) };
+		},
+
+		create: async ({ body }, ctx) => {
+			const operator = operatorOf(ctx);
+			const row = await translatingSlug(body.slug, () =>
+				withTx(deps.db(), async (tx) => {
+					await requireLiveSource(tx, body.sourceId);
+					await requireFreeSlug(tx, body.slug);
+					const hashed = {
+						description: body.description,
+						contentMd: body.contentMd,
+						avelEnhancementMd: body.avelEnhancementMd ?? null,
+						type: body.type,
+						layer: body.layer,
+						...(body.type === "capability"
+							? { grants: body.grants, ioShape: body.ioShape }
+							: { grants: null, ioShape: null }),
+					};
+					const values = {
+						id: deps.ids.next(),
+						slug: body.slug,
+						name: body.name,
+						...hashed,
+						recommendedFor: body.recommendedFor,
+						sourceId: body.sourceId,
+						contentSha256: skillContentSha256(hashed),
+						status: "draft" as const,
+						reviewedBy: null,
+						reviewedAt: null,
+						version: 1,
+						...stamp(deps.clock),
+					};
+					await tx.insert(skill).values(values);
+					await logActivity(tx, deps, {
+						actorKind: "operator",
+						actorUserId: operator.id,
+						action: "skill.created",
+						entityType: "skill",
+						entityId: values.id,
+						requestId: ctx.requestId,
+						payload: {
+							slug: values.slug,
+							type: values.type,
+							layer: values.layer,
+							contentSha256: values.contentSha256,
+						},
+					});
+					return findLive(tx, eq(skill.id, values.id));
+				}),
+			);
+			if (!row) throw new Error("a created skill was not readable");
+			return { status: 201, body: ok(toWire(row)) };
+		},
+
+		update: async ({ params, body }, ctx) => {
+			const operator = operatorOf(ctx);
+			const row = await translatingSlug(body.slug, () =>
+				withTx(deps.db(), async (tx) => {
+					const current = await lockSkill(tx, params.id);
+					if (current.status === "retired") {
+						throw new ApiError("CONFLICT", "A retired skill cannot be edited");
+					}
+					if (body.sourceId && body.sourceId !== current.sourceId) {
+						await requireLiveSource(tx, body.sourceId);
+					}
+					if (body.slug && body.slug !== current.slug) {
+						await requireFreeSlug(tx, body.slug);
+					}
+
+					// Moving to knowledge clears grants and ioShape; the contract
+					// refuses a body that moves to knowledge and sends non-null ones.
+					const toKnowledge = body.type === "knowledge";
+					const type = body.type ?? current.type;
+					const grants =
+						body.grants !== undefined
+							? body.grants
+							: toKnowledge
+								? null
+								: current.grants;
+					const ioShape =
+						body.ioShape !== undefined
+							? body.ioShape
+							: toKnowledge
+								? null
+								: current.ioShape;
+					const consistent =
+						type === "capability"
+							? grants !== null && ioShape !== null
+							: grants === null && ioShape === null;
+					if (!consistent) {
+						throw new ApiError(
+							"PRECONDITION_FAILED",
+							type === "capability"
+								? "A capability needs grants and ioShape"
+								: "A knowledge skill carries no grants or ioShape",
+							{ details: { reason: "skill_capability_mismatch" } },
+						);
+					}
+
+					const hashed = {
+						description: body.description ?? current.description,
+						contentMd: body.contentMd ?? current.contentMd,
+						avelEnhancementMd:
+							body.avelEnhancementMd !== undefined
+								? body.avelEnhancementMd
+								: current.avelEnhancementMd,
+						type,
+						layer: body.layer ?? current.layer,
+						grants,
+						ioShape,
+					};
+					const contentSha256 = skillContentSha256(hashed);
+					// Both sides recomputed, so a stored hash written some other way
+					// cannot fake a change. Approval pinned the old content.
+					const returnedToDraft =
+						current.status === "approved" &&
+						contentSha256 !== skillContentSha256(current);
+					const version = current.version + 1;
+					await tx
+						.update(skill)
+						.set({
+							...hashed,
+							slug: body.slug ?? current.slug,
+							name: body.name ?? current.name,
+							recommendedFor: body.recommendedFor ?? current.recommendedFor,
+							sourceId: body.sourceId ?? current.sourceId,
+							contentSha256,
+							version,
+							...(returnedToDraft
+								? {
+										status: "draft" as const,
+										reviewedBy: null,
+										reviewedAt: null,
+									}
+								: {}),
+							...touch(deps.clock),
+						})
+						.where(eq(skill.id, params.id));
+					await logActivity(tx, deps, {
+						actorKind: "operator",
+						actorUserId: operator.id,
+						action: "skill.updated",
+						entityType: "skill",
+						entityId: params.id,
+						requestId: ctx.requestId,
+						// Field names only: the text can be 100 KB.
+						payload: {
+							fields: Object.keys(body).sort(),
+							version,
+							contentSha256,
+							returnedToDraft,
+						},
+					});
+					return findLive(tx, eq(skill.id, params.id));
+				}),
+			);
+			if (!row) throw notFound("skill", params.id);
+			return { status: 200, body: ok(toWire(row)) };
+		},
+
+		approve: async ({ params, body }, ctx) => {
+			const operator = operatorOf(ctx);
+			const row = await withTx(deps.db(), async (tx) => {
+				const current = await lockSkill(tx, params.id);
+				if (current.status !== "draft") {
+					throw new ApiError(
+						"CONFLICT",
+						`A ${current.status} skill cannot be approved`,
+					);
+				}
+				if (current.contentSha256 !== body.contentSha256) {
+					throw new ApiError(
+						"CONFLICT",
+						"The skill changed since this hash was reviewed",
+					);
+				}
+				await tx
+					.update(skill)
+					.set({
+						status: "approved",
+						reviewedBy: operator.id,
+						reviewedAt: deps.clock.now(),
+						...touch(deps.clock),
+					})
+					.where(eq(skill.id, params.id));
+				await logActivity(tx, deps, {
+					actorKind: "operator",
+					actorUserId: operator.id,
+					action: "skill.approved",
+					entityType: "skill",
+					entityId: params.id,
+					requestId: ctx.requestId,
+					payload: { contentSha256: current.contentSha256 },
+				});
+				return findLive(tx, eq(skill.id, params.id));
+			});
+			if (!row) throw notFound("skill", params.id);
+			return { status: 200, body: ok(toWire(row)) };
+		},
+
+		retire: async ({ params }, ctx) => {
+			const operator = operatorOf(ctx);
+			const row = await withTx(deps.db(), async (tx) => {
+				const current = await lockSkill(tx, params.id);
+				if (current.status === "retired") {
+					throw new ApiError("CONFLICT", "The skill is already retired");
+				}
+				await tx
+					.update(skill)
+					.set({ status: "retired", ...touch(deps.clock) })
+					.where(eq(skill.id, params.id));
+				await logActivity(tx, deps, {
+					actorKind: "operator",
+					actorUserId: operator.id,
+					action: "skill.retired",
+					entityType: "skill",
+					entityId: params.id,
+					requestId: ctx.requestId,
+					payload: { from: current.status },
+				});
+				return findLive(tx, eq(skill.id, params.id));
+			});
+			if (!row) throw notFound("skill", params.id);
 			return { status: 200, body: ok(toWire(row)) };
 		},
 	});

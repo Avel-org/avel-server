@@ -33,6 +33,8 @@ import { engagementRoutes } from "./routes/engagements";
 import { health } from "./routes/health";
 import { intakeRoutes } from "./routes/intake";
 import { missionRoutes } from "./routes/missions";
+import { presetRoutes } from "./routes/presets";
+import { rosterRoutes } from "./routes/roster";
 import type { RequestContext } from "./routes/shared";
 import { skillSourceRoutes } from "./routes/skill-sources";
 import { skillRoutes } from "./routes/skills";
@@ -71,6 +73,8 @@ export function createApp(deps: AppDeps) {
 		agentTemplates: agentTemplateRoutes(routeDeps),
 		skills: skillRoutes(routeDeps),
 		skillSources: skillSourceRoutes(routeDeps),
+		roster: rosterRoutes(routeDeps),
+		presets: presetRoutes(routeDeps),
 	});
 
 	const app = new Hono<{ Variables: AuthVariables }>();

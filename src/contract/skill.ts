@@ -107,6 +107,100 @@ export const skillListQuery = pageQuery.extend({
 
 export type SkillListQuery = z.infer<typeof skillListQuery>;
 
+/** Lowercase words joined by single hyphens: it becomes a file name in the export. */
+const slug = z
+	.string()
+	.max(100)
+	.regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "Lowercase letters, digits and hyphens");
+const name = z.string().trim().min(1).max(200);
+/** Loaded into every relevant dispatch, so it is kept short. */
+const description = z.string().trim().min(1).max(500);
+const contentMd = z.string().min(1).max(100_000);
+const avelEnhancementMd = z.string().min(1).max(100_000).nullable();
+/** A skill recommended for no role is never delivered. */
+const recommendedFor = z.array(role).min(1);
+const grants = z.array(z.string().trim().min(1).max(200)).min(1);
+
+const skillFields = {
+	slug,
+	name,
+	description,
+	contentMd,
+	avelEnhancementMd: avelEnhancementMd.optional(),
+	layer: skillLayer,
+	recommendedFor,
+	sourceId: z.string().uuid(),
+};
+
+/**
+ * A new skill is always a draft at version 1. The server computes its
+ * contentSha256. As in the table, a capability carries grants and ioShape
+ * and a knowledge skill carries neither.
+ */
+export const createSkillBody = z.discriminatedUnion("type", [
+	z.object({ ...skillFields, type: z.literal("knowledge") }).strict(),
+	z
+		.object({
+			...skillFields,
+			type: z.literal("capability"),
+			grants,
+			ioShape: skillIoShape,
+		})
+		.strict(),
+]);
+
+/**
+ * Any subset of fields. Changing a hashed field of an approved skill returns
+ * it to draft. A body that changes type must agree with itself: to
+ * capability with grants and ioShape, to knowledge with neither. A body
+ * that leaves type alone is checked against the stored type instead
+ * (422 skill_capability_mismatch).
+ */
+export const updateSkillBody = z
+	.object({
+		slug: slug.optional(),
+		name: name.optional(),
+		description: description.optional(),
+		contentMd: contentMd.optional(),
+		avelEnhancementMd: avelEnhancementMd.optional(),
+		layer: skillLayer.optional(),
+		recommendedFor: recommendedFor.optional(),
+		sourceId: z.string().uuid().optional(),
+		type: skillType.optional(),
+		grants: grants.nullable().optional(),
+		ioShape: skillIoShape.nullable().optional(),
+	})
+	.strict()
+	.refine((body) => Object.keys(body).length > 0, {
+		message: "Give at least one field to change",
+	})
+	.refine(
+		(body) =>
+			body.type !== "capability" ||
+			(body.grants != null && body.ioShape != null),
+		{ message: "A capability needs grants and ioShape", path: ["type"] },
+	)
+	.refine(
+		(body) =>
+			body.type !== "knowledge" ||
+			(body.grants == null && body.ioShape == null),
+		{
+			message: "A knowledge skill carries no grants or ioShape",
+			path: ["type"],
+		},
+	);
+
+export type CreateSkillBody = z.infer<typeof createSkillBody>;
+export type UpdateSkillBody = z.infer<typeof updateSkillBody>;
+
+/**
+ * Approval pins the hash the operator reviewed. If the skill changed since,
+ * the hashes differ and approval is 409 CONFLICT.
+ */
+export const approveSkillBody = z
+	.object({ contentSha256: z.string().regex(/^[0-9a-f]{64}$/) })
+	.strict();
+
 const byId = z.object({ id: z.string().uuid() });
 const bySlug = z.object({ slug: z.string().min(1).max(200) });
 
@@ -130,5 +224,39 @@ export const skillContract = c.router({
 		pathParams: bySlug,
 		responses: { 200: successEnvelope(skillSchema) },
 		summary: "The live skill with this slug. A deleted one is reached by id",
+	},
+	create: {
+		method: "POST",
+		path: "/api/skills",
+		body: createSkillBody,
+		responses: { 201: successEnvelope(skillSchema) },
+		summary:
+			"A draft at version 1. A slug taken by a live skill is 409 CONFLICT.",
+	},
+	update: {
+		method: "PATCH",
+		path: "/api/skills/:id",
+		pathParams: byId,
+		body: updateSkillBody,
+		responses: { 200: successEnvelope(skillSchema) },
+		summary:
+			"Bumps version and recomputes contentSha256. A retired skill is 409 CONFLICT.",
+	},
+	approve: {
+		method: "POST",
+		path: "/api/skills/:id/approve",
+		pathParams: byId,
+		body: approveSkillBody,
+		responses: { 200: successEnvelope(skillSchema) },
+		summary:
+			"draft to approved, recording the reviewer. Any other status, or a stale hash, is 409 CONFLICT.",
+	},
+	retire: {
+		method: "POST",
+		path: "/api/skills/:id/retire",
+		pathParams: byId,
+		body: c.noBody(),
+		responses: { 200: successEnvelope(skillSchema) },
+		summary: "draft or approved to retired. Retiring twice is 409 CONFLICT.",
 	},
 });

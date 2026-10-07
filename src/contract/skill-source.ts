@@ -36,6 +36,34 @@ export const skillSourceListQuery = pageQuery.extend({
 
 export type SkillSourceListQuery = z.infer<typeof skillSourceListQuery>;
 
+const name = z.string().trim().min(1).max(200);
+const url = z.string().trim().url().max(2_000).nullable();
+const license = z.string().trim().min(1).max(200).nullable();
+
+export const createSkillSourceBody = z
+	.object({
+		name,
+		kind: skillSourceKind,
+		url: url.optional(),
+		license: license.optional(),
+	})
+	.strict();
+
+export const updateSkillSourceBody = z
+	.object({
+		name: name.optional(),
+		kind: skillSourceKind.optional(),
+		url: url.optional(),
+		license: license.optional(),
+	})
+	.strict()
+	.refine((body) => Object.keys(body).length > 0, {
+		message: "Give at least one field to change",
+	});
+
+/** What a removal answers: the id that is no longer live. */
+export const removedSchema = z.object({ id: z.string().uuid() });
+
 const byId = z.object({ id: z.string().uuid() });
 
 export const skillSourceContract = c.router({
@@ -51,5 +79,26 @@ export const skillSourceContract = c.router({
 		path: "/api/skill-sources/:id",
 		pathParams: byId,
 		responses: { 200: successEnvelope(skillSourceSchema) },
+	},
+	create: {
+		method: "POST",
+		path: "/api/skill-sources",
+		body: createSkillSourceBody,
+		responses: { 201: successEnvelope(skillSourceSchema) },
+	},
+	update: {
+		method: "PATCH",
+		path: "/api/skill-sources/:id",
+		pathParams: byId,
+		body: updateSkillSourceBody,
+		responses: { 200: successEnvelope(skillSourceSchema) },
+	},
+	remove: {
+		method: "DELETE",
+		path: "/api/skill-sources/:id",
+		pathParams: byId,
+		responses: { 200: successEnvelope(removedSchema) },
+		summary:
+			"Soft-deletes the source. Refused while a live skill comes from it (422 skill_source_in_use).",
 	},
 });

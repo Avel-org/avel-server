@@ -65,6 +65,9 @@ describe("the error envelope is a discriminated union on code", () => {
 			"engagement_closed",
 			"intake_check_failed",
 			"intake_cut_not_derived",
+			"skill_source_not_found",
+			"skill_source_in_use",
+			"skill_capability_mismatch",
 		]);
 	});
 

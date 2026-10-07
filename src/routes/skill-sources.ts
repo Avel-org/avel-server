@@ -18,12 +18,16 @@ import {
 	type SkillSourceListQuery,
 	skillSourceContract,
 } from "../contract";
+import { logActivity } from "../db/activity";
 import { skill, skillSource } from "../db/schema";
-import { live } from "../db/schema/columns";
+import { live, remove, stamp, touch } from "../db/schema/columns";
+import { type Executor, withTx } from "../db/tx";
+import { ApiError } from "../middleware/errors";
 import {
 	after,
 	containsPattern,
 	notFound,
+	operatorOf,
 	type RequestContext,
 	type RouteDeps,
 	toPage,
@@ -78,6 +82,14 @@ function toWire(row: Row): SkillSource {
 	};
 }
 
+async function findLive(db: Executor, id: string): Promise<Row | undefined> {
+	const [row] = await db
+		.select(withCount)
+		.from(skillSource)
+		.where(and(eq(skillSource.id, id), live(skillSource)));
+	return row;
+}
+
 function filtersFor(query: SkillSourceListQuery): SQL | undefined {
 	return and(
 		live(skillSource),
@@ -111,13 +123,100 @@ export function skillSourceRoutes(deps: RouteDeps) {
 		},
 
 		get: async ({ params }) => {
-			const [row] = await deps
-				.db()
-				.select(withCount)
-				.from(skillSource)
-				.where(and(eq(skillSource.id, params.id), live(skillSource)));
+			const row = await findLive(deps.db(), params.id);
 			if (!row) throw notFound("skill source", params.id);
 			return { status: 200, body: ok(toWire(row)) };
+		},
+
+		create: async ({ body }, ctx) => {
+			const operator = operatorOf(ctx);
+			const row = await withTx(deps.db(), async (tx) => {
+				const values = {
+					id: deps.ids.next(),
+					name: body.name,
+					kind: body.kind,
+					url: body.url ?? null,
+					license: body.license ?? null,
+					...stamp(deps.clock),
+				};
+				await tx.insert(skillSource).values(values);
+				await logActivity(tx, deps, {
+					actorKind: "operator",
+					actorUserId: operator.id,
+					action: "skill_source.created",
+					entityType: "skill_source",
+					entityId: values.id,
+					requestId: ctx.requestId,
+					payload: { name: values.name, kind: values.kind },
+				});
+				return { ...values, skillCount: 0 };
+			});
+			return { status: 201, body: ok(toWire(row)) };
+		},
+
+		update: async ({ params, body }, ctx) => {
+			const operator = operatorOf(ctx);
+			const row = await withTx(deps.db(), async (tx) => {
+				const [updated] = await tx
+					.update(skillSource)
+					.set({ ...body, ...touch(deps.clock) })
+					.where(and(eq(skillSource.id, params.id), live(skillSource)))
+					.returning({ id: skillSource.id });
+				if (!updated) throw notFound("skill source", params.id);
+				await logActivity(tx, deps, {
+					actorKind: "operator",
+					actorUserId: operator.id,
+					action: "skill_source.updated",
+					entityType: "skill_source",
+					entityId: params.id,
+					requestId: ctx.requestId,
+					payload: { changes: body },
+				});
+				return findLive(tx, params.id);
+			});
+			if (!row) throw notFound("skill source", params.id);
+			return { status: 200, body: ok(toWire(row)) };
+		},
+
+		remove: async ({ params }, ctx) => {
+			const operator = operatorOf(ctx);
+			await withTx(deps.db(), async (tx) => {
+				// Locked FOR UPDATE: skill create and update hold FOR SHARE on the
+				// source they name, so no skill can start pointing at it between
+				// this check and the delete.
+				const [locked] = await tx
+					.select({ id: skillSource.id })
+					.from(skillSource)
+					.where(and(eq(skillSource.id, params.id), live(skillSource)))
+					.for("update");
+				if (!locked) throw notFound("skill source", params.id);
+				const [inUse] = await tx
+					.select({ id: skill.id })
+					.from(skill)
+					.where(and(eq(skill.sourceId, params.id), live(skill)))
+					.limit(1);
+				if (inUse) {
+					throw new ApiError(
+						"PRECONDITION_FAILED",
+						"Skills still come from this source",
+						{ details: { reason: "skill_source_in_use" } },
+					);
+				}
+				await tx
+					.update(skillSource)
+					.set(remove(deps.clock))
+					.where(eq(skillSource.id, params.id));
+				await logActivity(tx, deps, {
+					actorKind: "operator",
+					actorUserId: operator.id,
+					action: "skill_source.deleted",
+					entityType: "skill_source",
+					entityId: params.id,
+					requestId: ctx.requestId,
+					payload: {},
+				});
+			});
+			return { status: 200, body: ok({ id: params.id }) };
 		},
 	});
 }

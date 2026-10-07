@@ -69,6 +69,9 @@ export const PRECONDITION_REASONS = [
 	"engagement_closed",
 	"intake_check_failed",
 	"intake_cut_not_derived",
+	"skill_source_not_found",
+	"skill_source_in_use",
+	"skill_capability_mismatch",
 ] as const;
 
 export const preconditionReason = z.enum(PRECONDITION_REASONS);
