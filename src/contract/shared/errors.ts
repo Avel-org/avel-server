@@ -65,6 +65,10 @@ export const PRECONDITION_REASONS = [
 	"client_not_found",
 	"client_closed",
 	"client_has_active_engagements",
+	"engagement_not_found",
+	"engagement_closed",
+	"intake_check_failed",
+	"intake_cut_not_derived",
 ] as const;
 
 export const preconditionReason = z.enum(PRECONDITION_REASONS);
@@ -77,6 +81,19 @@ export const preconditionDetails = z
 		reason: preconditionReason,
 		/** The client the precondition was about, where there is one. */
 		clientId: z.string().uuid().optional(),
+		/** The engagement the precondition was about, where there is one. */
+		engagementId: z.string().uuid().optional(),
+		/** What a mechanical check found (intake_check_failed), in a stable order. */
+		issues: z
+			.array(
+				z
+					.object({
+						path: z.array(z.union([z.string(), z.number()])),
+						message: z.string(),
+					})
+					.strict(),
+			)
+			.optional(),
 	})
 	.strict();
 

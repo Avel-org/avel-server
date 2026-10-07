@@ -61,6 +61,10 @@ describe("the error envelope is a discriminated union on code", () => {
 			"client_not_found",
 			"client_closed",
 			"client_has_active_engagements",
+			"engagement_not_found",
+			"engagement_closed",
+			"intake_check_failed",
+			"intake_cut_not_derived",
 		]);
 	});
 
@@ -84,6 +88,22 @@ describe("the error envelope is a discriminated union on code", () => {
 				).success,
 				JSON.stringify(details),
 			).toBe(false);
+		}
+	});
+
+	it("carries an optional engagementId and check issues on PRECONDITION_FAILED", () => {
+		const details = {
+			reason: "intake_check_failed",
+			engagementId: "00000000-0000-4000-8000-000000000001",
+			issues: [{ path: ["proposedBrief", "requirements", 0], message: "m" }],
+		};
+		expect(preconditionDetails.safeParse(details).success).toBe(true);
+		for (const bad of [
+			{ ...details, engagementId: "nope" },
+			{ ...details, issues: [{ path: [], message: "m", extra: 1 }] },
+			{ ...details, issues: [{ path: [true], message: "m" }] },
+		]) {
+			expect(preconditionDetails.safeParse(bad).success).toBe(false);
 		}
 	});
 

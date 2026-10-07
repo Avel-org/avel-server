@@ -15,7 +15,7 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
-import { EXPORT_STATUSES } from "../../contract/shared/status";
+import { EXPORT_STATUSES, INTAKE_STATUSES } from "../../contract/shared/status";
 import { engagement } from "./agency";
 import { user } from "./auth";
 import { id, softDelete, timestamps } from "./columns";
@@ -26,13 +26,8 @@ import { mission, rosterPreset } from "./work";
 const at = (name: string) =>
 	timestamp(name, { withTimezone: true, mode: "date" });
 
-export const intakeStatus = pgEnum("intake_status", [
-	"draft",
-	"proposed",
-	"approved",
-	"rejected",
-]);
-// Built from the contract array, so the database and avel-web cannot drift.
+// Built from the contract arrays, so the database and avel-web cannot drift.
+export const intakeStatus = pgEnum("intake_status", INTAKE_STATUSES);
 export const exportStatus = pgEnum("export_status", EXPORT_STATUSES);
 export const proposalKind = pgEnum("proposal_kind", [
 	"next_module",

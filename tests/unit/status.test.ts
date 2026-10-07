@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
 	EXPORT_STATUSES,
 	exportStatus,
+	INTAKE_STATUSES,
+	intakeStatus,
 	MISSION_STATUSES,
 	missionStatus,
 } from "../../src/contract";
@@ -36,8 +38,19 @@ describe("status vocabularies", () => {
 		expect(exportStatus.options).toEqual(EXPORT_STATUSES);
 	});
 
+	it("pins the intake statuses, in order", () => {
+		expect(INTAKE_STATUSES).toEqual([
+			"draft",
+			"proposed",
+			"approved",
+			"rejected",
+		]);
+		expect(intakeStatus.options).toEqual(INTAKE_STATUSES);
+	});
+
 	it("refuses a value outside each vocabulary", () => {
 		expect(missionStatus.safeParse("closed").success).toBe(false);
 		expect(exportStatus.safeParse("halted").success).toBe(false);
+		expect(intakeStatus.safeParse("active").success).toBe(false);
 	});
 });

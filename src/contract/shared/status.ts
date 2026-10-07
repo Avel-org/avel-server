@@ -34,3 +34,14 @@ export const EXPORT_STATUSES = [
 export const exportStatus = z.enum(EXPORT_STATUSES);
 
 export type ExportStatus = z.infer<typeof exportStatus>;
+
+export const INTAKE_STATUSES = [
+	"draft",
+	"proposed",
+	"approved",
+	"rejected",
+] as const;
+
+export const intakeStatus = z.enum(INTAKE_STATUSES);
+
+export type IntakeStatus = z.infer<typeof intakeStatus>;

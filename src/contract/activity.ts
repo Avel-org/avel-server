@@ -20,6 +20,11 @@ export const activityAction = z.enum([
 	"mission.status_changed",
 	"export.created",
 	"export.status_changed",
+	"intake.created",
+	"intake.updated",
+	"intake.proposed",
+	"intake.approved",
+	"intake.rejected",
 ]);
 
 /** Must equal the activity_entity_type pgEnum; tests/api/activity.test.ts checks it. */
@@ -30,6 +35,7 @@ export const activityEntityType = z.enum([
 	"connection",
 	"mission",
 	"export",
+	"intake",
 ]);
 
 export type ActivityActorKind = z.infer<typeof activityActorKind>;

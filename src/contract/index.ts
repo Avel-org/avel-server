@@ -4,6 +4,7 @@ import { activityContract } from "./activity";
 import { agentTemplateContract } from "./agent-template";
 import { clientContract } from "./client";
 import { engagementContract } from "./engagement";
+import { intakeContract } from "./intake";
 import { missionContract } from "./mission";
 import { errorEnvelope, successEnvelope } from "./shared/envelope";
 import { skillContract } from "./skill";
@@ -13,6 +14,7 @@ export * from "./activity";
 export * from "./agent-template";
 export * from "./client";
 export * from "./engagement";
+export * from "./intake";
 export * from "./mission";
 export * from "./shared/envelope";
 export * from "./shared/errors";
@@ -52,6 +54,7 @@ export const contract = c.router(
 		engagements: engagementContract,
 		missions: missionContract,
 		activity: activityContract,
+		intakes: intakeContract,
 		agentTemplates: agentTemplateContract,
 		skills: skillContract,
 		skillSources: skillSourceContract,

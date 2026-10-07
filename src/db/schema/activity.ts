@@ -19,7 +19,7 @@ export const actorKind = pgEnum("actor_kind", ["operator", "system", "agent"]);
 
 /**
  * Closed vocabulary. An action enters this list in the same change as the
- * mutation that writes it, so it holds only what module 0 writes.
+ * mutation that writes it, so it holds only what built modules write.
  * The prefix is a domain, not the entity_type.
  */
 export const activityAction = pgEnum("activity_action", [
@@ -36,6 +36,11 @@ export const activityAction = pgEnum("activity_action", [
 	"mission.status_changed",
 	"export.created",
 	"export.status_changed",
+	"intake.created",
+	"intake.updated",
+	"intake.proposed",
+	"intake.approved",
+	"intake.rejected",
 ]);
 
 export const activityEntityType = pgEnum("activity_entity_type", [
@@ -45,6 +50,7 @@ export const activityEntityType = pgEnum("activity_entity_type", [
 	"connection",
 	"mission",
 	"export",
+	"intake",
 ]);
 
 /**

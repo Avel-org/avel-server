@@ -31,6 +31,7 @@ import { agentTemplateRoutes } from "./routes/agent-templates";
 import { clientRoutes } from "./routes/clients";
 import { engagementRoutes } from "./routes/engagements";
 import { health } from "./routes/health";
+import { intakeRoutes } from "./routes/intake";
 import { missionRoutes } from "./routes/missions";
 import type { RequestContext } from "./routes/shared";
 import { skillSourceRoutes } from "./routes/skill-sources";
@@ -66,6 +67,7 @@ export function createApp(deps: AppDeps) {
 		engagements: engagementRoutes(routeDeps),
 		missions: missionRoutes(routeDeps),
 		activity: activityRoutes(routeDeps),
+		intakes: intakeRoutes(routeDeps),
 		agentTemplates: agentTemplateRoutes(routeDeps),
 		skills: skillRoutes(routeDeps),
 		skillSources: skillSourceRoutes(routeDeps),
