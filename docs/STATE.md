@@ -38,10 +38,10 @@ Legend: ⬜ not started · ◐ partly built · ✅ built.
 | # | Module | State |
 |---|---|---|
 | 0 | Foundation | ✅ |
-| 1 | Intake | ⬜ |
+| 1 | Intake | ✅ approval waits on module 2 for the derived cut |
 | 2 | Repo read | ⬜ |
 | 3 | Mission planner | ⬜ |
-| 4 | Roles and roster | ⬜ catalog shapes published, unmounted |
+| 4 | Roles and roster | ◐ catalog reads built |
 | 5 | Identity generator | ⬜ |
 | 6 | Dispatch and runner | ⬜ |
 | 7 | Sandbox rooms | ⬜ |

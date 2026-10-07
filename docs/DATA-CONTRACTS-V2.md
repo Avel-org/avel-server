@@ -64,8 +64,9 @@ src/contract/
 | `engagements` | list · get · create · update · close. Close revokes the engagement's live Connections and returns `revokedConnections` | `clientId` · `status` · cursor |
 | `missions` | list · get, read-only, for the Missions surface (module 13). Created through Intake approval once module 1 lands | `origin` (required, never both) · `status` · `q` · `sort` (`lastActivity` · `sprint` · `client`) with `direction` (nulls sort lowest) · `includeArchived` · `needsYou` · `quietBefore` (no activity since, or none) · `lastExportStatus` · cursor · `meta.total` (required here; follows every filter) · `meta.counts` (ignores the status-like filters) |
 | `activity` | list, read-only, for the Activity surface (module 13). Each entry is the row's columns, nothing joined | `missionId` · `engagementId` · `entityType` · `entityId` · `actorKind`, ANDed · cursor (a position, not bound to the filters) · `meta.total` (required) |
-
-**Published, not mounted** (module 4, 2026-10-06): `agent-template`, `skill` and `skill-source` export their shapes and an unmounted list · get router each. No endpoint answers until module 4's handlers.
+| `intakes` | list · get · create · revise (`PATCH`) · propose · approve · reject (module 1). A wrong state is 409. The check runs at propose and approve. Approve creates the Mission, and refuses `intake_cut_not_derived` until module 2 | `engagementId` · `status` · cursor · `meta.total` |
+| `agentTemplates` · `skills` | list · get · get-by-slug (`/by-slug/:slug`, the live row), read-only (module 4). Skills embed their source; the list item leaves out the markdown | templates: `q` · `kind` · `role` · `wave` (array overlap) · `engagementId`. Skills: `q` · `layer` · `type` · `status` · `role` · `sourceId`. Both: cursor · `meta.total` |
+| `skillSources` | list · get, read-only (module 4), with a live `skillCount` | `q` · `kind` · cursor · `meta.total` |
 
 Every list uses keyset cursors, and a cursor from a different sort is 400. Search escapes `\ % _` through one helper, `containsPattern()` in `src/routes/shared.ts`.
 
