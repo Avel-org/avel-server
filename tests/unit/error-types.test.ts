@@ -68,6 +68,13 @@ describe("the error envelope is a discriminated union on code", () => {
 			"skill_source_not_found",
 			"skill_source_in_use",
 			"skill_capability_mismatch",
+			"mission_not_editable",
+			"agent_template_not_found",
+			"template_not_rosterable",
+			"preset_not_found",
+			"roster_not_empty",
+			"skill_not_found",
+			"skill_not_attachable",
 		]);
 	});
 

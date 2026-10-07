@@ -48,6 +48,12 @@ export const activityAction = pgEnum("activity_action", [
 	"skill.updated",
 	"skill.approved",
 	"skill.retired",
+	"roster.entry_added",
+	"roster.entry_updated",
+	"roster.entry_removed",
+	"roster.preset_applied",
+	"mission.skill_attached",
+	"mission.skill_detached",
 ]);
 
 export const activityEntityType = pgEnum("activity_entity_type", [
@@ -60,6 +66,7 @@ export const activityEntityType = pgEnum("activity_entity_type", [
 	"intake",
 	"skill_source",
 	"skill",
+	"roster_entry",
 ]);
 
 /**

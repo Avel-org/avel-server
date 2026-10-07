@@ -60,6 +60,18 @@ export const role = z.enum(ROLES);
 
 export type Role = z.infer<typeof role>;
 
+/**
+ * The Firm family (docs/ROLES.md): agents that work between missions. Their
+ * roles never appear in a mission roster (ROSTER-V2.md, Merging roles into
+ * agents), so a template holding one cannot be put on a mission.
+ */
+export const FIRM_ROLES = [
+	"intake",
+	"strategy",
+	"research",
+	"client-ops",
+] as const satisfies readonly Role[];
+
 /** The global phases A to E; E is Operate. The wave pgEnum is built from it. */
 export const WAVES = ["A", "B", "C", "D", "E"] as const;
 
