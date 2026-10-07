@@ -41,7 +41,7 @@ Legend: ⬜ not started · ◐ partly built · ✅ built.
 | 1 | Intake | ✅ approval waits on module 2 for the derived cut |
 | 2 | Repo read | ⬜ |
 | 3 | Mission planner | ⬜ |
-| 4 | Roles and roster | ◐ catalog reads built |
+| 4 | Roles and roster | ◐ catalog reads and writes, roster, mission-skill and preset reads built; roster writes next |
 | 5 | Identity generator | ⬜ |
 | 6 | Dispatch and runner | ⬜ |
 | 7 | Sandbox rooms | ⬜ |

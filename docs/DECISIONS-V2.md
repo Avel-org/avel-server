@@ -585,7 +585,7 @@ The operator answered the module 0 question list on 2026-10-05. Shapes are in `D
 
 ### Stack
 
-- **The standing rule "no further stack or schema change before one mission runs" survives.** The changes below are recorded as decided before the first mission. After them the stack is frozen. This closes the open question about whether the repo split retired the rule. *Two exceptions, decided by the operator on 2026-10-06:* Dispatch, the firm roster, and their three foreign keys are built before the first mission (*Decided 2026-10-06: agents call the API*), and so are `Mission.template_ref` and `template_version` (*Decided 2026-10-06: build sync*), with `Finding.reported_by_dispatch_id` as a fourth foreign key before module 9. Nothing else is unfrozen.
+- **The standing rule "no further stack or schema change before one mission runs" survives.** The changes below are recorded as decided before the first mission. After them the stack is frozen. This closes the open question about whether the repo split retired the rule. *Two exceptions, decided by the operator on 2026-10-06:* Dispatch, the firm roster, and their three foreign keys are built before the first mission (*Decided 2026-10-06: agents call the API*), and so are `Mission.template_ref` and `template_version` (*Decided 2026-10-06: build sync*), with `Finding.reported_by_dispatch_id` as a fourth foreign key before module 9. A third, the same day: `Intake.repo_url`, `repo_commit_sha` and `repo_read_at`, with module 2 (*Starting the build*). Nothing else is unfrozen.
 - **Auth.js → Better Auth** (above). <!--allow-stale-->
 - **R2 is deferred.** The history in *Frozen bytes → R2 from the start* stands as written; a dated note there points here. When R2 returns, and where frozen bytes live until then, is open.
 - **Pino now, Sentry later.**
@@ -721,6 +721,10 @@ Agents retry on timeouts. A duplicate CompletionReport or Proposal corrupts attr
 - **Approval refuses until the cut is derived.** Letting the operator supply a cut would make "overridden" the normal path until module 2. That reverses the settled rule that the cut is derived, not chosen.
 - **Activity values that arrive with their mutation are routine,** not freeze exceptions. Every write logs, so each module's mutations add their actions, as migrations `0010` and `0011` did. The freeze covers new tables and columns.
 - **A roster changes only while its mission is a draft.** A team changed mid-mission muddies attribution, and the first mission exists to produce a clean number.
+- **The Intake records which repository was read,** and approval must name the same one. Trusting the approve body would let a cut derived from one repository travel to another, and that is a chosen cut under another name. Three nullable columns, the third freeze exception.
+- **Low-confidence conventions block until the repository is fixed.** There is no operator override. A field for hand-written conventions would mix authorship with extraction, and a repository that disagrees with itself has no convention to follow.
+- **Connections get a minimal list and create in module 2,** so the repo read and the onboarding step that connects a credential have something behind them. Revocation and the rest stay with module 11.
+- **An empty repository is refused for now.** It has no structure to derive a cut from. Greenfield work starts from an AVEL template, whose cut is known.
 
 ---
 

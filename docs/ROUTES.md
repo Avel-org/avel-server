@@ -105,8 +105,8 @@ Twelve links in three groups, per ruling 3 of `avel-web/design/AVEL-DESIGN.md` (
 | **No `preset` route group.** RosterPreset is an entity with `preset.list/get/create/update/apply`, and `Playbook.default_preset_id` FKs to it. The contract has no file for it. | `/presets`, `/presets/:id`, and the loadout screen's "apply preset" | **blocking** |
 | **No `skillSource` procedures.** The catalog is populated in-app; something must write it. | `/catalog/sources` | blocking for that screen |
 | `export.preview` | pre-flight | specced in `BLAST-RADIUS.md`, not yet in the contract |
-| `mission.getWithRoster` | loadout | named in v1, unbuilt |
-| `skill.resolveTiers` | loadout | named in v1, unbuilt |
+| `mission.getWithRoster` | loadout | Not built, by decision (2026-10-06): the loadout calls `missions.get` and `roster.list` |
+| `skill.resolveTiers` | loadout | Built as the pure function `resolveSkillTiers()` in the contract, not a route |
 | `mission.list` → `lastActivity` | mission list | needs one aggregate join to ActivityLog, not an N+1 |
 
 ---
@@ -140,7 +140,7 @@ Hub. Brief summary · roster summary · playbook in effect · last export state 
 
 **The core interaction.** Assemble the squad, tune each agent's skills, see coherence live.
 
-**Needs:** `mission.getWithRoster` · `agentTemplate.list` · `skill.list` · `skill.resolveTiers` · `roster.upsert` · `roster.applyPreset` · `preset.list` *(missing)*
+**Needs:** `missions.get` · `roster.list` · `roster.skills` · `agentTemplates.list` · `skills.list` · `resolveSkillTiers()` · `roster.add` / `update` / `remove` · `roster.applyPreset` · `roster.attachSkill` / `detachSkill` · `presets.list` (router keys as built, 2026-10-06)
 
 **Layout:** three panes — available agents · the roster with per-agent loadout · coherence panel.
 

@@ -43,7 +43,7 @@ src/contract/
   finding.ts          module 9 (moved from 12 on 2026-10-06)
   export.ts           modules 10 and 11
   repo-policy.ts      module 11
-  connection.ts       module 11
+  connection.ts       module 2 (list and create, for the repo read); revoke and the rest with module 11
   proposal.ts         module 14, after the first mission
   shared/
     envelope.ts       success/error response envelope
@@ -230,6 +230,8 @@ Module 3's planner extends this same list. It never starts a second one.
 
 **The mechanical check** runs at `propose` and again at `approve`. It requires a brief that parses, at least one requirement, unique ids, every criterion citing a requirement, and every requirement with at least one criterion. At `approve` it also requires every open question to be acknowledged: the approve body's `acknowledged[]` must equal `open_questions` as a set. The acknowledgements are recorded in the `intake.approved` ActivityLog payload, so the schema is unchanged.
 
+**The repository read is recorded on the Intake** `[specced]` 2026-10-06, module 2. `repo_url?`, `repo_commit_sha?` and `repo_read_at?` are set by `POST /api/intakes/:id/read-repo`, together with the `derived_*` fields. Approve requires its `repoUrl` to equal `repo_url`, refusing with `422 intake_repo_mismatch`. Otherwise an operator could read one repository and approve a mission on another. An empty repository is refused at read time (`422 EMPTY_REPOSITORY`); greenfield work starts from an AVEL template. A freeze exception, decided by the operator.
+
 **Approval creates the Mission and refuses until the cut is derived.** The approve body carries `missionType` and `repoUrl`. While `derived_cut` is null, approval is `422 intake_cut_not_derived`, because the cut is derived, never chosen. Until module 2 reads repositories, nothing is approved for real.
 
 **`derived_cut`, `derived_conventions`, and `derived_boundaries` are all computed by reading the repository, not proposed by Canon.** One capability — read the client's tree — with three outputs. See the Canon decision in `DECISIONS-V2.md`.
@@ -260,7 +262,7 @@ ConventionSet {
 
 **Every entry carries `evidence`** — the files or config that demonstrate the pattern. A convention asserted without evidence is a guess, and a guess in `conventions/` is worse than a gap, because agents follow it.
 
-**`confidence: 'low'` blocks approval.** A repository with three competing patterns has no convention to extract, and inventing one is the failure this whole system exists to prevent.
+**`confidence: 'low'` blocks approval.** A repository with three competing patterns has no convention to extract, and inventing one is the failure this whole system exists to prevent. *Specced 2026-10-06, module 2:* confidence is computed per dimension. A dimension is low when its dominant pattern covers under 80% of the samples, and the set is low when any dimension is. Approve refuses with `422 intake_conventions_low_confidence` and lists what disagreed. The block clears only when the repository is fixed and read again. There is no operator override (decided by the operator).
 
 **This closes a real gap.** `conventions/layering.md` is required by the golden fixture and no role owns writing it. CounselOS's were written by hand. At the third client that is the same provisioning problem Mission 002 found, one level up.
 
