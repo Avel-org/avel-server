@@ -8,6 +8,7 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { type Auth, REQUEST_ID_HEADER } from "./auth";
 import { contract } from "./contract";
 import type { Executor } from "./db/tx";
+import type { RepoSource } from "./gateways/repo-source";
 import type { Clock } from "./lib/clock";
 import type { IdGenerator } from "./lib/ids";
 import type { Logger } from "./lib/logger";
@@ -29,6 +30,7 @@ import { requestId } from "./middleware/request-id";
 import { activityRoutes } from "./routes/activity";
 import { agentTemplateRoutes } from "./routes/agent-templates";
 import { clientRoutes } from "./routes/clients";
+import { connectionRoutes } from "./routes/connections";
 import { engagementRoutes } from "./routes/engagements";
 import { health } from "./routes/health";
 import { intakeRoutes } from "./routes/intake";
@@ -50,6 +52,8 @@ export type AppDeps = {
 	webOrigins: readonly string[];
 	/** Dev preview (src/auth/preview.ts): sessionless reads. False everywhere but a local _dev run. */
 	preview: boolean;
+	/** Where the repo read gets repositories (src/gateways/repo-source.ts). GitHub in production, fixtures in tests. */
+	repos: RepoSource;
 };
 
 /**
@@ -69,7 +73,8 @@ export function createApp(deps: AppDeps) {
 		engagements: engagementRoutes(routeDeps),
 		missions: missionRoutes(routeDeps),
 		activity: activityRoutes(routeDeps),
-		intakes: intakeRoutes(routeDeps),
+		intakes: intakeRoutes({ ...routeDeps, repos: deps.repos }),
+		connections: connectionRoutes(routeDeps),
 		agentTemplates: agentTemplateRoutes(routeDeps),
 		skills: skillRoutes(routeDeps),
 		skillSources: skillSourceRoutes(routeDeps),

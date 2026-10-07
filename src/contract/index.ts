@@ -3,6 +3,7 @@ import { z } from "zod";
 import { activityContract } from "./activity";
 import { agentTemplateContract } from "./agent-template";
 import { clientContract } from "./client";
+import { connectionContract } from "./connection";
 import { engagementContract } from "./engagement";
 import { intakeContract } from "./intake";
 import { missionContract } from "./mission";
@@ -15,14 +16,17 @@ import { skillSourceContract } from "./skill-source";
 export * from "./activity";
 export * from "./agent-template";
 export * from "./client";
+export * from "./connection";
 export * from "./engagement";
 export * from "./intake";
 export * from "./mission";
 export * from "./preset";
+export * from "./repo-read";
 export * from "./roster";
 export * from "./shared/envelope";
 export * from "./shared/errors";
 export * from "./shared/pagination";
+export * from "./shared/repo-url";
 export * from "./shared/skill-tiers";
 export * from "./shared/status";
 export * from "./skill";
@@ -60,6 +64,7 @@ export const contract = c.router(
 		missions: missionContract,
 		activity: activityContract,
 		intakes: intakeContract,
+		connections: connectionContract,
 		agentTemplates: agentTemplateContract,
 		skills: skillContract,
 		skillSources: skillSourceContract,

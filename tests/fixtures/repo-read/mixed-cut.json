@@ -1,0 +1,40 @@
+{
+	"commitSha": "6d697865642d6375740000000000000000000000",
+	"entries": [
+		{
+			"path": "package.json",
+			"size": 73,
+			"text": "{\n  \"name\": \"mixed\",\n  \"devDependencies\": {\n    \"vitest\": \"^1.6.0\"\n  }\n}\n"
+		},
+		{
+			"path": "src/controllers/health-controller.ts",
+			"size": 44,
+			"text": "export function health() {\n  return 'ok';\n}\n"
+		},
+		{
+			"path": "src/modules/accounts/accounts.controller.ts",
+			"size": 35,
+			"text": "export class AccountsController {}\n"
+		},
+		{
+			"path": "src/modules/accounts/accounts.service.ts",
+			"size": 32,
+			"text": "export class AccountsService {}\n"
+		},
+		{
+			"path": "src/modules/billing/billing.controller.ts",
+			"size": 34,
+			"text": "export class BillingController {}\n"
+		},
+		{
+			"path": "src/modules/billing/billing.service.ts",
+			"size": 31,
+			"text": "export class BillingService {}\n"
+		},
+		{
+			"path": "src/services/mailer-service.ts",
+			"size": 26,
+			"text": "export function send() {}\n"
+		}
+	]
+}

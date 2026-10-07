@@ -16,6 +16,7 @@ import * as authSchema from "../../src/db/schema/auth";
 import type { Db } from "../../src/db/tx";
 import { fixedClock } from "../../src/lib/clock";
 import { type IdGenerator, sequentialIds } from "../../src/lib/ids";
+import { noRepos } from "../unit/repo-fixtures";
 import {
 	BASE_URL,
 	captureLogger,
@@ -166,6 +167,7 @@ describe.skipIf(!url)(
 					db: () => closer.db,
 					webOrigins: [],
 					preview: false,
+					repos: noRepos,
 				}),
 				creator: createApp({
 					clock,
@@ -175,6 +177,7 @@ describe.skipIf(!url)(
 					db: () => creator.db,
 					webOrigins: [],
 					preview: false,
+					repos: noRepos,
 				}),
 			};
 			const { cookie } = await signInWithGitHub(apps.creator, OPERATOR);

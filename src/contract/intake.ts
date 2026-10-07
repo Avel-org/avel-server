@@ -1,8 +1,10 @@
 import { initContract } from "@ts-rest/core";
 import { z } from "zod";
 import { missionCut } from "./mission";
+import { boundarySchema, conventionSetSchema } from "./repo-read";
 import { successEnvelope } from "./shared/envelope";
 import { pageMeta, pageQuery } from "./shared/pagination";
+import { parseGitHubRepoUrl } from "./shared/repo-url";
 import { intakeStatus } from "./shared/status";
 
 const c = initContract();
@@ -78,10 +80,17 @@ export const intakeSchema = z.object({
 	/** Computed by reading the repository (module 2). Null until then. */
 	derivedCut: missionCut.nullable(),
 	derivedCutEvidence: z.string().nullable(),
-	/** Deferred: an open record until module 2 builds ConventionSet. */
-	derivedConventions: z.record(z.string(), z.unknown()).nullable(),
-	/** Deferred: open records until module 2 builds Boundary. */
-	derivedBoundaries: z.array(z.record(z.string(), z.unknown())).nullable(),
+	/** The conventions the read extracted. A low one blocks approval. */
+	derivedConventions: conventionSetSchema.nullable(),
+	derivedBoundaries: z.array(boundarySchema).nullable(),
+	/**
+	 * The repository the derived fields were read from, normalized
+	 * (https://github.com/owner/repo), and the commit they describe. All three
+	 * are set by read-repo, and approve requires its repoUrl to match.
+	 */
+	repoUrl: z.string().nullable(),
+	repoCommitSha: z.string().nullable(),
+	repoReadAt: iso.nullable(),
 	suggestedPresetId: uuid.nullable(),
 	/** All three are set exactly when status is approved. */
 	approvedBy: uuid.nullable(),
@@ -130,6 +139,27 @@ export const approveIntakeBody = z
 		 * through revise instead. Recorded in the intake.approved ActivityLog row.
 		 */
 		acknowledged: z.array(openQuestion).max(100).default([]),
+	})
+	.strict();
+
+/** A GitHub repository URL: https://github.com/owner/repo, optionally ending .git or /. */
+const githubRepoUrl = z
+	.string()
+	.max(500)
+	.refine((u) => parseGitHubRepoUrl(u) !== null, {
+		message: "Give a GitHub repository URL: https://github.com/owner/repo",
+	});
+
+/**
+ * Reads the repository through a Connection of the intake's engagement and
+ * writes the derived fields. A re-read replaces them; it never changes status.
+ */
+export const readRepoBody = z
+	.object({
+		connectionId: uuid,
+		repoUrl: githubRepoUrl,
+		/** A branch, tag or sha. Omitted: the default branch's head. */
+		ref: z.string().trim().min(1).max(250).optional(),
 	})
 	.strict();
 
@@ -203,6 +233,15 @@ export const intakeContract = c.router({
 		responses: { 200: successEnvelope(intakeSchema) },
 		summary:
 			"Proposed to approved, creating the Mission. Re-runs the check, with every open question acknowledged.",
+	},
+	readRepo: {
+		method: "POST",
+		path: "/api/intakes/:id/read-repo",
+		pathParams: byId,
+		body: readRepoBody,
+		responses: { 200: successEnvelope(intakeSchema) },
+		summary:
+			"Draft or proposed. Reads the repository once and writes the cut, conventions and boundaries, with their evidence.",
 	},
 	reject: {
 		method: "POST",

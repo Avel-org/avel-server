@@ -21,6 +21,7 @@ import * as authSchema from "../../src/db/schema/auth";
 import type { Db } from "../../src/db/tx";
 import { fixedClock } from "../../src/lib/clock";
 import { type IdGenerator, sequentialIds } from "../../src/lib/ids";
+import { noRepos } from "../unit/repo-fixtures";
 import {
 	BASE_URL,
 	captureLogger,
@@ -223,6 +224,7 @@ describe.skipIf(!url)(
 					db: () => g.db,
 					webOrigins: [],
 					preview: false,
+					repos: noRepos,
 				});
 			const apps = {
 				first: app(prefixedIds("11111111"), first),
@@ -258,7 +260,12 @@ describe.skipIf(!url)(
 				await call("first", `/api/intakes/${id}/propose`, { method: "POST" });
 				await db
 					.update(intake)
-					.set({ derivedCut: "vertical" })
+					.set({
+						derivedCut: "vertical",
+						repoUrl: APPROVE.repoUrl,
+						repoCommitSha: "c".repeat(40),
+						repoReadAt: new Date("2026-10-05T12:00:00.000Z"),
+					})
 					.where(eq(intake.id, id));
 
 				const path = `/api/intakes/${id}/approve`;

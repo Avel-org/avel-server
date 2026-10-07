@@ -68,6 +68,12 @@ export const intake = pgTable(
 		approvedBy: uuid("approved_by").references(() => user.id),
 		approvedAt: at("approved_at"),
 		missionId: uuid("mission_id").references(() => mission.id),
+		// The repository the derived_* fields were read from (normalized), and
+		// the commit. Set together by read-repo; approve requires its repoUrl
+		// to match.
+		repoUrl: text("repo_url"),
+		repoCommitSha: text("repo_commit_sha"),
+		repoReadAt: at("repo_read_at"),
 		...softDelete,
 		...timestamps,
 	},
@@ -76,6 +82,10 @@ export const intake = pgTable(
 		check(
 			"intake_approval_complete",
 			sql`${t.status} <> 'approved' or (${t.approvedBy} is not null and ${t.approvedAt} is not null and ${t.missionId} is not null)`,
+		),
+		check(
+			"intake_repo_read_complete",
+			sql`(${t.repoUrl} is null and ${t.repoCommitSha} is null and ${t.repoReadAt} is null) or (${t.repoUrl} is not null and ${t.repoCommitSha} is not null and ${t.repoReadAt} is not null)`,
 		),
 	],
 );

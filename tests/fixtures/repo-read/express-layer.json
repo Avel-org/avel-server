@@ -1,0 +1,75 @@
+{
+	"commitSha": "657870726573732d6c6179657200000000000000",
+	"entries": [
+		{
+			"path": "biome.json",
+			"size": 42,
+			"text": "{ \"formatter\": { \"indentStyle\": \"tab\" } }\n"
+		},
+		{
+			"path": "package.json",
+			"size": 194,
+			"text": "{\n  \"name\": \"booking-api\",\n  \"type\": \"module\",\n  \"scripts\": {\n    \"test\": \"vitest run\"\n  },\n  \"dependencies\": {\n    \"express\": \"^4.19.0\"\n  },\n  \"devDependencies\": {\n    \"vitest\": \"^1.6.0\"\n  }\n}\n"
+		},
+		{
+			"path": "src/app.ts",
+			"size": 123,
+			"text": "import express from 'express';\nimport { router } from './routes/index.js';\n\nexport const app = express();\napp.use(router);\n"
+		},
+		{
+			"path": "src/controllers/booking-controller.ts",
+			"size": 147,
+			"text": "import { bookSlot } from '../services/booking-service.js';\n\nexport function createBooking(req: { body: unknown }) {\n  return bookSlot(req.body);\n}\n"
+		},
+		{
+			"path": "src/controllers/user-controller.ts",
+			"size": 152,
+			"text": "import { findUser } from '../services/user-service.js';\n\nexport function getUser(req: { params: { id: string } }) {\n  return findUser(req.params.id);\n}\n"
+		},
+		{
+			"path": "src/db.ts",
+			"size": 45,
+			"text": "export const db = { rows: [] as unknown[] };\n"
+		},
+		{
+			"path": "src/models/booking.ts",
+			"size": 127,
+			"text": "import { db } from '../db.js';\n\nexport class Booking {\n  constructor(readonly input: unknown) {\n    db.rows.push(input);\n  }\n}\n"
+		},
+		{
+			"path": "src/models/user.ts",
+			"size": 60,
+			"text": "export class User {\n  constructor(readonly id: string) {}\n}\n"
+		},
+		{
+			"path": "src/routes/index.ts",
+			"size": 274,
+			"text": "import { Router } from 'express';\nimport { createBooking } from '../controllers/booking-controller.js';\nimport { getUser } from '../controllers/user-controller.js';\n\nexport const router = Router();\nrouter.post('/bookings', createBooking);\nrouter.get('/users/:id', getUser);\n"
+		},
+		{
+			"path": "src/services/booking-service.ts",
+			"size": 123,
+			"text": "import { Booking } from '../models/booking.js';\n\nexport function bookSlot(input: unknown) {\n  return new Booking(input);\n}\n"
+		},
+		{
+			"path": "src/services/user-service.ts",
+			"size": 113,
+			"text": "import { db } from '../db.js';\n\nexport function findUser(id: string) {\n  return db.rows.find((r) => r === id);\n}\n"
+		},
+		{
+			"path": "tests/controllers/booking-controller.test.ts",
+			"size": 234,
+			"text": "import { describe, expect, it } from 'vitest';\nimport { createBooking } from '../../src/controllers/booking-controller.js';\n\ndescribe('createBooking', () => {\n  it('books', () => expect(createBooking({ body: {} })).toBeTruthy());\n});\n"
+		},
+		{
+			"path": "tests/services/user-service.test.ts",
+			"size": 205,
+			"text": "import { describe, expect, it } from 'vitest';\nimport { findUser } from '../../src/services/user-service.js';\n\ndescribe('findUser', () => {\n  it('misses', () => expect(findUser('x')).toBeUndefined());\n});\n"
+		},
+		{
+			"path": "tsconfig.json",
+			"size": 42,
+			"text": "{ \"compilerOptions\": { \"strict\": true } }\n"
+		}
+	]
+}

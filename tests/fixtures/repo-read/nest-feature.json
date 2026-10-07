@@ -1,0 +1,120 @@
+{
+	"commitSha": "6e6573742d666561747572650000000000000000",
+	"entries": [
+		{
+			"path": ".eslintrc.json",
+			"size": 99,
+			"text": "{\n  \"rules\": {\n    \"no-restricted-imports\": [\"error\", { \"patterns\": [\"../*/*.repository\"] }]\n  }\n}\n"
+		},
+		{
+			"path": ".github/workflows/ci.yml",
+			"size": 94,
+			"text": "name: ci\non: [push]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: npm test\n"
+		},
+		{
+			"path": ".husky/pre-commit",
+			"size": 16,
+			"text": "npx lint-staged\n"
+		},
+		{
+			"path": ".prettierrc",
+			"size": 24,
+			"text": "{ \"singleQuote\": true }\n"
+		},
+		{
+			"path": "package.json",
+			"size": 231,
+			"text": "{\n  \"name\": \"salon-api\",\n  \"scripts\": {\n    \"test\": \"jest\"\n  },\n  \"dependencies\": {\n    \"@nestjs/common\": \"^10.0.0\",\n    \"@nestjs/core\": \"^10.0.0\"\n  },\n  \"devDependencies\": {\n    \"jest\": \"^29.7.0\",\n    \"typescript\": \"^5.4.0\"\n  }\n}\n"
+		},
+		{
+			"path": "src/app.module.ts",
+			"size": 334,
+			"text": "import { Module } from '@nestjs/common';\nimport { BookingsModule } from './modules/bookings/bookings.module';\nimport { ServicesModule } from './modules/services/services.module';\nimport { UsersModule } from './modules/users/users.module';\n\n@Module({ imports: [BookingsModule, ServicesModule, UsersModule] })\nexport class AppModule {}\n"
+		},
+		{
+			"path": "src/main.ts",
+			"size": 202,
+			"text": "import { NestFactory } from '@nestjs/core';\nimport { AppModule } from './app.module';\n\nexport async function bootstrap() {\n  const app = await NestFactory.create(AppModule);\n  await app.listen(3000);\n}\n"
+		},
+		{
+			"path": "src/modules/bookings/bookings.controller.spec.ts",
+			"size": 168,
+			"text": "import { BookingsController } from './bookings.controller';\n\ndescribe('BookingsController', () => {\n  it('exists', () => expect(BookingsController).toBeDefined());\n});\n"
+		},
+		{
+			"path": "src/modules/bookings/bookings.controller.ts",
+			"size": 289,
+			"text": "import { BookingsService } from './bookings.service';\nimport { CreateBookingDto } from './dto/create-booking.dto';\n\nexport class BookingsController {\n  constructor(private readonly bookings: BookingsService) {}\n  create(dto: CreateBookingDto) {\n    return this.bookings.create(dto);\n  }\n}\n"
+		},
+		{
+			"path": "src/modules/bookings/bookings.module.ts",
+			"size": 264,
+			"text": "import { Module } from '@nestjs/common';\nimport { BookingsController } from './bookings.controller';\nimport { BookingsService } from './bookings.service';\n\n@Module({ controllers: [BookingsController], providers: [BookingsService] })\nexport class BookingsModule {}\n"
+		},
+		{
+			"path": "src/modules/bookings/bookings.repository.ts",
+			"size": 210,
+			"text": "import { Database } from '../../shared/database';\n\nexport class BookingsRepository {\n  constructor(private readonly db: Database) {}\n  insert(row: object) {\n    return this.db.query(JSON.stringify(row));\n  }\n}\n"
+		},
+		{
+			"path": "src/modules/bookings/bookings.service.ts",
+			"size": 287,
+			"text": "import { BookingsRepository } from './bookings.repository';\nimport { CreateBookingDto } from './dto/create-booking.dto';\n\nexport class BookingsService {\n  constructor(private readonly repo: BookingsRepository) {}\n  create(dto: CreateBookingDto) {\n    return this.repo.insert(dto);\n  }\n}\n"
+		},
+		{
+			"path": "src/modules/bookings/dto/create-booking.dto.ts",
+			"size": 77,
+			"text": "export class CreateBookingDto {\n  serviceId!: string;\n  startsAt!: string;\n}\n"
+		},
+		{
+			"path": "src/modules/services/services.controller.ts",
+			"size": 152,
+			"text": "import { ServicesService } from './services.service';\n\nexport class ServicesController {\n  constructor(private readonly services: ServicesService) {}\n}\n"
+		},
+		{
+			"path": "src/modules/services/services.module.ts",
+			"size": 264,
+			"text": "import { Module } from '@nestjs/common';\nimport { ServicesController } from './services.controller';\nimport { ServicesService } from './services.service';\n\n@Module({ controllers: [ServicesController], providers: [ServicesService] })\nexport class ServicesModule {}\n"
+		},
+		{
+			"path": "src/modules/services/services.service.spec.ts",
+			"size": 166,
+			"text": "import { ServicesService } from './services.service';\n\ndescribe('ServicesService', () => {\n  it('lists', () => expect(new ServicesService().list()).toEqual([]));\n});\n"
+		},
+		{
+			"path": "src/modules/services/services.service.ts",
+			"size": 63,
+			"text": "export class ServicesService {\n  list() {\n    return [];\n  }\n}\n"
+		},
+		{
+			"path": "src/modules/users/users.controller.ts",
+			"size": 137,
+			"text": "import { UsersService } from './users.service';\n\nexport class UsersController {\n  constructor(private readonly users: UsersService) {}\n}\n"
+		},
+		{
+			"path": "src/modules/users/users.module.ts",
+			"size": 243,
+			"text": "import { Module } from '@nestjs/common';\nimport { UsersController } from './users.controller';\nimport { UsersService } from './users.service';\n\n@Module({ controllers: [UsersController], providers: [UsersService] })\nexport class UsersModule {}\n"
+		},
+		{
+			"path": "src/modules/users/users.service.spec.ts",
+			"size": 144,
+			"text": "import { UsersService } from './users.service';\n\ndescribe('UsersService', () => {\n  it('exists', () => expect(UsersService).toBeDefined());\n});\n"
+		},
+		{
+			"path": "src/modules/users/users.service.ts",
+			"size": 129,
+			"text": "import { Database } from '../../shared/database';\n\nexport class UsersService {\n  constructor(private readonly db: Database) {}\n}\n"
+		},
+		{
+			"path": "src/shared/database.ts",
+			"size": 69,
+			"text": "export class Database {\n  query(sql: string) {\n    return sql;\n  }\n}\n"
+		},
+		{
+			"path": "tsconfig.json",
+			"size": 44,
+			"text": "{\n  \"compilerOptions\": { \"strict\": true }\n}\n"
+		}
+	]
+}

@@ -25,6 +25,7 @@
 	},
 	"dependencies": {
 		"@hono/node-server": "^1.19.0",
+		"@octokit/rest": "22.0.1",
 		"@ts-rest/core": "^3.52.1",
 		"@ts-rest/serverless": "^3.52.1",
 		"better-auth": "^1.7.7",

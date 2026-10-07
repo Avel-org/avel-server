@@ -75,6 +75,12 @@ describe("the error envelope is a discriminated union on code", () => {
 			"roster_not_empty",
 			"skill_not_found",
 			"skill_not_attachable",
+			"intake_repo_mismatch",
+			"intake_conventions_low_confidence",
+			"connection_not_found",
+			"connection_expired",
+			"connection_scope_mismatch",
+			"connection_credential_missing",
 		]);
 	});
 

@@ -106,7 +106,13 @@ async function readyToApprove(
 	);
 	await h.tx
 		.update(intake)
-		.set({ derivedCut: "vertical", derivedCutEvidence: "src/features/*" })
+		.set({
+			derivedCut: "vertical",
+			derivedCutEvidence: "src/features/*",
+			repoUrl: APPROVE.repoUrl,
+			repoCommitSha: "c".repeat(40),
+			repoReadAt: clock.now(),
+		})
 		.where(eq(intake.id, created.id));
 	return created.id;
 }
@@ -151,6 +157,9 @@ describe.skipIf(!url)("/api/intakes", () => {
 				derivedCutEvidence: null,
 				derivedConventions: null,
 				derivedBoundaries: null,
+				repoUrl: null,
+				repoCommitSha: null,
+				repoReadAt: null,
 				suggestedPresetId: null,
 				approvedBy: null,
 				approvedAt: null,

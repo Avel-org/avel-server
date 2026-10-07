@@ -1,0 +1,40 @@
+{
+	"commitSha": "6d6f6e6f7265706f000000000000000000000000",
+	"entries": [
+		{
+			"path": "package.json",
+			"size": 80,
+			"text": "{\n  \"name\": \"mono\",\n  \"private\": true,\n  \"workspaces\": [\n    \"packages/*\"\n  ]\n}\n"
+		},
+		{
+			"path": "packages/api/package.json",
+			"size": 71,
+			"text": "{\n  \"name\": \"api\",\n  \"devDependencies\": {\n    \"vitest\": \"^1.6.0\"\n  }\n}\n"
+		},
+		{
+			"path": "packages/api/src/controllers/booking-controller.ts",
+			"size": 28,
+			"text": "export function create() {}\n"
+		},
+		{
+			"path": "packages/api/src/services/booking-service.ts",
+			"size": 26,
+			"text": "export function book() {}\n"
+		},
+		{
+			"path": "packages/web/package.json",
+			"size": 71,
+			"text": "{\n  \"name\": \"web\",\n  \"devDependencies\": {\n    \"vitest\": \"^1.6.0\"\n  }\n}\n"
+		},
+		{
+			"path": "packages/web/src/features/booking/booking-api.ts",
+			"size": 26,
+			"text": "export function post() {}\n"
+		},
+		{
+			"path": "packages/web/src/features/booking/booking-form.tsx",
+			"size": 49,
+			"text": "export function BookingForm() {\n  return null;\n}\n"
+		}
+	]
+}

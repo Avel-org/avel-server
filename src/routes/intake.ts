@@ -1,17 +1,23 @@
 import { tsr } from "@ts-rest/serverless/fetch";
 import { and, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import {
+	type Boundary,
 	type Brief,
+	type ConventionSet,
 	type Intake,
 	type IntakeStatus,
 	intakeContract,
 	ok,
+	parseGitHubRepoUrl,
 } from "../contract";
 import { logActivity } from "../db/activity";
-import { client, engagement, intake, mission } from "../db/schema";
+import { client, connection, engagement, intake, mission } from "../db/schema";
 import { live, stamp, touch } from "../db/schema/columns";
 import { type Executor, type Tx, withTx } from "../db/tx";
+import type { RepoSource } from "../gateways/repo-source";
 import { checkIntake } from "../lib/intake-check";
+import { lowConfidenceIssues } from "../lib/repo-read/conventions";
+import { readRepo } from "../lib/repo-read/index";
 import { ApiError } from "../middleware/errors";
 import {
 	after,
@@ -35,13 +41,11 @@ function toWire(row: Row): Intake {
 		openQuestions: row.openQuestions,
 		derivedCut: row.derivedCut,
 		derivedCutEvidence: row.derivedCutEvidence,
-		derivedConventions: row.derivedConventions as Record<
-			string,
-			unknown
-		> | null,
-		derivedBoundaries: row.derivedBoundaries as Array<
-			Record<string, unknown>
-		> | null,
+		derivedConventions: row.derivedConventions as ConventionSet | null,
+		derivedBoundaries: row.derivedBoundaries as Boundary[] | null,
+		repoUrl: row.repoUrl,
+		repoCommitSha: row.repoCommitSha,
+		repoReadAt: row.repoReadAt?.toISOString() ?? null,
 		suggestedPresetId: row.suggestedPresetId,
 		approvedBy: row.approvedBy,
 		approvedAt: row.approvedAt?.toISOString() ?? null,
@@ -118,7 +122,69 @@ function checkFailed(issues: ReturnType<typeof checkIntake>): ApiError {
 	);
 }
 
-export function intakeRoutes(deps: RouteDeps) {
+type ConnectionRow = typeof connection.$inferSelect;
+
+function connectionRefused(
+	reason:
+		| "connection_not_found"
+		| "connection_expired"
+		| "connection_scope_mismatch"
+		| "connection_credential_missing",
+	message: string,
+	connectionId: string,
+): ApiError {
+	return new ApiError("PRECONDITION_FAILED", message, {
+		details: { reason, connectionId },
+	});
+}
+
+/**
+ * Whether a connection may read this repository now: live, of the intake's
+ * engagement, active and unexpired, scoped to cover the repository. The
+ * credential is checked separately, by name, through the gateway.
+ */
+function usableConnection(
+	row: ConnectionRow | undefined,
+	connectionId: string,
+	engagementId: string,
+	repo: { owner: string; repo: string },
+	now: Date,
+): ConnectionRow {
+	if (!row || row.engagementId !== engagementId) {
+		throw connectionRefused(
+			"connection_not_found",
+			"The intake's engagement has no such connection",
+			connectionId,
+		);
+	}
+	if (row.status === "revoked") {
+		throw new ApiError("CONNECTION_REVOKED", "The connection is revoked", {
+			details: { connectionId },
+		});
+	}
+	if (row.status === "expired" || (row.expiresAt && row.expiresAt <= now)) {
+		throw connectionRefused(
+			"connection_expired",
+			"The connection has expired",
+			connectionId,
+		);
+	}
+	const scope = row.scopeValue.toLowerCase();
+	const covers =
+		row.scopeType === "owner"
+			? scope === repo.owner
+			: scope === `${repo.owner}/${repo.repo}`;
+	if (!covers) {
+		throw connectionRefused(
+			"connection_scope_mismatch",
+			`The connection is scoped to ${row.scopeValue}, which does not cover ${repo.owner}/${repo.repo}`,
+			connectionId,
+		);
+	}
+	return row;
+}
+
+export function intakeRoutes(deps: RouteDeps & { repos: RepoSource }) {
 	/** Applies `set` to a locked intake and logs `action`, in the caller's transaction. */
 	async function transition(
 		tx: Tx,
@@ -129,7 +195,8 @@ export function intakeRoutes(deps: RouteDeps) {
 			| "intake.updated"
 			| "intake.proposed"
 			| "intake.approved"
-			| "intake.rejected",
+			| "intake.rejected"
+			| "intake.repo_read",
 		payload: Record<string, unknown>,
 	): Promise<Row> {
 		const operator = operatorOf(ctx);
@@ -302,6 +369,38 @@ export function intakeRoutes(deps: RouteDeps) {
 						},
 					);
 				}
+				// The mission is built on the repository that was read, never on
+				// one named only at approval.
+				const named = parseGitHubRepoUrl(body.repoUrl)?.url;
+				if (current.repoUrl === null || named !== current.repoUrl) {
+					throw new ApiError(
+						"PRECONDITION_FAILED",
+						current.repoUrl === null
+							? "No repository has been read for this intake"
+							: `The intake's cut was read from ${current.repoUrl}, not ${body.repoUrl}`,
+						{
+							details: {
+								reason: "intake_repo_mismatch",
+								engagementId: current.engagementId,
+							},
+						},
+					);
+				}
+				const conventions = current.derivedConventions as ConventionSet | null;
+				const low = conventions ? lowConfidenceIssues(conventions) : [];
+				if (low.length > 0) {
+					throw new ApiError(
+						"PRECONDITION_FAILED",
+						"The repository's conventions disagree with themselves; fix the repository and read it again",
+						{
+							details: {
+								reason: "intake_conventions_low_confidence",
+								engagementId: current.engagementId,
+								issues: low,
+							},
+						},
+					);
+				}
 				const now = deps.clock.now();
 				const missionId = deps.ids.next();
 				await tx.insert(mission).values({
@@ -315,7 +414,7 @@ export function intakeRoutes(deps: RouteDeps) {
 					cut: current.derivedCut,
 					cutSource: "derived",
 					cutRationale: null,
-					repoUrl: body.repoUrl,
+					repoUrl: current.repoUrl,
 					spendCeilingUsd: null,
 					deletedAt: null,
 					...stamp(deps.clock),
@@ -343,6 +442,90 @@ export function intakeRoutes(deps: RouteDeps) {
 					},
 					"intake.approved",
 					{ missionId, acknowledged: body.acknowledged },
+				);
+			});
+			return { status: 200, body: ok(toWire(row)) };
+		},
+
+		readRepo: async ({ params, body }, ctx) => {
+			const db = deps.db();
+			// Checked before GitHub is called, so a wrong state or a bad
+			// connection costs no request. Checked again under the lock below.
+			const [found] = await visible(db).where(
+				and(eq(intake.id, params.id), live(intake)),
+			);
+			if (!found) throw notFound("intake", params.id);
+			if (found.status !== "draft" && found.status !== "proposed") {
+				throw wrongState(found, "read");
+			}
+			const repo = parseGitHubRepoUrl(body.repoUrl);
+			if (!repo) throw new Error("the contract admitted a non-GitHub URL");
+			const loadConnection = async (ex: Executor) => {
+				const [row] = await ex
+					.select()
+					.from(connection)
+					.where(and(eq(connection.id, body.connectionId), live(connection)));
+				return row;
+			};
+			const conn = usableConnection(
+				await loadConnection(db),
+				body.connectionId,
+				found.engagementId,
+				repo,
+				deps.clock.now(),
+			);
+			if (!deps.repos.hasCredential(conn.credentialRef)) {
+				throw connectionRefused(
+					"connection_credential_missing",
+					`The credential ${conn.credentialRef} is not set on this server`,
+					conn.id,
+				);
+			}
+
+			// One read of one commit; pure from here on.
+			const snapshot = await deps.repos.snapshot({
+				owner: repo.owner,
+				repo: repo.repo,
+				ref: body.ref,
+				credentialRef: conn.credentialRef,
+			});
+			const read = readRepo(snapshot);
+
+			const row = await withTx(db, async (tx) => {
+				const current = await lockIntake(tx, params.id);
+				if (current.status !== "draft" && current.status !== "proposed") {
+					throw wrongState(current, "read");
+				}
+				// The connection may have been revoked while GitHub answered.
+				usableConnection(
+					await loadConnection(tx),
+					body.connectionId,
+					current.engagementId,
+					repo,
+					deps.clock.now(),
+				);
+				return transition(
+					tx,
+					ctx,
+					current,
+					{
+						derivedCut: read.cut,
+						derivedCutEvidence: read.cutEvidence,
+						derivedConventions: read.conventions,
+						derivedBoundaries: read.boundaries,
+						repoUrl: repo.url,
+						repoCommitSha: read.commitSha,
+						repoReadAt: deps.clock.now(),
+					},
+					"intake.repo_read",
+					{
+						connectionId: conn.id,
+						repoUrl: repo.url,
+						ref: body.ref ?? null,
+						commitSha: read.commitSha,
+						cut: read.cut,
+						confidence: read.conventions.confidence,
+					},
 				);
 			});
 			return { status: 200, body: ok(toWire(row)) };

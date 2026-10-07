@@ -38,6 +38,8 @@ export const activityAction = z.enum([
 	"roster.preset_applied",
 	"mission.skill_attached",
 	"mission.skill_detached",
+	"intake.repo_read",
+	"connection.created",
 ]);
 
 /** Must equal the activity_entity_type pgEnum; tests/api/activity.test.ts checks it. */

@@ -79,6 +79,12 @@ export const PRECONDITION_REASONS = [
 	"roster_not_empty",
 	"skill_not_found",
 	"skill_not_attachable",
+	"intake_repo_mismatch",
+	"intake_conventions_low_confidence",
+	"connection_not_found",
+	"connection_expired",
+	"connection_scope_mismatch",
+	"connection_credential_missing",
 ] as const;
 
 export const preconditionReason = z.enum(PRECONDITION_REASONS);
@@ -93,6 +99,8 @@ export const preconditionDetails = z
 		clientId: z.string().uuid().optional(),
 		/** The engagement the precondition was about, where there is one. */
 		engagementId: z.string().uuid().optional(),
+		/** The connection the precondition was about, where there is one. */
+		connectionId: z.string().uuid().optional(),
 		/** What a mechanical check found (intake_check_failed), in a stable order. */
 		issues: z
 			.array(

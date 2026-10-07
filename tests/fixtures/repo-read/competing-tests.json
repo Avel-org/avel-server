@@ -1,0 +1,90 @@
+{
+	"commitSha": "636f6d706574696e672d74657374730000000000",
+	"entries": [
+		{
+			"path": ".prettierrc",
+			"size": 3,
+			"text": "{}\n"
+		},
+		{
+			"path": "biome.json",
+			"size": 3,
+			"text": "{}\n"
+		},
+		{
+			"path": "package.json",
+			"size": 77,
+			"text": "{\n  \"name\": \"competing\",\n  \"devDependencies\": {\n    \"vitest\": \"^1.6.0\"\n  }\n}\n"
+		},
+		{
+			"path": "src/controllers/booking-controller.ts",
+			"size": 28,
+			"text": "export function create() {}\n"
+		},
+		{
+			"path": "src/controllers/user-controller.ts",
+			"size": 28,
+			"text": "export function create() {}\n"
+		},
+		{
+			"path": "src/services/booking-service.ts",
+			"size": 26,
+			"text": "export function book() {}\n"
+		},
+		{
+			"path": "src/services/user-service.ts",
+			"size": 26,
+			"text": "export function find() {}\n"
+		},
+		{
+			"path": "tests/booking-cancel.spec.ts",
+			"size": 52,
+			"text": "import { it } from 'vitest';\nit('works', () => {});\n"
+		},
+		{
+			"path": "tests/booking-create.spec.ts",
+			"size": 52,
+			"text": "import { it } from 'vitest';\nit('works', () => {});\n"
+		},
+		{
+			"path": "tests/booking-list.spec.ts",
+			"size": 52,
+			"text": "import { it } from 'vitest';\nit('works', () => {});\n"
+		},
+		{
+			"path": "tests/booking-move.spec.ts",
+			"size": 52,
+			"text": "import { it } from 'vitest';\nit('works', () => {});\n"
+		},
+		{
+			"path": "tests/booking-notify.spec.ts",
+			"size": 52,
+			"text": "import { it } from 'vitest';\nit('works', () => {});\n"
+		},
+		{
+			"path": "tests/booking-price.spec.ts",
+			"size": 52,
+			"text": "import { it } from 'vitest';\nit('works', () => {});\n"
+		},
+		{
+			"path": "tests/user-create.test.ts",
+			"size": 52,
+			"text": "import { it } from 'vitest';\nit('works', () => {});\n"
+		},
+		{
+			"path": "tests/user-delete.test.ts",
+			"size": 52,
+			"text": "import { it } from 'vitest';\nit('works', () => {});\n"
+		},
+		{
+			"path": "tests/user-list.test.ts",
+			"size": 52,
+			"text": "import { it } from 'vitest';\nit('works', () => {});\n"
+		},
+		{
+			"path": "tests/user-update.test.ts",
+			"size": 52,
+			"text": "import { it } from 'vitest';\nit('works', () => {});\n"
+		}
+	]
+}

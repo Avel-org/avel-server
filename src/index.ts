@@ -8,6 +8,7 @@ import { previewAuthConfig, previewConfigFromEnv } from "./auth/preview";
 import { signInRecorder } from "./auth/sign-in-activity";
 import { getDb } from "./db/client";
 import * as authSchema from "./db/schema/auth";
+import { githubRepoSource } from "./gateways/repo-source";
 import { systemClock } from "./lib/clock";
 import { randomIds } from "./lib/ids";
 import { createLogger } from "./lib/logger";
@@ -52,6 +53,8 @@ serve({
 		db: getDb,
 		webOrigins: config.webOrigins,
 		preview: preview.enabled,
+		// A Connection names an env var; the gateway reads it at read time.
+		repos: githubRepoSource({ env: (name) => process.env[name] }),
 	}).fetch,
 	port,
 });

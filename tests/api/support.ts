@@ -10,8 +10,10 @@ import * as schema from "../../src/db/schema";
 import { activityLog, user } from "../../src/db/schema";
 import * as authSchema from "../../src/db/schema/auth";
 import { type Tx, withTx } from "../../src/db/tx";
+import type { RepoSource } from "../../src/gateways/repo-source";
 import { fixedClock } from "../../src/lib/clock";
 import { type IdGenerator, randomIds, sequentialIds } from "../../src/lib/ids";
+import { noRepos } from "../unit/repo-fixtures";
 import {
 	BASE_URL,
 	captureLogger,
@@ -107,6 +109,8 @@ export async function withApi(
 		preview?: boolean;
 		/** Run on the counting connection, recording every statement in `statements`. */
 		countStatements?: boolean;
+		/** Where read-repo gets repositories. Default: none, and a read fails loudly. */
+		repos?: RepoSource;
 	} = {},
 ) {
 	const db = options.countStatements ? countingDb() : getDb();
@@ -145,6 +149,7 @@ export async function withApi(
 			db: () => tx,
 			webOrigins: config.webOrigins,
 			preview: options.preview ?? false,
+			repos: options.repos ?? noRepos,
 		});
 
 		let cookie = "";

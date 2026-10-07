@@ -1,0 +1,20 @@
+{
+	"commitSha": "626172652d6c6179657200000000000000000000",
+	"entries": [
+		{
+			"path": "src/controllers/a.js",
+			"size": 34,
+			"text": "module.exports = function a() {};\n"
+		},
+		{
+			"path": "src/controllers/b.js",
+			"size": 34,
+			"text": "module.exports = function b() {};\n"
+		},
+		{
+			"path": "src/services/c.js",
+			"size": 34,
+			"text": "module.exports = function c() {};\n"
+		}
+	]
+}

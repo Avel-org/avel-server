@@ -7,6 +7,7 @@ import type { AuthConfig } from "../../src/auth/config";
 import { type Clock, fixedClock } from "../../src/lib/clock";
 import { type IdGenerator, sequentialIds } from "../../src/lib/ids";
 import { createLogger } from "../../src/lib/logger";
+import { noRepos } from "./repo-fixtures";
 
 // Helpers shared by the unit tests. Not collected as a test file: vitest only
 // collects *.test.ts.
@@ -112,6 +113,7 @@ export function buildApp(
 		},
 		webOrigins: config.webOrigins,
 		preview: options.preview ?? false,
+		repos: noRepos,
 	});
 	return { app, auth, memory, logs: lines, signIns };
 }
