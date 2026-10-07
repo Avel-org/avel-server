@@ -38,10 +38,6 @@ export type SkillSourceListQuery = z.infer<typeof skillSourceListQuery>;
 
 const byId = z.object({ id: z.string().uuid() });
 
-/**
- * Module 4 routes, published ahead of their handlers. Not mounted on the
- * contract router yet: a mounted route with no handler does not typecheck.
- */
 export const skillSourceContract = c.router({
 	list: {
 		method: "GET",

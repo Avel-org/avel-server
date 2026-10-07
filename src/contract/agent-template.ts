@@ -110,11 +110,9 @@ export const agentTemplateListQuery = pageQuery.extend({
 export type AgentTemplateListQuery = z.infer<typeof agentTemplateListQuery>;
 
 const byId = z.object({ id: z.string().uuid() });
+const bySlug = z.object({ slug: z.string().min(1).max(200) });
 
-/**
- * Module 4 routes, published ahead of their handlers. Not mounted on the
- * contract router yet: a mounted route with no handler does not typecheck.
- */
+/** Module 4: read-only. Templates are written by the identity generator (module 5). */
 export const agentTemplateContract = c.router({
 	list: {
 		method: "GET",
@@ -128,5 +126,12 @@ export const agentTemplateContract = c.router({
 		path: "/api/agent-templates/:id",
 		pathParams: byId,
 		responses: { 200: successEnvelope(agentTemplateSchema) },
+	},
+	getBySlug: {
+		method: "GET",
+		path: "/api/agent-templates/by-slug/:slug",
+		pathParams: bySlug,
+		responses: { 200: successEnvelope(agentTemplateSchema) },
+		summary: "The live template with this slug. A deleted one is reached by id",
 	},
 });

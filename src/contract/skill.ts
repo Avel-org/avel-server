@@ -108,11 +108,8 @@ export const skillListQuery = pageQuery.extend({
 export type SkillListQuery = z.infer<typeof skillListQuery>;
 
 const byId = z.object({ id: z.string().uuid() });
+const bySlug = z.object({ slug: z.string().min(1).max(200) });
 
-/**
- * Module 4 routes, published ahead of their handlers. Not mounted on the
- * contract router yet: a mounted route with no handler does not typecheck.
- */
 export const skillContract = c.router({
 	list: {
 		method: "GET",
@@ -126,5 +123,12 @@ export const skillContract = c.router({
 		path: "/api/skills/:id",
 		pathParams: byId,
 		responses: { 200: successEnvelope(skillSchema) },
+	},
+	getBySlug: {
+		method: "GET",
+		path: "/api/skills/by-slug/:slug",
+		pathParams: bySlug,
+		responses: { 200: successEnvelope(skillSchema) },
+		summary: "The live skill with this slug. A deleted one is reached by id",
 	},
 });

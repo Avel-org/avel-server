@@ -27,11 +27,14 @@ import {
 } from "./middleware/errors";
 import { requestId } from "./middleware/request-id";
 import { activityRoutes } from "./routes/activity";
+import { agentTemplateRoutes } from "./routes/agent-templates";
 import { clientRoutes } from "./routes/clients";
 import { engagementRoutes } from "./routes/engagements";
 import { health } from "./routes/health";
 import { missionRoutes } from "./routes/missions";
 import type { RequestContext } from "./routes/shared";
+import { skillSourceRoutes } from "./routes/skill-sources";
+import { skillRoutes } from "./routes/skills";
 
 export type AppDeps = {
 	clock: Clock;
@@ -63,6 +66,9 @@ export function createApp(deps: AppDeps) {
 		engagements: engagementRoutes(routeDeps),
 		missions: missionRoutes(routeDeps),
 		activity: activityRoutes(routeDeps),
+		agentTemplates: agentTemplateRoutes(routeDeps),
+		skills: skillRoutes(routeDeps),
+		skillSources: skillSourceRoutes(routeDeps),
 	});
 
 	const app = new Hono<{ Variables: AuthVariables }>();
