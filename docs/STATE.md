@@ -38,8 +38,8 @@ Legend: ⬜ not started · ◐ partly built · ✅ built.
 | # | Module | State |
 |---|---|---|
 | 0 | Foundation | ✅ |
-| 1 | Intake | ✅ approval waits on module 2 for the derived cut |
-| 2 | Repo read | ⬜ |
+| 1 | Intake | ✅ |
+| 2 | Repo read | ✅ GitHub only; Next.js app-router layouts return no cut |
 | 3 | Mission planner | ⬜ |
 | 4 | Roles and roster | ◐ catalog reads and writes, roster, mission-skill and preset reads built; roster writes next |
 | 5 | Identity generator | ⬜ |

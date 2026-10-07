@@ -67,6 +67,8 @@ src/contract/
 | `intakes` | list · get · create · revise (`PATCH`) · propose · approve · reject (module 1). A wrong state is 409. The check runs at propose and approve. Approve creates the Mission, and refuses `intake_cut_not_derived` until module 2 | `engagementId` · `status` · cursor · `meta.total` |
 | `agentTemplates` · `skills` | list · get · get-by-slug (`/by-slug/:slug`, the live row), read-only (module 4). Skills embed their source; the list item leaves out the markdown | templates: `q` · `kind` · `role` · `wave` (array overlap) · `engagementId`. Skills: `q` · `layer` · `type` · `status` · `role` · `sourceId`. Both: cursor · `meta.total` |
 | `skillSources` | list · get, read-only (module 4), with a live `skillCount` | `q` · `kind` · cursor · `meta.total` |
+| `connections` | list · get · create (module 2), operator-only. `credentialRef` must look like an env var name; only the name is stored | `engagementId` · cursor |
+| `intakes.readRepo` | `POST /api/intakes/:id/read-repo` (module 2): pins the commit, reads the tarball, writes the derived fields and the repo columns. Never changes status | — |
 
 Every list uses keyset cursors, and a cursor from a different sort is 400. Search escapes `\ % _` through one helper, `containsPattern()` in `src/routes/shared.ts`.
 
