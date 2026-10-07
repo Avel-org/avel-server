@@ -62,7 +62,7 @@ Decided before the first mission, after which the stack is frozen until one miss
 | pgvector *usage* | The knowledge vault has contents. Extension enabled day one; nothing built against it. |
 | Redis | pg-boss removes the reason. Revisit only on genuine throughput need. |
 | BullMQ | Same. |
-| **Cloudflare R2** (object storage for frozen export bytes) | Deferred 2026-10-05, before the first mission. The trigger for bringing it back, and where frozen bytes live until then, are open (`DECISIONS-V2.md`). `snapshot_key` stays in the schema. |
+| **Cloudflare R2** (object storage for frozen export bytes) | Deferred 2026-10-05, before the first mission. *Decided 2026-10-06:* R2 is the production backend of one blob gateway that holds export snapshots and Drive files; local disk serves dev and tests (`DECISIONS-V2.md`, *the Drive*). It returns when module 10 freezes the first snapshot. `snapshot_key` stays in the schema. |
 | **Sentry** | Later. Pino is the logging now. Deferred 2026-10-05; the trigger is not decided. |
 
 ---

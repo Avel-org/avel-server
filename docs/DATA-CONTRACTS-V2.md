@@ -129,7 +129,7 @@ error:    { success: false, error: { code, message, details?, requestId } }
 
 **`details` is typed per code.** The error envelope is a discriminated union on `code`. Two codes carry a strict schema, and the other twenty keep `details` optional and untyped:
 
-- `PRECONDITION_FAILED`: `{ reason, clientId? }`, required. `reason` is the closed list `PRECONDITION_REASONS`: `client_not_found · client_closed · client_has_active_engagements`. A new reason is an edit to that list, announced to `avel-web` first.
+- `PRECONDITION_FAILED`: `{ reason, clientId?, engagementId?, issues? }`, required. `reason` is the closed list `PRECONDITION_REASONS` in `src/contract/shared/errors.ts`, which is authoritative; each module's handoff names the reasons it adds and when they fire. A new reason is an edit to that list, announced to `avel-web` first.
 - `VALIDATION_FAILED`: `{ params?, headers?, query?, body? }`, each an array of `{ path, message, code? }`, optional because an unparseable body has no issues.
 
 A thrower cannot attach details that don't match its code: `ApiError` is typed per code, so a wrong reason fails to compile. Decided 2026-10-06.
@@ -144,9 +144,10 @@ A thrower cannot attach details that don't match its code: `ApiError` is typed p
 
 ## Non-contract routes
 
-Three deliberate exceptions:
+Four deliberate exceptions:
 
 - **Zip download** — authenticated `GET`, streams the frozen package.
+- **File bytes** `[specced]`, after the first mission — upload and download for the Drive (*File*).
 - **GitHub webhook** — receives, does not envelope. It moves an Export from `pr-open` to `done` when the PR merges, and to `closed` when the PR is closed without merging.
 - **Sign-in** — Better Auth's own routes at `/api/auth/*`, GitHub provider. An allowlist of GitHub ids in an environment variable is checked in Better Auth's sign-in hook; any other GitHub account is refused.
 
@@ -154,9 +155,9 @@ Three deliberate exceptions:
 
 # Part 2 — The Schema
 
-## The nineteen core entities
+## The twenty core entities
 
-**Client · Engagement · AgentTemplate · Skill · KnowledgeEntry · Finding · Intake · Mission · Playbook · RosterEntry · Dispatch · CompletionReport · RosterPreset · Export · RepoPolicy · Connection · ActivityLog · User · Proposal**
+**Client · Engagement · AgentTemplate · Skill · KnowledgeEntry · Finding · Intake · Mission · Playbook · RosterEntry · Dispatch · CompletionReport · RosterPreset · Export · RepoPolicy · Connection · ActivityLog · User · Proposal · File**
 
 Plus **SkillSource** (supporting catalog). Deferred: PromptFragment (V1.5). Session is not an AVEL entity: Better Auth owns sessions, in its `session`, `account` and `verification` tables (see *User*).
 
@@ -165,6 +166,8 @@ Plus **SkillSource** (supporting catalog). Deferred: PromptFragment (V1.5). Sess
 Up from twelve. `Client` and `Engagement` close the agency layer, `Intake` holds Canon's proposal before an operator approves it into a Mission, `Finding` turns a confirmed defect from one mission into an executable check on every mission after it, `CompletionReport` makes cost and edge consumption required fields rather than habits, and `Proposal` is how anything proactive reaches the operator without acting on its own.
 
 `Dispatch` joined on 2026-10-06 `[specced]`, built with module 6. It is the run itself: one agent, one piece of work, one budget, one access token. Before it, nothing sat between "on the team" (`RosterEntry`) and "finished" (`CompletionReport`).
+
+`File` joined on 2026-10-06 `[specced]`, built after the first mission: one document store, scoped general, client or engagement.
 
 ---
 
@@ -415,7 +418,7 @@ timestamps             created_at, updated_at (as built 2026-10-05); status and 
 
 ### Finding
 
-A defect recorded against a mission. Confirmed findings are what `verification.findings` checks every later mission against. Not the same thing as a `GateFinding` (see *The nineteen core entities*).
+A defect recorded against a mission. Confirmed findings are what `verification.findings` checks every later mission against. Not the same thing as a `GateFinding` (see *The twenty core entities*).
 
 ```
 id · mission_id        FK → Mission
@@ -798,6 +801,39 @@ deleted_at · timestamps
 
 V1 reads a single token from env. The model supports many, so the second client is a row, not a migration.
 
+### File
+
+`[specced]` 2026-10-06, **built after the first mission** (decided by the operator; not a freeze exception). One store for documents: the agency's general docs, a client's files, an engagement's files.
+
+```
+id
+scope                  'general' | 'client' | 'engagement'
+client_id?             FK → Client — required when scope is 'client' or 'engagement', null when 'general' (CHECK)
+engagement_id?         FK → Engagement — required exactly when scope is 'engagement' (CHECK)
+name                   the uploaded file name, for display only
+mime                   detected by the server from the bytes, never taken from the upload
+bytes                  integer, under a size cap
+sha256                 computed by the server; the storage key
+storage_key            where the blob gateway holds the bytes; null once purged
+uploaded_by            FK → User
+purged_at?             set when the bytes are hard-deleted
+deleted_at · timestamps
+```
+
+```
+intake_files           intake_id FK → Intake · file_id FK → File — source material attached to an Intake
+```
+
+**`client_id` is the one-way door,** as on KnowledgeEntry and Finding. A client's or an engagement's file is never readable by an agent working another client's mission.
+
+**Bytes live behind the blob gateway,** the same one that holds frozen export snapshots: `put` and `get` by sha256 key, in `AppDeps`. Local disk in dev and tests, R2 in production (`DECISIONS-V2.md`, *Decided 2026-10-06: the Drive*).
+
+**Deleting a file hard-deletes its bytes and keeps the row as a tombstone.** A client document can carry a duty to destroy it, which a soft delete cannot honor. The row keeps `sha256`, `name`, `uploaded_by` and the time, sets `purged_at` and clears `storage_key`. This is the one stated exception to the soft-delete invariant below, decided by the operator.
+
+**Uploads and downloads are byte routes outside the contract,** like the zip download. A download always sends `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`, and never serves HTML or SVG inline, so an uploaded file cannot run script in the app's origin.
+
+**Agents never search the store.** A mission agent reads the files listed in its dispatch brief, hashed with the brief the way its skills are. Firm agents read across scopes, per `ROLES.md`. Files reach a room only as copies, never as a mount of the store (`SANDBOX.md`). Agents learn from a file only when the operator promotes it to a knowledge skill, through draft, review and approval pinned by hash (`SKILLS.md`). There is no retrieval and no write-back.
+
 ### ActivityLog
 Append-only. `action` and `entity_type` are **closed vocabularies**. Adding a mutation adds its action to the enum in the same change. The action prefix is a *domain*, not the entity_type (`roster.preset_applied` logs against entity_type `roster_entry`). The write happens **inside the same transaction** as the mutation.
 
@@ -876,7 +912,7 @@ Warnings are playbook-relative — read the playbook's `gates`, so absences a pl
 
 ## Cross-cutting invariants
 
-- **Soft delete** on anything an Export can reach. `deleted_at` + an explicit `live()` filter in every list query — Drizzle has no middleware, so it is never implicit. Exceptions: `Finding` is never removed, only dismissed; `ActivityLog` is append-only; `Export` has no `deleted_at`; Better Auth's tables have none.
+- **Soft delete** on anything an Export can reach. `deleted_at` + an explicit `live()` filter in every list query — Drizzle has no middleware, so it is never implicit. Exceptions: a `File`'s bytes are hard-deleted and its row kept as a tombstone (decided 2026-10-06); `Finding` is never removed, only dismissed; `ActivityLog` is append-only; `Export` has no `deleted_at`; Better Auth's tables have none.
 - **No database defaults for ids or times.** The only column defaults are `repo_policy.allow_direct_push_to_default = false` and `export.dry_run = false`. As built 2026-10-05.
 - **Unique slugs and keys are partial unique indexes on live rows** (`deleted_at is null`): `agent_template.slug`, `skill.slug`, `playbook.mission_type`, `repo_policy.repo_url`. `export.idempotency_key` is plainly unique. As built 2026-10-05.
 - **Foreign keys are `ON DELETE no action`,** except `session.user_id` and `account.user_id`, which cascade. A user who acted cannot be hard-deleted. As built 2026-10-05.

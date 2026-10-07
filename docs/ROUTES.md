@@ -28,7 +28,7 @@
 
 ## The sidebar
 
-Twelve links in three groups, per ruling 3 of `avel-web/design/AVEL-DESIGN.md` (2026-10-05). An earlier draft of this section listed sixteen; that was a stale field count.
+Twelve links in three groups, per ruling 3 of `avel-web/design/AVEL-DESIGN.md` (2026-10-05). An earlier draft of this section listed sixteen; that was a stale field count. A thirteenth, Drive `/drive`, is decided (2026-10-06) and arrives with the Drive after the first mission. Its design ruling is avel-web's.
 
 | Work | Library | System |
 |---|---|---|
@@ -45,6 +45,7 @@ Twelve links in three groups, per ruling 3 of `avel-web/design/AVEL-DESIGN.md` (
   - **Findings:** in mission detail, where the operator confirms or dismisses the `open` Findings that judges write. The finding routes land with module 9.
   - **Templates:** open; see *Open* below.
 - No Runs page until two missions run at once.
+- **The Drive** (decided 2026-10-06, built after the first mission): a client's and its engagements' files appear as Notes and Files tabs on the client's panel in `/clients`. General docs live on `/drive`.
 
 **Every link exists in the route tree, and every route in the tree is reachable from somewhere.** A sidebar link to a missing page, or a page nothing links to, is a defect the first build's navigation tests were written to catch; keep them.
 
@@ -89,6 +90,8 @@ Twelve links in three groups, per ruling 3 of `avel-web/design/AVEL-DESIGN.md` (
 /settings/account                  📱   session, sign out
 
 /activity                          📱   global log
+
+/drive                             🖥   general docs (after the first mission)
 ```
 
 **Nothing at `/knowledge`.** KnowledgeEntry has no write path in V1 and an empty vault; a screen over zero rows is a screen that teaches you nothing. Deferred with the write-back.

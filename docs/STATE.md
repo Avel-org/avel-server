@@ -17,7 +17,7 @@
 | Thing | Count |
 |---|---|
 | Command Center modules (`COMMAND-CENTER.md`) | **15**, numbered 0–14 |
-| Core entities | **19** + SkillSource (supporting catalog): 18 built, and `Dispatch` specced 2026-10-06 for module 6. Every one has a field list (`DATA-CONTRACTS-V2.md`). |
+| Core entities | **20** + SkillSource (supporting catalog): 18 built, `Dispatch` specced 2026-10-06 for module 6, and `File` specced 2026-10-06 for after the first mission. Every one has a field list (`DATA-CONTRACTS-V2.md`). |
 | Database tables built | **24** — the 18 entities, SkillSource, `role_skills`, `mission_skills`, and Better Auth's `session`, `account` and `verification`. Migrations `0000`–`0013` applied. |
 | Error codes in `src/contract/shared/errors.ts` | **22** — 6 generic · `NOT_OPERATOR` · 2 route · 12 `BLAST-RADIUS.md` · `GITHUB_REJECTED` |
 | Roles (`ROLES.md`) | **35** — 23 model · 11 code · 1 human |
@@ -111,6 +111,7 @@ Fourteen known flaws in the agent design, all addressed in the specification and
 - **`cc-palette.html` is not in this repository.** `ROUTES.md` references it as the source of the tokens. It needs an owner doc and a location, or the reference goes.
 - **`avel-gates-diagram.html` and `avel-cc-shell.html` are not in this repository.** They are in the operator's frontend bundle, under `design/` (operator, 2026-10-05). `DOC-OWNERSHIP.md`, `STUDY-GUIDE.md` and `DAY-ONE-FRONTEND.md` reference them.
 - **No mobile doc is written, and none is needed now.** Offline capture is deferred (`DECISIONS-V2.md`, *Decided 2026-10-05*). `DAY-ONE-FRONTEND.md` still lists the old mobile doc as a blocker; that file belongs to another session.
+- **The Drive is specced, not built** (decided 2026-10-06): `File`, `intake_files`, the blob gateway and the byte routes. Built after the first mission. The blob gateway itself comes earlier, with module 10's snapshots.
 - **The Platform family has no Owns or Checked-by fields** (`ROLES.md`, *Open questions*). They were deferred to module 4, which is now starting. Module 4's code does not need them, so the doc is what's due.
 - **Two figures in `WHY-AVEL-EXISTS.md` are not fully verified.** See that doc's *Sources*.
 

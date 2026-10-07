@@ -57,6 +57,8 @@ A room sets the ceiling: what an agent's work may write, whether it has network,
 
 **A capability can never raise the ceiling.** No capability gives a judge write access to source, and none gives any room but delivery the credential. A code check rejects a capability attached to a role whose room cannot hold it. See `SKILLS.md`.
 
+**Drive files reach a room only as copies** (specced 2026-10-06, built after the first mission). The runner copies the files a dispatch brief lists into the room before it starts. No room mounts the file store, so the one-way door between clients holds at the filesystem, not only in the API (`DATA-CONTRACTS-V2.md`, *File*).
+
 ## Pattern boundaries: the exit checkpoint
 
 A mount works on whole directories. Some boundaries are patterns, not directories — most importantly, "not the test files," when test files sit in the same directory as the source:

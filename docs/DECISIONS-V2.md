@@ -587,7 +587,7 @@ The operator answered the module 0 question list on 2026-10-05. Shapes are in `D
 
 - **The standing rule "no further stack or schema change before one mission runs" survives.** The changes below are recorded as decided before the first mission. After them the stack is frozen. This closes the open question about whether the repo split retired the rule. *Two exceptions, decided by the operator on 2026-10-06:* Dispatch, the firm roster, and their three foreign keys are built before the first mission (*Decided 2026-10-06: agents call the API*), and so are `Mission.template_ref` and `template_version` (*Decided 2026-10-06: build sync*), with `Finding.reported_by_dispatch_id` as a fourth foreign key before module 9. A third, the same day: `Intake.repo_url`, `repo_commit_sha` and `repo_read_at`, with module 2 (*Starting the build*). Nothing else is unfrozen.
 - **Auth.js → Better Auth** (above). <!--allow-stale-->
-- **R2 is deferred.** The history in *Frozen bytes → R2 from the start* stands as written; a dated note there points here. When R2 returns, and where frozen bytes live until then, is open.
+- **R2 is deferred.** The history in *Frozen bytes → R2 from the start* stands as written; a dated note there points here. *Resolved 2026-10-06:* one blob gateway holds frozen export bytes and Drive files, on local disk in dev and tests and R2 in production (*Decided 2026-10-06: the Drive*).
 - **Pino now, Sentry later.**
 
 ### Later modules (recorded now, built when the module comes)
@@ -726,6 +726,18 @@ Agents retry on timeouts. A duplicate CompletionReport or Proposal corrupts attr
 - **Connections get a minimal list and create in module 2,** so the repo read and the onboarding step that connects a credential have something behind them. Revocation and the rest stay with module 11.
 - **An empty repository is refused for now.** It has no structure to derive a cut from. Greenfield work starts from an AVEL template, whose cut is known.
 
+
+## Decided 2026-10-06: the Drive
+
+The operator wants documents in the Command Center: a client's files, and docs the agency keeps for itself and for its agents. Shapes are in `DATA-CONTRACTS-V2.md`, *File*.
+
+- **One store with a scope:** `general`, `client` or `engagement`. Client files appear as Notes and Files tabs on each client's panel in `/clients`. General docs get a Drive page of their own (`ROUTES.md`). Separate stores per kind would duplicate the access rules three times.
+- **Decided now, built after the first mission.** The first mission is an internal template build that needs no client files. Building the Drive before it would add a table during the freeze for no gain in the number that mission exists to produce. It is not a freeze exception.
+- **One blob gateway for every byte AVEL keeps,** export snapshots and files alike: `put` and `get` by sha256 key, local disk in dev and tests, R2 in production. This answers the open question of where frozen export bytes live, which module 10 needed anyway. Two storage systems would drift.
+- **Deleting a file destroys its bytes** and keeps a tombstone row. A client document can carry a duty to destroy it. This is a stated exception to soft delete, and the only one.
+- **Agents learn only through the operator.** A file becomes agent knowledge when the operator promotes it to a knowledge skill, reviewed and pinned by hash. A mission agent reads the files its dispatch brief lists, hashed with the brief, and never searches. This keeps the knowledge vault's deferral intact (*Sequencing corrections*): "agents read the Drive" must not become retrieval by the back door, because a run that read whatever a search returned cannot be attributed or replayed.
+- **Uploads are the riskiest surface AVEL adds,** so the rules are fixed now. The server computes the hash and the mime type and enforces a size cap. Downloads are always attachments with `nosniff`, never HTML or SVG inline. Files reach rooms only as copies.
+- **An Intake can carry files** as source material, through an `intake_files` join.
 ---
 
 ## Open questions
@@ -735,13 +747,12 @@ Agents retry on timeouts. A duplicate CompletionReport or Proposal corrupts attr
 | Mutation scope: does the sprint-final full run block or report? | Before first ship |
 | Client-side conformance artifact format (D1/D2) | **Yes — blocks the top-priority fix** |
 | The verification receipt handed to clients. *Five gate additions* marks it resolved; this table held it. Which one stands | **Held** (confirmed 2026-10-05). Not built until the operator decides. |
-| When R2 returns, and where frozen export bytes live until then | Before module 10 freezes a snapshot |
 
 **Resolved 2026-08-21:** mutation threshold (global + versioned) · mutation scope (changed per export, full at ship) · `gate_override` renders into the package and PR body · `computeCoherence` in `src/contract/` · `preset` route group added · `no-mistakes`: map its design, do not adopt it (`PRIOR-ART.md`).
 
 **Resolved 2026-10-05:** no mobile doc is needed now; offline capture is deferred · the stack rule survives, with the current changes recorded as decided before the first mission. See *Decided 2026-10-05: module 0*.
 
-**Resolved 2026-10-06:** Dispatch, the firm roster, and their three foreign keys are built before the first mission, the first exception to the schema freeze. See *Decided 2026-10-06: agents call the API*. `Mission.template_ref` and `template_version` are the second. See *Decided 2026-10-06: build sync*.
+**Resolved 2026-10-06:** where frozen export bytes live: one blob gateway, R2 in production (*Decided 2026-10-06: the Drive*). Dispatch, the firm roster, and their three foreign keys are built before the first mission, the first exception to the schema freeze. See *Decided 2026-10-06: agents call the API*. `Mission.template_ref` and `template_version` are the second. See *Decided 2026-10-06: build sync*.
 
 **Resolved by the repo split:** TanStack Start for `avel-web` · the contract lives in `avel-server/src/contract/`, consumed as a git dependency.
 

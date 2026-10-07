@@ -247,9 +247,11 @@ Three verbs:
 | Verify | Its own dispatch | Its own CompletionReport | Nothing |
 | Review | Its own dispatch | Its own CompletionReport, and an `open` Finding on its own mission | Nothing |
 | Operate | The delivered mission: exports, findings, activity | Its own CompletionReport | A follow-up |
-| Firm | Across missions: clients, missions, engagements, exports, activity. Never connections, repo policies or credentials | `intake` only: Intake drafts | `intake`: questions · `strategy`: chat suggestions and next missions · `client-ops`: a client message |
+| Firm | Across missions: clients, missions, engagements, exports, activity, and Drive files in every scope. Never connections, repo policies or credentials | `intake` only: Intake drafts | `intake`: questions · `strategy`: chat suggestions and next missions · `client-ops`: a client message |
 
 `code` roles have no agent and no token. `foundations` is the operator.
+
+**Drive files** (specced 2026-10-06, built after the first mission): a mission agent reads only the files its dispatch brief lists, inside its own client's door. No agent writes, deletes or searches files (`DATA-CONTRACTS-V2.md`, *File*).
 
 **An agent covering several roles gets all of them.** That is safe because roles merge only within a side (`ROSTER-V2.md`, *Merging roles into agents*). An agent that can write source can never also write findings.
 
