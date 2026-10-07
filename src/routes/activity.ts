@@ -1,10 +1,36 @@
 import { tsr } from "@ts-rest/serverless/fetch";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, sql } from "drizzle-orm";
 import { type ActivityEntry, activityContract } from "../contract";
-import { activityLog } from "../db/schema";
+import { activityLog, agentTemplate, rosterEntry, user } from "../db/schema";
 import { after, type RequestContext, type RouteDeps, toPage } from "./shared";
 
-type Row = typeof activityLog.$inferSelect;
+type Row = typeof activityLog.$inferSelect & {
+	login: string | null;
+	agentName: string | null;
+	territory: string | null;
+};
+
+/**
+ * The actor's label. The CHECKs on activity_log tie each kind to its foreign
+ * key, and the foreign keys keep the joined rows, so a missing name is a
+ * broken row: a 500, never a made-up label.
+ */
+function actorDisplay(row: Row): string {
+	switch (row.actorKind) {
+		case "system":
+			return "System";
+		case "operator":
+			if (row.login === null)
+				throw new Error(`activity ${row.id}: operator has no user row`);
+			return row.login;
+		case "agent":
+			if (row.agentName === null)
+				throw new Error(`activity ${row.id}: agent has no template row`);
+			return row.territory
+				? `${row.agentName} · ${row.territory}`
+				: row.agentName;
+	}
+}
 
 /** The keyset position shared.ts pages on: (at desc, id desc) here. */
 const position = { createdAt: activityLog.at, id: activityLog.id };
@@ -24,6 +50,7 @@ function toWire(row: Row): ActivityEntry {
 		engagementId: row.engagementId,
 		requestId: row.requestId,
 		payload: row.payload as Record<string, unknown>,
+		actor: { kind: row.actorKind, display: actorDisplay(row) },
 	};
 }
 
@@ -54,8 +81,24 @@ export function activityRoutes(deps: RouteDeps) {
 			// without the cursor, so it is the same on every page.
 			const [rows, [counted]] = await Promise.all([
 				db
-					.select()
+					.select({
+						...getTableColumns(activityLog),
+						login: user.githubLogin,
+						agentName: agentTemplate.name,
+						territory: rosterEntry.territory,
+					})
 					.from(activityLog)
+					// One query, no per-row lookups. No live(): a removed roster
+					// entry or template still names who acted.
+					.leftJoin(user, eq(user.id, activityLog.actorUserId))
+					.leftJoin(
+						rosterEntry,
+						eq(rosterEntry.id, activityLog.actorRosterEntryId),
+					)
+					.leftJoin(
+						agentTemplate,
+						eq(agentTemplate.id, rosterEntry.agentTemplateId),
+					)
 					.where(and(filters, after(position, query.cursor)))
 					.orderBy(desc(activityLog.at), desc(activityLog.id))
 					.limit(query.limit + 1),

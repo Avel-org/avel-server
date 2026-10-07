@@ -39,7 +39,7 @@ export type ActivityEntityType = z.infer<typeof activityEntityType>;
 const iso = z.string().datetime();
 const uuid = z.string().uuid();
 
-/** One ActivityLog row: its columns in camelCase, nothing joined. */
+/** One ActivityLog row: its columns in camelCase, plus the actor's label. */
 export const activityEntry = z.object({
 	id: uuid,
 	at: iso,
@@ -56,6 +56,12 @@ export const activityEntry = z.object({
 	/** The request that wrote the row; a system job's run or job id. */
 	requestId: z.string(),
 	payload: z.record(z.string(), z.unknown()),
+	/**
+	 * Who acted, for display. An operator is their GitHub login, the system is
+	 * "System", and an agent is "Name · territory" from its RosterEntry and
+	 * AgentTemplate, or the bare name when the entry has no territory.
+	 */
+	actor: z.object({ kind: activityActorKind, display: z.string() }),
 });
 
 export type ActivityEntry = z.infer<typeof activityEntry>;

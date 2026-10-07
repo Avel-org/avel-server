@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import {
 	type ActivityEntry,
@@ -21,7 +22,7 @@ import {
 import { stamp } from "../../src/db/schema/columns";
 import type { Tx } from "../../src/db/tx";
 import { randomIds } from "../../src/lib/ids";
-import { clock, closeApi, prefixedIds, withApi } from "./support";
+import { clock, closeApi, prefixedIds, statements, withApi } from "./support";
 
 const url = process.env.DATABASE_URL;
 const at = (minutes: number) =>
@@ -40,6 +41,8 @@ type Seeded = {
 	exportId: string;
 	rosterEntryId: string;
 	operatorId: string;
+	/** The signed-in operator's GitHub login, which labels their rows. */
+	operatorLogin: string;
 	/** The seed's own id block, so a test can tell its rows from any other. */
 	prefix: string;
 };
@@ -49,7 +52,11 @@ type Seeded = {
  * two rows (c, d) at the same instant so the id tiebreak shows. Newest
  * first they are f, e, d, c, b, a.
  */
-async function seed(tx: Tx, operatorId: string): Promise<Seeded> {
+async function seed(
+	tx: Tx,
+	operatorId: string,
+	operatorLogin: string,
+): Promise<Seeded> {
 	const prefix = randomIds.next().slice(0, 8);
 	const ids = prefixedIds(prefix);
 	const clientId = ids.next();
@@ -112,6 +119,7 @@ async function seed(tx: Tx, operatorId: string): Promise<Seeded> {
 		waves: ["A"],
 		grain: "default",
 		absorbedBoundaries: [],
+		territory: "booking",
 		...stamp(clock),
 	});
 	const exportId = ids.next();
@@ -197,17 +205,20 @@ async function seed(tx: Tx, operatorId: string): Promise<Seeded> {
 		exportId,
 		rosterEntryId,
 		operatorId,
+		operatorLogin,
 		prefix,
 	};
 }
 
 type Call = (path: string) => Promise<Response>;
 
-async function withActivity(fn: (call: Call, s: Seeded) => Promise<void>) {
+async function withActivity(
+	fn: (call: Call, s: Seeded, tx: Tx) => Promise<void>,
+) {
 	await withApi(async (api) => {
 		await api.signIn();
-		const s = await seed(api.tx, await api.operatorId());
-		await fn((path) => api.call(path), s);
+		const s = await seed(api.tx, await api.operatorId(), api.operator.login);
+		await fn((path) => api.call(path), s, api.tx);
 	});
 }
 
@@ -280,6 +291,7 @@ describe.skipIf(!url)("/api/activity", () => {
 					engagementId: s.e1,
 					requestId: "req-f",
 					payload: { name: "f" },
+					actor: { kind: "operator", display: s.operatorLogin },
 				},
 				{
 					id: s.row.d,
@@ -294,6 +306,7 @@ describe.skipIf(!url)("/api/activity", () => {
 					engagementId: s.e1,
 					requestId: "req-d",
 					payload: { name: "d" },
+					actor: { kind: "agent", display: "Backend · booking" },
 				},
 				{
 					id: s.row.c,
@@ -308,9 +321,57 @@ describe.skipIf(!url)("/api/activity", () => {
 					engagementId: s.e1,
 					requestId: "req-c",
 					payload: { name: "c" },
+					actor: { kind: "system", display: "System" },
 				},
 			]);
 		});
+	});
+
+	it("labels an agent with no territory by its template name alone", async () => {
+		await withActivity(async (call, s, tx) => {
+			await tx
+				.update(rosterEntry)
+				.set({ territory: null })
+				.where(eq(rosterEntry.id, s.rosterEntryId));
+			const { data } = await listOf(call, "actorKind=agent");
+			expect(data.find((r) => r.id === s.row.d)?.actor).toEqual({
+				kind: "agent",
+				display: "Backend",
+			});
+		});
+	});
+
+	it("labels every row of a page in one query", async () => {
+		await withApi(
+			async (api) => {
+				await api.signIn();
+				const s = await seed(
+					api.tx,
+					await api.operatorId(),
+					api.operator.login,
+				);
+				const from = statements.length;
+				const { data } = await listOf(
+					(path) => api.call(path),
+					`engagementId=${s.e1}`,
+				);
+				expect(data.map((r) => r.actor.kind)).toEqual([
+					"operator",
+					"agent",
+					"system",
+					"system",
+				]);
+				const activityQueries = statements
+					.slice(from)
+					.filter((q) => /from "activity_log"/.test(q));
+				// The page and its count: never one lookup per row.
+				expect(activityQueries).toHaveLength(2);
+				expect(
+					statements.slice(from).filter((q) => /from "agent_template"/.test(q)),
+				).toEqual([]);
+			},
+			{ countStatements: true },
+		);
 	});
 
 	it("lists newest first, breaking a tie in `at` on id descending", async () => {
