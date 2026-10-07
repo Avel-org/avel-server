@@ -3,6 +3,7 @@ import {
 	agentKind,
 	agentTemplateListQuery,
 	agentTemplateSchema,
+	ROLES,
 	role,
 	skillLayer,
 	skillListItem,
@@ -13,6 +14,7 @@ import {
 	skillSourceSchema,
 	skillStatus,
 	skillType,
+	WAVES,
 	wave,
 } from "../../src/contract";
 import {
@@ -150,8 +152,53 @@ describe("catalog vocabularies", () => {
 		expect(skillSourceKind.options).toEqual(skillSourceKindEnum.enumValues);
 	});
 
-	it("pins the role count at 35", () => {
+	// role and wave pgEnums are built from these arrays, so the equality above
+	// cannot catch an edit. Pinning them here makes any edit a deliberate,
+	// reviewed change. A removal or reorder needs a hand-written migration:
+	// drizzle-kit's generated one casts the enum-array columns through text.
+	it("pins the 35 roles, in catalog order", () => {
+		expect(ROLES).toEqual([
+			"foundations",
+			"schema",
+			"contract",
+			"design-system",
+			"fixture",
+			"domain",
+			"api-surface",
+			"integration",
+			"realtime",
+			"auth",
+			"state",
+			"interface",
+			"backend-tests",
+			"frontend-tests",
+			"property-tests",
+			"accessibility",
+			"performance",
+			"spec-check",
+			"spec-judgment",
+			"security-review",
+			"compliance-review",
+			"adversarial",
+			"reconciliation",
+			"concurrency",
+			"deploy",
+			"recovery",
+			"observability",
+			"incident-response",
+			"intake",
+			"strategy",
+			"research",
+			"client-ops",
+			"knowledge",
+			"render",
+			"ship-decision",
+		]);
 		expect(role.options).toHaveLength(35);
+	});
+
+	it("pins the waves, in order", () => {
+		expect(WAVES).toEqual(["A", "B", "C", "D", "E"]);
 	});
 });
 

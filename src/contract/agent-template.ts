@@ -7,8 +7,9 @@ import { oneOrMany, searchQuery } from "./shared/query";
 const c = initContract();
 
 /**
- * The closed role vocabulary from docs/ROLES.md, in catalog order. Must equal
- * the role pgEnum; tests/unit/catalog-contract.test.ts checks it.
+ * The closed role vocabulary from docs/ROLES.md, in catalog order. The role
+ * pgEnum is built from it, so a change here is a migration;
+ * tests/unit/catalog-contract.test.ts pins it.
  */
 export const ROLES = [
 	// Foundation
@@ -59,7 +60,7 @@ export const role = z.enum(ROLES);
 
 export type Role = z.infer<typeof role>;
 
-/** The global phases A to E; E is Operate. Must equal the wave pgEnum. */
+/** The global phases A to E; E is Operate. The wave pgEnum is built from it. */
 export const WAVES = ["A", "B", "C", "D", "E"] as const;
 
 export const wave = z.enum(WAVES);

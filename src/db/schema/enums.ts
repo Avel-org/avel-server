@@ -1,54 +1,15 @@
 import { pgEnum } from "drizzle-orm/pg-core";
+import { ROLES, WAVES } from "../../contract/agent-template";
 
-/** The closed role vocabulary from docs/ROLES.md: 35 roles, in catalog order. */
-export const roles = [
-	// Foundation
-	"foundations",
-	"schema",
-	"contract",
-	"design-system",
-	"fixture",
-	// Build
-	"domain",
-	"api-surface",
-	"integration",
-	"realtime",
-	"auth",
-	"state",
-	"interface",
-	// Verify
-	"backend-tests",
-	"frontend-tests",
-	"property-tests",
-	"accessibility",
-	"performance",
-	// Review
-	"spec-check",
-	"spec-judgment",
-	"security-review",
-	"compliance-review",
-	"adversarial",
-	"reconciliation",
-	"concurrency",
-	// Operate
-	"deploy",
-	"recovery",
-	"observability",
-	"incident-response",
-	// Firm
-	"intake",
-	"strategy",
-	"research",
-	"client-ops",
-	// Platform
-	"knowledge",
-	"render",
-	"ship-decision",
-] as const;
+/**
+ * The closed role vocabulary (docs/ROLES.md) and the waves A to E, built from
+ * the contract arrays so the database and avel-web cannot drift.
+ */
+export const roles = ROLES;
 export type Role = (typeof roles)[number];
 export const role = pgEnum("role", roles);
 
-export const waves = ["A", "B", "C", "D", "E"] as const;
+export const waves = WAVES;
 export type Wave = (typeof waves)[number];
 export const wave = pgEnum("wave", waves);
 
