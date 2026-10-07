@@ -223,7 +223,10 @@ describe("githubRepoSource", () => {
 	/** A fetch that answers GitHub's two calls, recording what was asked. */
 	function github(commitStatus = 200) {
 		const calls: Array<{ url: string; auth: string | null }> = [];
-		const fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+		const fetch = (async (
+			input: string | URL | Request,
+			init?: RequestInit,
+		) => {
 			const url = String(input instanceof Request ? input.url : input);
 			const headers = new Headers(init?.headers);
 			calls.push({ url, auth: headers.get("authorization") });
