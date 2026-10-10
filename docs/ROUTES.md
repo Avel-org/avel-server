@@ -100,13 +100,13 @@ Twelve links in three groups, per ruling 3 of `avel-web/design/AVEL-DESIGN.md` (
 
 ## Contract gaps this map surfaces
 
-`src/contract/` lists route groups for mission, roster, export, agent-template, skill, playbook, repo-policy, connection, activity.
+`src/contract/` holds route groups for clients, engagements, missions, missionPlans, activity, intakes, connections, agentTemplates, skills, skillSources, roster, presets and playbooks (checked 2026-10-10). Export and repo-policy arrive with modules 10 and 11. Exact routes: `DATA-CONTRACTS-V2.md`, *Built so far*.
 
 | Gap | Needed by | Severity |
 |---|---|---|
-| **No `client`, `engagement`, or `intake` route groups.** Three new entities with no procedures. | `/clients/*`, `/intake/:id` | **blocking** |
-| **No `preset` route group.** RosterPreset is an entity with `preset.list/get/create/update/apply`, and `Playbook.default_preset_id` FKs to it. The contract has no file for it. | `/presets`, `/presets/:id`, and the loadout screen's "apply preset" | **blocking** |
-| **No `skillSource` procedures.** The catalog is populated in-app; something must write it. | `/catalog/sources` | blocking for that screen |
+| ~~No `client`, `engagement`, or `intake` route groups.~~ Resolved: built with modules 0 and 1. | `/clients/*`, `/intake/:id` | — |
+| ~~No `preset` route group.~~ Resolved 2026-10-10: `presets` list, get, create, update; applying is `roster.applyPreset`. | `/presets`, `/presets/:id`, and the loadout screen's "apply preset" | — |
+| ~~No `skillSource` procedures.~~ Resolved: built with module 4. | `/catalog/sources` | — |
 | `export.preview` | pre-flight | specced in `BLAST-RADIUS.md`, not yet in the contract |
 | `mission.getWithRoster` | loadout | Not built, by decision (2026-10-06): the loadout calls `missions.get` and `roster.list` |
 | `skill.resolveTiers` | loadout | Built as the pure function `resolveSkillTiers()` in the contract, not a route |
@@ -136,7 +136,7 @@ The Phase Zero surface, and the only offline-capable one.
 
 Hub. Brief summary · roster summary · playbook in effect · last export state · coherence status.
 
-**Needs:** `mission.getWithRoster`, `playbook.getForType`
+**Needs:** `missions.get`, `playbooks.getForType` (module 3; `/missions/:id/playbook` uses it too, with the mission's type)
 **Rule:** every construction action here is a link, not an inline control — the actions live on desktop routes.
 
 ### `/missions/:id/roster` — the loadout screen 🖥

@@ -8,7 +8,7 @@ import { createApp } from "../../src/app";
 import { createAuth } from "../../src/auth";
 import { signInRecorder } from "../../src/auth/sign-in-activity";
 import {
-	type Brief,
+	type BriefInput,
 	clientSchema,
 	engagementSchema,
 	errorEnvelope,
@@ -39,7 +39,7 @@ const url = process.env.DATABASE_URL;
 const scratch = `avel_intake_race_${process.pid}`;
 const BUDGET_MS = 60_000;
 
-const BRIEF: Brief = {
+const BRIEF: BriefInput = {
 	summary: "Online booking",
 	requirements: [{ id: "R1", text: "A customer books a slot" }],
 	acceptanceCriteria: [{ id: "AC1", requirementId: "R1", text: "It shows" }],

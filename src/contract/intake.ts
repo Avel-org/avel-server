@@ -18,6 +18,9 @@ export const requirementId = z
 export const criterionId = z
 	.string()
 	.regex(/^AC[1-9][0-9]*$/, "A criterion id is AC and a number: AC1, AC2, ...");
+export const moduleId = z
+	.string()
+	.regex(/^M[1-9][0-9]*$/, "A module id is M and a number: M1, M2, ...");
 
 /**
  * The brief Canon drafts and the operator approves. Held here and nowhere
@@ -52,10 +55,29 @@ export const briefSchema = z
 					.strict(),
 			)
 			.max(2_000),
+		/**
+		 * How the work splits (module 3). The operator writes it on a draft
+		 * Mission; Intake leaves it empty. A brief stored before modules
+		 * existed parses with none.
+		 */
+		modules: z
+			.array(
+				z
+					.object({
+						id: moduleId,
+						name: z.string().trim().min(1).max(200),
+						requirementIds: z.array(requirementId).max(500),
+					})
+					.strict(),
+			)
+			.max(200)
+			.default([]),
 	})
 	.strict();
 
 export type Brief = z.infer<typeof briefSchema>;
+/** A brief as a request body may send it: modules may be left out. */
+export type BriefInput = z.input<typeof briefSchema>;
 
 const openQuestion = z.string().trim().min(1).max(2_000);
 

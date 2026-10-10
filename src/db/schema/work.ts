@@ -14,6 +14,7 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
+import { DELIVERABLES } from "../../contract/playbook";
 import { MISSION_STATUSES } from "../../contract/shared/status";
 import { client, engagement } from "./agency";
 import { id, softDelete, timestamps } from "./columns";
@@ -24,11 +25,8 @@ export const missionOrigin = pgEnum("mission_origin", ["internal", "client"]);
 // Built from the contract array, so the database and avel-web cannot drift.
 export const missionStatus = pgEnum("mission_status", MISSION_STATUSES);
 export const cutSource = pgEnum("cut_source", ["derived", "overridden"]);
-export const deliverable = pgEnum("deliverable", [
-	"pr",
-	"report",
-	"recommendation",
-]);
+// Built from the contract array, so the database and avel-web cannot drift.
+export const deliverable = pgEnum("deliverable", DELIVERABLES);
 export const grain = pgEnum("grain", ["merged", "default", "split"]);
 export const completionStatus = pgEnum("completion_status", [
 	"complete",
@@ -159,6 +157,10 @@ export const mission = pgTable(
 		cutRationale: text("cut_rationale"),
 		repoUrl: text("repo_url").notNull(),
 		spendCeilingUsd: numeric("spend_ceiling_usd", { precision: 12, scale: 2 }),
+		// The template slug it was built from and that template repository's
+		// commit sha; both or neither (mission_template_complete).
+		templateRef: text("template_ref"),
+		templateVersion: text("template_version"),
 		...softDelete,
 		...timestamps,
 	},
@@ -171,6 +173,10 @@ export const mission = pgTable(
 		check(
 			"mission_override_has_rationale",
 			sql`${t.cutSource} <> 'overridden' or (${t.cutRationale} is not null and btrim(${t.cutRationale}) <> '')`,
+		),
+		check(
+			"mission_template_complete",
+			sql`(${t.templateRef} is null and ${t.templateVersion} is null) or (${t.templateRef} is not null and ${t.templateVersion} ~ '^[0-9a-f]{40}$')`,
 		),
 	],
 );

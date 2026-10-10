@@ -34,7 +34,9 @@ import { connectionRoutes } from "./routes/connections";
 import { engagementRoutes } from "./routes/engagements";
 import { health } from "./routes/health";
 import { intakeRoutes } from "./routes/intake";
+import { missionPlanRoutes } from "./routes/mission-plan";
 import { missionRoutes } from "./routes/missions";
+import { playbookRoutes } from "./routes/playbooks";
 import { presetRoutes } from "./routes/presets";
 import { rosterRoutes } from "./routes/roster";
 import type { RequestContext } from "./routes/shared";
@@ -72,6 +74,7 @@ export function createApp(deps: AppDeps) {
 		clients: clientRoutes(routeDeps),
 		engagements: engagementRoutes(routeDeps),
 		missions: missionRoutes(routeDeps),
+		missionPlans: missionPlanRoutes(routeDeps),
 		activity: activityRoutes(routeDeps),
 		intakes: intakeRoutes({ ...routeDeps, repos: deps.repos }),
 		connections: connectionRoutes(routeDeps),
@@ -80,6 +83,7 @@ export function createApp(deps: AppDeps) {
 		skillSources: skillSourceRoutes(routeDeps),
 		roster: rosterRoutes(routeDeps),
 		presets: presetRoutes(routeDeps),
+		playbooks: playbookRoutes(routeDeps),
 	});
 
 	const app = new Hono<{ Variables: AuthVariables }>();

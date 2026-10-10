@@ -738,6 +738,18 @@ The operator wants documents in the Command Center: a client's files, and docs t
 - **Agents learn only through the operator.** A file becomes agent knowledge when the operator promotes it to a knowledge skill, reviewed and pinned by hash. A mission agent reads the files its dispatch brief lists, hashed with the brief, and never searches. This keeps the knowledge vault's deferral intact (*Sequencing corrections*): "agents read the Drive" must not become retrieval by the back door, because a run that read whatever a search returned cannot be attributed or replayed.
 - **Uploads are the riskiest surface AVEL adds,** so the rules are fixed now. The server computes the hash and the mime type and enforces a size cap. Downloads are always attachments with `nosniff`, never HTML or SVG inline. Files reach rooms only as copies.
 - **An Intake can carry files** as source material, through an `intake_files` join.
+
+## Decided 2026-10-10: the mission planner
+
+Decided by the operator when module 3 started. Module 4's preset create and update were built in the same pass, so module 4 is complete.
+
+- **The planner's modules live in the brief,** as `modules: [{ id, name, requirementIds }]`, not in a table. COMMAND-CENTER says the planner produces modules, and no entity held them. A table would have been another freeze exception; the brief is jsonb and DATA-CONTRACTS already requires the planner to extend the brief's list rather than start a second one.
+- **The operator writes the plan, and code checks it.** The Intake pattern: a mechanical check (`checkPlan`) confirms ids, coverage, and that every requirement sits in exactly one module. Canon cannot draft it until it runs as a dispatch (modules 6 + 7 + 8), and a template-derived plan works only for template missions.
+- **The approved brief is fixed.** A plan adds requirements, criteria and modules, and never edits or removes what the operator approved at Intake. Requirement ids are permanent, and an approval that the plan could rewrite would sign off nothing.
+- **A plan saves without passing.** The check is reported on every read and write. Refusing to save a half-finished plan would push the work into the client. The check binds when a mission leaves `draft`, which the dispatch unit builds.
+- **`Mission.template_version` is the template repository's commit sha.** Exact, and the same pinning module 2 uses for `repo_commit_sha`. A semver string lets two contents share a version, which would corrupt the comparison `template_ref` exists for.
+- **Coherence, three answers.** The disjointness half of the vertical-cut warning is deferred until `writable_paths` can express exclusions, after the first mission; without them the canonical layout always warns. When it lands, a human's foundations entry is exempt, because the rule exists so agents do not grade work they own. "Foundations and verification both assigned" applies under any vertical cut, not per gate; gate-relative warnings come later.
+- **Presets, as built.** A preset is saved only if it could be applied: live, rosterable templates, each at most once per territory. A missing preset on update is 404, like every update by id. No delete, because `Playbook.default_preset_id` is a NOT NULL FK.
 ---
 
 ## Open questions

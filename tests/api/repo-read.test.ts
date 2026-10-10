@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import {
-	type Brief,
+	type BriefInput,
 	clientSchema,
 	connectionSchema,
 	engagementSchema,
@@ -21,7 +21,7 @@ import { type ApiHarness, clock, closeApi, withApi } from "./support";
 const url = process.env.DATABASE_URL;
 const one = successEnvelope(intakeSchema);
 
-const BRIEF: Brief = {
+const BRIEF: BriefInput = {
 	summary: "Online booking",
 	requirements: [{ id: "R1", text: "A customer books a slot" }],
 	acceptanceCriteria: [{ id: "AC1", requirementId: "R1", text: "It shows" }],

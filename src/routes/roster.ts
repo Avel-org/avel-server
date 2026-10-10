@@ -142,6 +142,43 @@ function requireRosterable(
 	}
 }
 
+/**
+ * A preset's agents, as applying them requires: each template live and
+ * rosterable, and each template at most once per territory (no territory
+ * counts as one). Preset create and update check the same before saving.
+ */
+export async function requirePresetAgents(
+	db: Executor,
+	agents: Array<{ agentTemplateId: string; territory: string | null }>,
+) {
+	const templateIds = [...new Set(agents.map((a) => a.agentTemplateId))];
+	const templates =
+		templateIds.length === 0
+			? []
+			: await db
+					.select({
+						id: agentTemplate.id,
+						roles: agentTemplate.roles,
+						deletedAt: agentTemplate.deletedAt,
+					})
+					.from(agentTemplate)
+					.where(inArray(agentTemplate.id, templateIds));
+	const byId = new Map(templates.map((t) => [t.id, t]));
+	for (const id of templateIds) requireRosterable(byId.get(id), id);
+
+	const seen = new Set<string>();
+	for (const a of agents) {
+		const key = JSON.stringify([a.agentTemplateId, a.territory]);
+		if (seen.has(key)) {
+			throw new ApiError(
+				"CONFLICT",
+				"The preset names one template twice for the same territory",
+			);
+		}
+		seen.add(key);
+	}
+}
+
 /** One live entry per template and territory on a mission (no territory counts as one). */
 async function requireNoDuplicate(
 	tx: Tx,
@@ -415,34 +452,16 @@ export function rosterRoutes(deps: RouteDeps) {
 					);
 				}
 
-				const templateIds = [
-					...new Set(preset.agents.map((a) => a.agent_template_id)),
-				];
-				const templates =
-					templateIds.length === 0
-						? []
-						: await tx
-								.select({
-									id: agentTemplate.id,
-									roles: agentTemplate.roles,
-									deletedAt: agentTemplate.deletedAt,
-								})
-								.from(agentTemplate)
-								.where(inArray(agentTemplate.id, templateIds));
-				const byId = new Map(templates.map((t) => [t.id, t]));
-				for (const id of templateIds) requireRosterable(byId.get(id), id);
+				await requirePresetAgents(
+					tx,
+					preset.agents.map((a) => ({
+						agentTemplateId: a.agent_template_id,
+						territory: a.territory ?? null,
+					})),
+				);
 
-				const seen = new Set<string>();
 				const values = preset.agents.map((a) => {
 					const territory = a.territory ?? null;
-					const key = JSON.stringify([a.agent_template_id, territory]);
-					if (seen.has(key)) {
-						throw new ApiError(
-							"CONFLICT",
-							"The preset names one template twice for the same territory",
-						);
-					}
-					seen.add(key);
 					const estimatedTokens = a.estimated_tokens ?? null;
 					const row = {
 						id: deps.ids.next(),

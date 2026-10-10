@@ -7,6 +7,8 @@ import { connectionContract } from "./connection";
 import { engagementContract } from "./engagement";
 import { intakeContract } from "./intake";
 import { missionContract } from "./mission";
+import { missionPlanContract } from "./mission-plan";
+import { playbookContract } from "./playbook";
 import { presetContract } from "./preset";
 import { rosterContract } from "./roster";
 import { errorEnvelope, successEnvelope } from "./shared/envelope";
@@ -20,9 +22,12 @@ export * from "./connection";
 export * from "./engagement";
 export * from "./intake";
 export * from "./mission";
+export * from "./mission-plan";
+export * from "./playbook";
 export * from "./preset";
 export * from "./repo-read";
 export * from "./roster";
+export * from "./shared/coherence";
 export * from "./shared/envelope";
 export * from "./shared/errors";
 export * from "./shared/pagination";
@@ -62,6 +67,7 @@ export const contract = c.router(
 		clients: clientContract,
 		engagements: engagementContract,
 		missions: missionContract,
+		missionPlans: missionPlanContract,
 		activity: activityContract,
 		intakes: intakeContract,
 		connections: connectionContract,
@@ -70,6 +76,7 @@ export const contract = c.router(
 		skillSources: skillSourceContract,
 		roster: rosterContract,
 		presets: presetContract,
+		playbooks: playbookContract,
 	},
 	{
 		// One entry per ERROR_STATUSES value. Written out, not mapped, so ts-rest

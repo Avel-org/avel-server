@@ -13,20 +13,63 @@ export type CheckIssue = { path: Array<string | number>; message: string };
  * 3. Every criterion cites a requirement that exists.
  * 4. Every requirement has at least one criterion.
  * 5. (approve) The acknowledged questions are exactly the open questions.
+ * 6. The brief has no modules: the mission's plan adds them (module 3).
  */
 export function checkIntake(input: {
 	proposedBrief: unknown;
 	openQuestions: readonly string[];
 	acknowledged?: readonly string[];
 }): CheckIssue[] {
-	const issues: CheckIssue[] = [];
+	const issues = checkBriefRules(input.proposedBrief, "proposedBrief");
 	const at = (...path: Array<string | number>) => ["proposedBrief", ...path];
 
+	// Rule 5.
+	if (input.acknowledged) {
+		const acknowledged = new Set(input.acknowledged);
+		const open = new Set(input.openQuestions);
+		input.openQuestions.forEach((q, i) => {
+			if (!acknowledged.has(q)) {
+				issues.push({
+					path: ["openQuestions", i],
+					message: `Open question is neither answered nor acknowledged: ${q}`,
+				});
+			}
+		});
+		input.acknowledged.forEach((q, i) => {
+			if (!open.has(q)) {
+				issues.push({
+					path: ["acknowledged", i],
+					message: `Acknowledged a question that is not open: ${q}`,
+				});
+			}
+		});
+	}
+
+	// Rule 6.
+	const brief = briefSchema.safeParse(input.proposedBrief);
+	if (brief.success && brief.data.modules.length > 0) {
+		issues.push({
+			path: at("modules"),
+			message: "An intake's brief has no modules; the mission's plan adds them",
+		});
+	}
+
+	return issues;
+}
+
+/**
+ * Rules 1 to 4, which the mission's plan check (src/lib/plan-check.ts) shares.
+ * Issue paths start at `root`.
+ */
+export function checkBriefRules(brief: unknown, root: string): CheckIssue[] {
+	const issues: CheckIssue[] = [];
+	const at = (...path: Array<string | number>) => [root, ...path];
+
 	// Rule 1.
-	if (input.proposedBrief === null || input.proposedBrief === undefined) {
+	if (brief === null || brief === undefined) {
 		issues.push({ path: at(), message: "There is no brief yet" });
 	} else {
-		const parsed = briefSchema.safeParse(input.proposedBrief);
+		const parsed = briefSchema.safeParse(brief);
 		if (!parsed.success) {
 			for (const issue of parsed.error.issues) {
 				issues.push({ path: at(...issue.path), message: issue.message });
@@ -83,28 +126,6 @@ export function checkIntake(input: {
 				}
 			});
 		}
-	}
-
-	// Rule 5.
-	if (input.acknowledged) {
-		const acknowledged = new Set(input.acknowledged);
-		const open = new Set(input.openQuestions);
-		input.openQuestions.forEach((q, i) => {
-			if (!acknowledged.has(q)) {
-				issues.push({
-					path: ["openQuestions", i],
-					message: `Open question is neither answered nor acknowledged: ${q}`,
-				});
-			}
-		});
-		input.acknowledged.forEach((q, i) => {
-			if (!open.has(q)) {
-				issues.push({
-					path: ["acknowledged", i],
-					message: `Acknowledged a question that is not open: ${q}`,
-				});
-			}
-		});
 	}
 
 	return issues;

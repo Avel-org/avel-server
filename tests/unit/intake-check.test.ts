@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { Brief } from "../../src/contract";
+import type { BriefInput } from "../../src/contract";
 import { checkIntake } from "../../src/lib/intake-check";
 
 /** A brief that passes rules 1 to 4: two requirements, each with a criterion. */
-function brief(over: Partial<Brief> = {}): Brief {
+function brief(over: Partial<BriefInput> = {}): BriefInput {
 	return {
 		summary: "Online booking for a salon",
 		requirements: [
@@ -161,5 +161,30 @@ describe("checkIntake", () => {
 			["proposedBrief", "requirements", 0],
 			["openQuestions", 0],
 		]);
+	});
+});
+
+describe("checkIntake rule 6", () => {
+	it("refuses a brief that carries modules, since the plan adds them", () => {
+		expect(
+			checkIntake({
+				proposedBrief: brief({
+					modules: [{ id: "M1", name: "Booking", requirementIds: ["R1"] }],
+				}),
+				openQuestions: [],
+			}),
+		).toEqual([
+			{
+				path: ["proposedBrief", "modules"],
+				message:
+					"An intake's brief has no modules; the mission's plan adds them",
+			},
+		]);
+	});
+
+	it("passes an empty modules list", () => {
+		expect(
+			checkIntake({ proposedBrief: brief({ modules: [] }), openQuestions: [] }),
+		).toEqual([]);
 	});
 });

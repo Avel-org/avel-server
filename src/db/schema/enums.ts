@@ -1,5 +1,6 @@
 import { pgEnum } from "drizzle-orm/pg-core";
 import { ROLES, WAVES } from "../../contract/agent-template";
+import { GATES } from "../../contract/playbook";
 
 /**
  * The closed role vocabulary (docs/ROLES.md) and the waves A to E, built from
@@ -15,15 +16,8 @@ export const wave = pgEnum("wave", waves);
 
 export const cut = pgEnum("cut", ["horizontal", "vertical"]);
 
-/** Closed gate vocabulary, DATA-CONTRACTS-V2.md Playbook. */
-export const gates = [
-	"phase1-close",
-	"alignment",
-	"qa",
-	"security",
-	"rollback",
-	"acceptance",
-] as const;
+/** Closed gate vocabulary, DATA-CONTRACTS-V2.md Playbook, built from the contract array. */
+export const gates = GATES;
 export type Gate = (typeof gates)[number];
 export const gate = pgEnum("gate", gates);
 

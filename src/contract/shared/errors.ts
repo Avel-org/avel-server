@@ -85,6 +85,7 @@ export const PRECONDITION_REASONS = [
 	"connection_expired",
 	"connection_scope_mismatch",
 	"connection_credential_missing",
+	"plan_changes_approved_brief",
 ] as const;
 
 export const preconditionReason = z.enum(PRECONDITION_REASONS);
@@ -101,7 +102,7 @@ export const preconditionDetails = z
 		engagementId: z.string().uuid().optional(),
 		/** The connection the precondition was about, where there is one. */
 		connectionId: z.string().uuid().optional(),
-		/** What a mechanical check found (intake_check_failed), in a stable order. */
+		/** What a mechanical check found (intake_check_failed) or what a plan changed (plan_changes_approved_brief), in a stable order. */
 		issues: z
 			.array(
 				z

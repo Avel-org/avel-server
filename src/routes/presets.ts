@@ -3,16 +3,22 @@ import { and, desc, eq, ilike, inArray, type SQL, sql } from "drizzle-orm";
 import {
 	ok,
 	type Preset,
+	type PresetAgent,
 	type PresetListQuery,
 	page,
 	presetContract,
 } from "../contract";
+import { logActivity } from "../db/activity";
 import { rosterPreset } from "../db/schema";
-import { live } from "../db/schema/columns";
+import { live, stamp, touch } from "../db/schema/columns";
+import type { PresetAgent as StoredAgent } from "../db/schema/work";
+import { withTx } from "../db/tx";
+import { requirePresetAgents } from "./roster";
 import {
 	after,
 	containsPattern,
 	notFound,
+	operatorOf,
 	type RequestContext,
 	type RouteDeps,
 	toPage,
@@ -38,6 +44,19 @@ function toWire(row: Row): Preset {
 		createdAt: row.createdAt.toISOString(),
 		updatedAt: row.updatedAt.toISOString(),
 	};
+}
+
+/** The wire's nulls become absent keys, the stored shape. */
+function toStored(agents: PresetAgent[]): StoredAgent[] {
+	return agents.map((a) => ({
+		agent_template_id: a.agentTemplateId,
+		waves: a.waves,
+		...(a.territory !== null ? { territory: a.territory } : {}),
+		...(a.writablePaths !== null ? { writable_paths: a.writablePaths } : {}),
+		...(a.estimatedTokens !== null
+			? { estimated_tokens: a.estimatedTokens }
+			: {}),
+	}));
 }
 
 function filtersFor(query: PresetListQuery): SQL | undefined {
@@ -79,6 +98,80 @@ export function presetRoutes(deps: RouteDeps) {
 				.from(rosterPreset)
 				.where(and(eq(rosterPreset.id, params.id), live(rosterPreset)));
 			if (!row) throw notFound("preset", params.id);
+			return { status: 200, body: ok(toWire(row)) };
+		},
+
+		create: async ({ body }, ctx) => {
+			const operator = operatorOf(ctx);
+			const row = await withTx(deps.db(), async (tx) => {
+				await requirePresetAgents(tx, body.agents);
+				const values = {
+					id: deps.ids.next(),
+					name: body.name,
+					description: body.description ?? null,
+					cut: body.cut,
+					agents: toStored(body.agents),
+					version: 1,
+					deletedAt: null,
+					...stamp(deps.clock),
+				};
+				await tx.insert(rosterPreset).values(values);
+				await logActivity(tx, deps, {
+					actorKind: "operator",
+					actorUserId: operator.id,
+					action: "preset.created",
+					entityType: "roster_preset",
+					entityId: values.id,
+					requestId: ctx.requestId,
+					payload: {
+						name: values.name,
+						cut: values.cut,
+						agentCount: values.agents.length,
+					},
+				});
+				return values;
+			});
+			return { status: 201, body: ok(toWire(row)) };
+		},
+
+		update: async ({ params, body }, ctx) => {
+			const operator = operatorOf(ctx);
+			const row = await withTx(deps.db(), async (tx) => {
+				// Locked FOR UPDATE, so concurrent updates bump the version one at a time.
+				const [current] = await tx
+					.select({ version: rosterPreset.version })
+					.from(rosterPreset)
+					.where(and(eq(rosterPreset.id, params.id), live(rosterPreset)))
+					.for("update");
+				if (!current) throw notFound("preset", params.id);
+				if (body.agents) await requirePresetAgents(tx, body.agents);
+				const { agents, ...rest } = body;
+				const [updated] = await tx
+					.update(rosterPreset)
+					.set({
+						...rest,
+						...(agents ? { agents: toStored(agents) } : {}),
+						version: current.version + 1,
+						...touch(deps.clock),
+					})
+					.where(eq(rosterPreset.id, params.id))
+					.returning();
+				if (!updated) throw new Error("a locked preset was not updatable");
+				await logActivity(tx, deps, {
+					actorKind: "operator",
+					actorUserId: operator.id,
+					action: "preset.updated",
+					entityType: "roster_preset",
+					entityId: params.id,
+					requestId: ctx.requestId,
+					// Field names only, like the roster: agents can be long.
+					payload: {
+						fields: Object.keys(body).sort(),
+						version: updated.version,
+					},
+				});
+				return updated;
+			});
 			return { status: 200, body: ok(toWire(row)) };
 		},
 	});

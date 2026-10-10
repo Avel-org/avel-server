@@ -29,7 +29,8 @@ src/contract/
   index.ts            the assembled contract (this is THE artifact)
   client.ts           module 0
   engagement.ts       module 0
-  mission.ts          module 13 (read, built); writes with modules 1 and 3
+  mission.ts          module 13 (read, built); created by module 1
+  mission-plan.ts     module 3 — the plan: get · update (PUT). Its own file, because intake.ts imports mission.ts
   activity.ts         module 13 (read only)
   intake.ts           module 1
   playbook.ts         module 3
@@ -37,7 +38,7 @@ src/contract/
   skill.ts            module 4
   skill-source.ts     module 4
   roster.ts           module 4
-  preset.ts           module 4 — RosterPreset: list · get · create · update · apply
+  preset.ts           module 4 — RosterPreset: list · get · create · update. Applying is roster.applyPreset
   dispatch.ts         module 6
   completion-report.ts  module 8
   finding.ts          module 9 (moved from 12 on 2026-10-06)
@@ -68,6 +69,10 @@ src/contract/
 | `agentTemplates` · `skills` | list · get · get-by-slug (`/by-slug/:slug`, the live row), read-only (module 4). Skills embed their source; the list item leaves out the markdown | templates: `q` · `kind` · `role` · `wave` (array overlap) · `engagementId`. Skills: `q` · `layer` · `type` · `status` · `role` · `sourceId`. Both: cursor · `meta.total` |
 | `skillSources` | list · get, read-only (module 4), with a live `skillCount` | `q` · `kind` · cursor · `meta.total` |
 | `connections` | list · get · create (module 2), operator-only. `credentialRef` must look like an env var name; only the name is stored | `engagementId` · cursor |
+| `roster` | list · add · update · remove · applyPreset (`POST /api/missions/:missionId/roster/apply-preset`, all or nothing; refuses a non-empty roster unless `replace`) · skills · attachSkill · detachSkill (module 4). Writes need a `draft` mission (422 `mission_not_editable`) | — |
+| `presets` | list · get · create (201) · update (`PATCH`, any subset, at least one field; `agents` replaces the list; every update adds 1 to `version`) (module 4). Agents must name live, rosterable templates (422 `agent_template_not_found`, `template_not_rosterable`), each at most once per territory (409 `CONFLICT`), the same rules apply-preset meets. A missing or deleted preset is 404. No delete: `Playbook.default_preset_id` is a NOT NULL FK | `q` · `cut` · cursor · `meta.total` |
+| `playbooks` | list · getForType (`GET /api/playbooks/by-type/:missionType`, the live row, else 404), read-only (module 3). Writes for the `/playbooks` editor are not built | `q` (name) · cursor · `meta.total` |
+| `missionPlans` | get · update (`GET`/`PUT /api/missions/:id/plan`, module 3). The response carries the brief (null when the stored one predates the brief shape), `approvedBrief` (the approving Intake's brief, which the plan may not change; null when no Intake created the mission), `templateRef`, `templateVersion`, and `check: { passed, issues }` from `checkPlan`. Update replaces the plan on a `draft` mission (422 `mission_not_editable`), saves whether or not the check passes, and refuses any change to the approved brief (422 `plan_changes_approved_brief`, with `issues`) | — |
 | `intakes.readRepo` | `POST /api/intakes/:id/read-repo` (module 2): pins the commit, reads the tarball, writes the derived fields and the repo columns. Never changes status | — |
 
 Every list uses keyset cursors, and a cursor from a different sort is 400. Search escapes `\ % _` through one helper, `containsPattern()` in `src/routes/shared.ts`.
@@ -229,11 +234,16 @@ deleted_at · timestamps
 summary              text
 requirements         [{ id: 'R1', text }]                         — at least one; ids unique and permanent
 acceptanceCriteria   [{ id: 'AC1', requirementId: 'R1', text }]   — ids unique; each cites an existing requirement
+modules              [{ id: 'M1', name, requirementIds: ['R1'] }]  — [built] 2026-10-10, module 3; defaults to [] so a brief stored before it parses
 ```
 
-Module 3's planner extends this same list. It never starts a second one.
+Module 3's planner extends this same list. It never starts a second one. *Decided by the operator 2026-10-10:* the modules live in the brief, not a table. The operator writes the plan on a draft Mission and code checks it, the Intake pattern; no model is in the path. An Intake's brief carries no modules (the intake check's rule 6). Module ids may change while the mission is a draft, because the plan is still being written. `[attestation]` until the dispatch unit builds the move out of `draft`: from then on, nothing changes the brief.
 
-**The mechanical check** runs at `propose` and again at `approve`. It requires a brief that parses, at least one requirement, unique ids, every criterion citing a requirement, and every requirement with at least one criterion. At `approve` it also requires every open question to be acknowledged: the approve body's `acknowledged[]` must equal `open_questions` as a set. The acknowledgements are recorded in the `intake.approved` ActivityLog payload, so the schema is unchanged.
+**The plan check** (`checkPlan`, `src/lib/plan-check.ts`) is Intake's rules 1 to 4, plus: at least one module, unique module ids, every requirement a module lists exists and is listed once, and every requirement sits in exactly one module. Saving a plan does not require a pass.
+
+**The approved brief is fixed.** A plan may add requirements, criteria and modules. It may not change the summary, or remove or edit an approved requirement or criterion; the approval signed off their text. The approved brief is the approving Intake's `proposed_brief`, which no route changes after approval. A mission no Intake created has nothing fixed.
+
+**The mechanical check** runs at `propose` and again at `approve`. It requires a brief that parses, at least one requirement, unique ids, every criterion citing a requirement, and every requirement with at least one criterion. It also requires an empty `modules` list, since the plan adds them (rule 6, 2026-10-10). At `approve` it also requires every open question to be acknowledged: the approve body's `acknowledged[]` must equal `open_questions` as a set. The acknowledgements are recorded in the `intake.approved` ActivityLog payload, so the schema is unchanged.
 
 **The repository read is recorded on the Intake** `[specced]` 2026-10-06, module 2. `repo_url?`, `repo_commit_sha?` and `repo_read_at?` are set by `POST /api/intakes/:id/read-repo`, together with the `derived_*` fields. Approve requires its `repoUrl` to equal `repo_url`, refusing with `422 intake_repo_mismatch`. Otherwise an operator could read one repository and approve a mission on another. An empty repository is refused at read time (`422 EMPTY_REPOSITORY`); greenfield work starts from an AVEL template. A freeze exception, decided by the operator.
 
@@ -474,8 +484,8 @@ cut_source             'derived' | 'overridden'
 cut_rationale          text — required when overridden, renders into delivery
 repo_url               a DEFAULT, not the binding destination
 spend_ceiling_usd?     numeric(12,2), nullable; the runner halts the mission when attributed spend reaches it
-template_ref?          [specced] 2026-10-06, module 3 — the template slug it was built from, e.g. 'template-booking'; null when none
-template_version?      [specced] 2026-10-06, module 3 — which version of that template; required exactly when template_ref is set (CHECK); format [unspecified]
+template_ref?          [built] 2026-10-10, module 3 — the template slug it was built from, e.g. 'template-booking'; null when none
+template_version?      [built] 2026-10-10, module 3 — the template repository's commit sha, 40 lowercase hex (decided 2026-10-10); set exactly when template_ref is (CHECK mission_template_complete)
 deleted_at · timestamps
 ```
 
@@ -837,7 +847,7 @@ intake_files           intake_id FK → Intake · file_id FK → File — source
 **Agents never search the store.** A mission agent reads the files listed in its dispatch brief, hashed with the brief the way its skills are. Firm agents read across scopes, per `ROLES.md`. Files reach a room only as copies, never as a mount of the store (`SANDBOX.md`). Agents learn from a file only when the operator promotes it to a knowledge skill, through draft, review and approval pinned by hash (`SKILLS.md`). There is no retrieval and no write-back.
 
 ### ActivityLog
-Append-only. `action` and `entity_type` are **closed vocabularies**. Adding a mutation adds its action to the enum in the same change. The action prefix is a *domain*, not the entity_type (`roster.preset_applied` logs against entity_type `roster_entry`). The write happens **inside the same transaction** as the mutation.
+Append-only. `action` and `entity_type` are **closed vocabularies**. Adding a mutation adds its action to the enum in the same change. The action prefix is a *domain*, not the entity_type (`roster.preset_applied` logs against entity_type `mission`, as built; corrected 2026-10-10, this said `roster_entry`). The write happens **inside the same transaction** as the mutation.
 
 ```
 id · at
@@ -892,11 +902,16 @@ Better Auth also creates `session`, `account`, and `verification`. Those are Bet
 ## Coherence
 
 ```
-computeCoherence(mission, playbook) → {
-  block?: { code: 'no_agents_in_first_wave', reason, wave },
+computeCoherence({ cut, roster: CoherenceEntry[] }, playbook: { wavesApplicable, gates }) → {
+  block?: { code: 'no_agents_in_first_wave', reason, wave: Wave | null },
   warnings: CoherenceWarning[]
 }
+CoherenceEntry = { id, active, waves, kind, roles, writablePaths }   — writablePaths resolved
 ```
+
+*As built 2026-10-10* (`src/contract/shared/coherence.ts`, module 3). The mission wire carries no roster, so the caller passes the cut and the resolved roster. `resolveWritablePaths(entry, template)` is exported so both sides resolve paths the same way: the entry's override, else the template's. Only active entries count. `earliestWave(playbook)` is exported too: the lowest wave in `WAVES` order that the playbook declares, or null when it declares none. **A playbook with no waves blocks, with `wave: null`** (fails closed, decided 2026-10-10). The one warning built is `vertical_cut_roles_unassigned`: under a vertical cut, `foundations` and a Verify-family role must each be held by an active entry. It applies whatever gates the playbook declares (decided 2026-10-10). `gates` is in the input but read by no check yet.
+
+**The disjointness half of cut coherence is deferred** (decided 2026-10-10) until `writable_paths` can express exclusions; a human's foundations entry will be exempt. The glob classifier it needs is built and exported, wired into no warning: each glob is a prefix, an exact file, a leaf anywhere (`**/<leaf>`), or unknown, and pairs compare by segment, never by character. A literal without a trailing slash is a file; write a directory as `dir/` or `dir/**`. Any pair with an unknown glob is not proven disjoint.
 
 **This function lives in `src/contract/`, not in the service layer.** It is pure — no database, no network, no clock — so both sides import the same implementation. The frontend calls it for live feedback on the loadout screen; the export gate calls it for permission. Shared code, single authority: a client that lies about coherence still cannot ship.
 
@@ -945,13 +960,18 @@ As built, from `drizzle/` (2026-10-05). Each table comes after every table its f
 | `0011` | ActivityLog enum values | Adds `mission.created`, `mission.status_changed`, `export.created`, `export.status_changed`, and entity types `mission`, `export` |
 | `0012` | `export.status_changed_at` | Added nullable, backfilled from `created_at`, then NOT NULL. CHECK `status_changed_at >= created_at` |
 | `0013` | Export status trigger | Refuses any status change that does not move `status_changed_at` forward |
+| `0014` | ActivityLog enum values | Intake's five actions and entity type `intake` |
+| `0015` | ActivityLog enum values | Skill source and skill actions, entity types `skill_source`, `skill` |
+| `0016` | ActivityLog enum values | Roster and mission-skill actions, entity type `roster_entry` |
+| `0017` | Intake repository read | `intake.repo_url`, `repo_commit_sha`, `repo_read_at` under an all-or-none CHECK; `intake.repo_read`, `connection.created` |
+| `0018` | ActivityLog enum values | `preset.created`, `preset.updated`, entity type `roster_preset` |
+| `0019` | Mission plan | `mission.template_ref`, `template_version` under CHECK `mission_template_complete`; `mission.plan_updated` |
 
 `0001`–`0006` create 24 tables: 2 + 3 + 8 + 4 + 6 + 1.
 
 `Mission` has no foreign key to `Playbook`. They join on `Playbook.mission_type`.
 
 **Specced 2026-10-06, not yet migrated:**
-- **Module 3:** `mission.template_ref` and `mission.template_version`, nullable, under their CHECK.
 - **Module 6:** `roster_entry.scope` with `mission_id` made nullable under its CHECK, plus the partial unique index on live firm entries per template. Then `dispatch`, with `token_sha256` unique. Then `completion_report.dispatch_id`, `proposal.proposed_by_dispatch_id` and `intake.drafted_by_dispatch_id`.
 - **Before module 9:** `finding.reported_by_dispatch_id`, nullable.
 - **With each agent-reachable create:** its `idempotency_key` and request hash, unique per dispatch (*Idempotency*).

@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import {
-	type Brief,
+	type BriefInput,
 	clientSchema,
 	engagementSchema,
 	errorEnvelope,
@@ -17,7 +17,7 @@ import { type ApiHarness, clock, closeApi, withApi } from "./support";
 
 const url = process.env.DATABASE_URL;
 
-const BRIEF: Brief = {
+const BRIEF: BriefInput = {
 	summary: "Online booking for a salon",
 	requirements: [
 		{ id: "R1", text: "A customer books a slot" },
@@ -151,7 +151,7 @@ describe.skipIf(!url)("/api/intakes", () => {
 				engagementId,
 				status: "draft",
 				sourceMd: "Call notes",
-				proposedBrief: BRIEF,
+				proposedBrief: { ...BRIEF, modules: [] },
 				openQuestions: ["Deposits?"],
 				derivedCut: null,
 				derivedCutEvidence: null,

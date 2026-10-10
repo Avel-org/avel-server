@@ -2,6 +2,7 @@ import { initContract } from "@ts-rest/core";
 import { z } from "zod";
 import { wave } from "./agent-template";
 import { missionCut } from "./mission";
+import { addRosterEntryBody } from "./roster";
 import { successEnvelope } from "./shared/envelope";
 import { pageEnvelope, pageQuery } from "./shared/pagination";
 import { oneOrMany, searchQuery } from "./shared/query";
@@ -44,6 +45,59 @@ export const presetListQuery = pageQuery.extend({
 
 export type PresetListQuery = z.infer<typeof presetListQuery>;
 
+const name = z.string().trim().min(1).max(200);
+// The skill description's rule, nullable.
+const description = z.string().trim().min(1).max(500).nullable();
+
+/**
+ * One agent as written. The keys are presetAgentSchema's, every one required,
+ * so a preset read back can be sent again unchanged. The field rules are the
+ * roster entry's, so applying a saved preset never meets a rule it skipped.
+ */
+export const presetAgentBody = presetAgentSchema
+	.extend(
+		addRosterEntryBody
+			.pick({
+				waves: true,
+				territory: true,
+				writablePaths: true,
+				estimatedTokens: true,
+			})
+			.required().shape,
+	)
+	.strict();
+
+/**
+ * The agents must name live templates that may sit on a roster
+ * (422 agent_template_not_found, template_not_rosterable), at most once per
+ * territory (409 CONFLICT), as applying them would require. A new preset is
+ * version 1.
+ */
+export const createPresetBody = z
+	.object({
+		name,
+		description: description.optional(),
+		cut: missionCut,
+		agents: z.array(presetAgentBody),
+	})
+	.strict();
+
+/** Any subset, at least one. agents replaces the whole list. Every update adds 1 to version. */
+export const updatePresetBody = z
+	.object({
+		name: name.optional(),
+		description: description.optional(),
+		cut: missionCut.optional(),
+		agents: z.array(presetAgentBody).optional(),
+	})
+	.strict()
+	.refine((body) => Object.keys(body).length > 0, {
+		message: "Give at least one field to change",
+	});
+
+export type CreatePresetBody = z.infer<typeof createPresetBody>;
+export type UpdatePresetBody = z.infer<typeof updatePresetBody>;
+
 const byId = z.object({ id: z.string().uuid() });
 
 export const presetContract = c.router({
@@ -59,5 +113,19 @@ export const presetContract = c.router({
 		path: "/api/presets/:id",
 		pathParams: byId,
 		responses: { 200: successEnvelope(presetSchema) },
+	},
+	create: {
+		method: "POST",
+		path: "/api/presets",
+		body: createPresetBody,
+		responses: { 201: successEnvelope(presetSchema) },
+	},
+	update: {
+		method: "PATCH",
+		path: "/api/presets/:id",
+		pathParams: byId,
+		body: updatePresetBody,
+		responses: { 200: successEnvelope(presetSchema) },
+		summary: "A missing or deleted preset is 404",
 	},
 });

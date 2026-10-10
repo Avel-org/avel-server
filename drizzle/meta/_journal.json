@@ -127,6 +127,20 @@
       "when": 1791336394518,
       "tag": "0017_intake_repo_read",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1791665920862,
+      "tag": "0018_preset_activity",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1791666047360,
+      "tag": "0019_mission_plan",
+      "breakpoints": true
     }
   ]
 }
