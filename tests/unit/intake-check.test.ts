@@ -188,3 +188,45 @@ describe("checkIntake rule 6", () => {
 		).toEqual([]);
 	});
 });
+
+describe("shape issues are worded like the other rules", () => {
+	const messages = (proposedBrief: unknown) =>
+		checkIntake({ proposedBrief, openQuestions: [] }).map((i) => i.message);
+
+	it("names a missing top-level field", () => {
+		expect(messages({ summary: "Notifications." })).toEqual([
+			"The brief has no requirements",
+			"The brief has no acceptance criteria",
+		]);
+	});
+
+	it("names the item and field, counted from 1", () => {
+		expect(
+			messages(
+				brief({
+					requirements: [
+						{ id: "R1", text: "A client books a slot" },
+						{ id: "R2" } as never,
+					],
+				}),
+			),
+		).toEqual(["Requirement 2's text is missing"]);
+		expect(messages(brief({ summary: "" }))).toEqual(["The summary is empty"]);
+	});
+
+	it("names fields the brief does not use, and keeps the schema's own id wording", () => {
+		expect(messages({ ...brief(), extra: 1 })).toEqual([
+			"The brief has fields the brief does not use: extra",
+		]);
+		expect(
+			messages(
+				brief({
+					requirements: [
+						{ id: "X1", text: "A client books a slot" },
+						{ id: "R2", text: "A stylist sees the day's bookings" },
+					],
+				}),
+			),
+		).toEqual(["A requirement id is R and a number: R1, R2, ..."]);
+	});
+});

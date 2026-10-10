@@ -1,3 +1,4 @@
+import type { Brief } from "../../contract/intake";
 import { fixedClock } from "../../lib/clock";
 import type { IdGenerator } from "../../lib/ids";
 import type {
@@ -346,6 +347,9 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 		path: [MissionStatus, number][];
 		deletedDay?: number;
 		spendCeilingUsd?: string;
+		/** A shaped brief. Without one the mission stores only its summary. */
+		brief?: Brief;
+		type?: string;
 	}) => {
 		const id = ids.next();
 		const last = m.path.at(-1);
@@ -355,8 +359,8 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 			id,
 			engagementId: m.engagementId,
 			origin: m.engagementId === null ? "internal" : "client",
-			type: "full-build",
-			brief: { summary: m.summary },
+			type: m.type ?? "full-build",
+			brief: m.brief ?? { summary: m.summary },
 			sprintN: m.sprint,
 			status,
 			cut: "vertical",
@@ -417,6 +421,24 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 		summary: "Notifications.",
 		created: 24,
 		path: [],
+		// A plan half written: R3 is in no module yet, so the check fails.
+		brief: {
+			summary: "Notifications.",
+			requirements: [
+				{ id: "R1", text: "A user gets an email when a document is shared" },
+				{ id: "R2", text: "A user can turn each notification off" },
+				{ id: "R3", text: "Notifications are batched into a daily digest" },
+			],
+			acceptanceCriteria: [
+				{ id: "AC1", requirementId: "R1", text: "Sharing sends one email" },
+				{ id: "AC2", requirementId: "R2", text: "A muted kind sends nothing" },
+				{ id: "AC3", requirementId: "R3", text: "One digest a day, at most" },
+			],
+			modules: [
+				{ id: "M1", name: "Delivery", requirementIds: ["R1"] },
+				{ id: "M2", name: "Preferences", requirementIds: ["R2"] },
+			],
+		},
 	});
 	addMission({
 		engagementId: billing,
@@ -704,6 +726,32 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 		day: 6,
 		endDay: 6,
 		rendered: "e",
+	});
+
+	// Added last, so every earlier seed id stays where it was. A playbook
+	// declaring no waves, and a draft of its type: coherence blocks it with
+	// wave null (fails closed).
+	rows.playbook.push({
+		id: ids.next(),
+		missionType: "discovery",
+		name: "Discovery (no waves declared)",
+		wavesApplicable: [],
+		gates: [],
+		deliverable: "recommendation",
+		requiredFields: ["brief"],
+		defaultPresetId: preset,
+		version: 1,
+		createdAt: at(0),
+		updatedAt: at(0),
+	});
+	addMission({
+		engagementId: null,
+		repo: "avel-org/discovery",
+		sprint: 1,
+		summary: "Discovery: what a firm needs first.",
+		created: 27,
+		path: [],
+		type: "discovery",
 	});
 
 	return rows;

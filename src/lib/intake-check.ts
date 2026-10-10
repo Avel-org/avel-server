@@ -1,3 +1,4 @@
+import type { ZodIssue } from "zod";
 import { briefSchema } from "../contract/intake";
 
 export type CheckIssue = { path: Array<string | number>; message: string };
@@ -72,7 +73,7 @@ export function checkBriefRules(brief: unknown, root: string): CheckIssue[] {
 		const parsed = briefSchema.safeParse(brief);
 		if (!parsed.success) {
 			for (const issue of parsed.error.issues) {
-				issues.push({ path: at(...issue.path), message: issue.message });
+				issues.push({ path: at(...issue.path), message: shapeMessage(issue) });
 			}
 		} else {
 			const { requirements, acceptanceCriteria } = parsed.data;
@@ -129,4 +130,59 @@ export function checkBriefRules(brief: unknown, root: string): CheckIssue[] {
 	}
 
 	return issues;
+}
+
+const FIELD: Record<string, string> = {
+	summary: "summary",
+	requirements: "requirements",
+	acceptanceCriteria: "acceptance criteria",
+	modules: "modules",
+	id: "id",
+	text: "text",
+	name: "name",
+	requirementId: "requirement it cites",
+	requirementIds: "requirement list",
+};
+
+const ITEM: Record<string, string> = {
+	requirements: "Requirement",
+	acceptanceCriteria: "Criterion",
+	modules: "Module",
+};
+
+/** "The summary", "Requirement 2", "Criterion 1's text": counted from 1. */
+function describe(path: ReadonlyArray<string | number>): string {
+	const [top, index, field] = path;
+	if (top === undefined) return "The brief";
+	const topName = FIELD[String(top)] ?? String(top);
+	if (typeof index !== "number") return `The ${topName}`;
+	const item = `${ITEM[String(top)] ?? topName} ${index + 1}`;
+	if (field === undefined) return item;
+	return `${item}'s ${FIELD[String(field)] ?? String(field)}`;
+}
+
+/**
+ * A shape issue in the words the check's other rules use, not zod's. A
+ * message the brief schema wrote itself (an id's format) is kept as written.
+ */
+function shapeMessage(issue: ZodIssue): string {
+	switch (issue.code) {
+		case "invalid_type":
+			if (issue.received === "undefined") {
+				return issue.path.length === 1
+					? `The brief has no ${FIELD[String(issue.path[0])] ?? issue.path[0]}`
+					: `${describe(issue.path)} is missing`;
+			}
+			return `${describe(issue.path)} is the wrong kind of value`;
+		case "too_small":
+			return `${describe(issue.path)} is empty`;
+		case "too_big":
+			return issue.type === "array"
+				? `${describe(issue.path)} has more than ${issue.maximum} entries`
+				: `${describe(issue.path)} is longer than ${issue.maximum} characters`;
+		case "unrecognized_keys":
+			return `${describe(issue.path)} has fields the brief does not use: ${issue.keys.join(", ")}`;
+		default:
+			return issue.message;
+	}
 }
