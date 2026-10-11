@@ -33,6 +33,8 @@ async function dump(dbUrl: string) {
 			"roster_entry",
 			"export",
 			"activity_log",
+			"skill_source",
+			"skill",
 		]) {
 			out[table] = await conn.unsafe(`select * from "${table}" order by id`);
 		}

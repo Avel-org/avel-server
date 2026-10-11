@@ -1,0 +1,113 @@
+import { describe, expect, it } from "vitest";
+import {
+	createSkillBody,
+	createSkillSourceBody,
+	FIRM_ROLES,
+	type Role,
+} from "../../src/contract";
+import { buildSeed, seedIds } from "../../src/db/seed/data";
+import { skillContentSha256 } from "../../src/lib/skill-hash";
+
+// The seeded skill catalog must be rows the API could have written, so the
+// catalog pages show what a real operator would see.
+describe("seed skill catalog", () => {
+	const rows = buildSeed(seedIds());
+
+	it("has one source of each kind, each one a valid create body", () => {
+		expect(rows.skillSource.map((s) => s.kind).sort()).toEqual([
+			"community",
+			"internal",
+			"vendor",
+		]);
+		for (const s of rows.skillSource) {
+			expect(
+				createSkillSourceBody.safeParse({
+					name: s.name,
+					kind: s.kind,
+					url: s.url,
+					license: s.license,
+				}).success,
+			).toBe(true);
+		}
+	});
+
+	it("writes every skill as POST /api/skills would, hash included", () => {
+		const sources = new Set(rows.skillSource.map((s) => s.id));
+		for (const k of rows.skill) {
+			const body = {
+				slug: k.slug,
+				name: k.name,
+				description: k.description,
+				contentMd: k.contentMd,
+				avelEnhancementMd: k.avelEnhancementMd,
+				layer: k.layer,
+				type: k.type,
+				recommendedFor: k.recommendedFor,
+				sourceId: k.sourceId,
+				...(k.type === "capability"
+					? { grants: k.grants, ioShape: k.ioShape }
+					: {}),
+			};
+			const parsed = createSkillBody.safeParse(body);
+			expect(parsed.error?.issues ?? [], k.slug).toEqual([]);
+			expect(k.contentSha256, k.slug).toBe(
+				skillContentSha256({
+					description: k.description,
+					contentMd: k.contentMd,
+					avelEnhancementMd: k.avelEnhancementMd ?? null,
+					grants: k.grants ?? null,
+					ioShape: k.ioShape ?? null,
+					type: k.type,
+					layer: k.layer,
+				}),
+			);
+			expect(sources.has(k.sourceId), k.slug).toBe(true);
+			const firm = k.recommendedFor.filter((r) =>
+				(FIRM_ROLES as readonly Role[]).includes(r),
+			);
+			expect(firm, k.slug).toEqual([]);
+			// The seed invents no users.
+			expect([k.reviewedBy, k.reviewedAt], k.slug).toEqual([null, null]);
+		}
+	});
+
+	it("covers every layer, status and type", () => {
+		const seen = (f: "layer" | "status" | "type") =>
+			[...new Set(rows.skill.map((k) => k[f]))].sort();
+		expect(seen("layer")).toEqual(["domain", "role", "stack"]);
+		expect(seen("status")).toEqual(["approved", "draft", "retired"]);
+		expect(seen("type")).toEqual(["capability", "knowledge"]);
+	});
+
+	it("adds its rows after every earlier seed id", () => {
+		const seq = (id: string) => Number(id.slice(-12));
+		const earlier = [
+			...rows.client,
+			...rows.engagement,
+			...rows.connection,
+			...rows.agentTemplate,
+			...rows.rosterPreset,
+			...rows.playbook,
+			...rows.mission,
+			...rows.rosterEntry,
+			...rows.export,
+			...rows.activityLog,
+		].map((r) => seq(r.id as string));
+		const catalog = [...rows.skillSource, ...rows.skill].map((r) =>
+			seq(r.id as string),
+		);
+		expect(Math.min(...catalog)).toBe(Math.max(...earlier) + 1);
+	});
+
+	it("keeps the mission ids avel-web references", () => {
+		const byId = (id: string) => rows.mission.find((m) => m.id === id);
+		expect(byId("3fcd1ce4-5eed-4000-8000-000000000036")).toMatchObject({
+			type: "full-build",
+			status: "draft",
+		});
+		expect(byId("fbd64a0e-5eed-4000-8000-000000000110")).toMatchObject({
+			type: "discovery",
+			status: "draft",
+		});
+	});
+});

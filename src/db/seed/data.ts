@@ -1,6 +1,7 @@
 import type { Brief } from "../../contract/intake";
 import { fixedClock } from "../../lib/clock";
 import type { IdGenerator } from "../../lib/ids";
+import { skillContentSha256 } from "../../lib/skill-hash";
 import type {
 	activityLog,
 	agentTemplate,
@@ -12,6 +13,8 @@ import type {
 	playbook,
 	rosterEntry,
 	rosterPreset,
+	skill,
+	skillSource,
 } from "../schema";
 
 /**
@@ -69,6 +72,8 @@ export interface SeedRows {
 	rosterEntry: Row<typeof rosterEntry>[];
 	export: Row<typeof exportTable>[];
 	activityLog: Row<typeof activityLog>[];
+	skillSource: Row<typeof skillSource>[];
+	skill: Row<typeof skill>[];
 }
 
 type MissionStatus = Row<typeof mission>["status"];
@@ -86,6 +91,8 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 		rosterEntry: [],
 		export: [],
 		activityLog: [],
+		skillSource: [],
+		skill: [],
 	};
 
 	const log = (
@@ -752,6 +759,172 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 		created: 27,
 		path: [],
 		type: "discovery",
+	});
+
+	// Added last, so every earlier seed id stays where it was. The skill
+	// catalog: one source of each kind, and skills across the three layers,
+	// both types and every status. The seed invents no users, so no skill
+	// names a reviewer, approved ones included. No role_skills or
+	// mission_skills rows.
+	const addSource = (
+		name: string,
+		kind: Row<typeof skillSource>["kind"],
+		url: string | null,
+		license: string | null,
+	) => {
+		const id = ids.next();
+		rows.skillSource.push({
+			id,
+			name,
+			kind,
+			url,
+			license,
+			deletedAt: null,
+			createdAt: at(1),
+			updatedAt: at(1),
+		});
+		return id;
+	};
+	const house = addSource("AVEL house skills", "internal", null, null);
+	const quillstone = addSource(
+		"Quillstone Tools",
+		"vendor",
+		"https://quillstone.example/skills",
+		"Proprietary",
+	);
+	const commons = addSource(
+		"Open Ledger Commons",
+		"community",
+		"https://commons.example/skills",
+		"MIT",
+	);
+
+	const addSkill = (s: {
+		slug: string;
+		name: string;
+		description: string;
+		contentMd: string;
+		avelEnhancementMd?: string;
+		layer: Row<typeof skill>["layer"];
+		capability?: {
+			grants: string[];
+			ioShape: { reads: "large" | "small"; returns: "large" | "small" };
+		};
+		recommendedFor: Row<typeof skill>["recommendedFor"];
+		sourceId: string;
+		status: Row<typeof skill>["status"];
+		day: number;
+		endDay?: number;
+	}) => {
+		// The same fields and hash as POST /api/skills writes.
+		const hashed = {
+			description: s.description,
+			contentMd: s.contentMd,
+			avelEnhancementMd: s.avelEnhancementMd ?? null,
+			grants: s.capability?.grants ?? null,
+			ioShape: s.capability?.ioShape ?? null,
+			type: s.capability ? ("capability" as const) : ("knowledge" as const),
+			layer: s.layer,
+		};
+		rows.skill.push({
+			id: ids.next(),
+			slug: s.slug,
+			name: s.name,
+			...hashed,
+			recommendedFor: s.recommendedFor,
+			sourceId: s.sourceId,
+			contentSha256: skillContentSha256(hashed),
+			status: s.status,
+			reviewedBy: null,
+			reviewedAt: null,
+			version: 1,
+			deletedAt: null,
+			createdAt: at(s.day),
+			updatedAt: at(s.endDay ?? s.day),
+		});
+	};
+	addSkill({
+		slug: "contract-first-api",
+		name: "Contract-first API",
+		description: "Write the route's shapes before its handler.",
+		contentMd:
+			"# Contract-first API\n\nDefine the request and response shapes, then build the handler against them.",
+		avelEnhancementMd:
+			"Every shape lives in the contract package. A handler never returns an off-contract body.",
+		layer: "role",
+		recommendedFor: ["api-surface", "contract"],
+		sourceId: house,
+		status: "approved",
+		day: 2,
+	});
+	addSkill({
+		slug: "schema-migration-runner",
+		name: "Schema migration runner",
+		description: "Generate and apply one forward-only migration.",
+		contentMd:
+			"# Schema migration runner\n\nGenerate the migration, read it, then apply it to a scratch database first.",
+		layer: "role",
+		capability: {
+			grants: ["db:migrate"],
+			ioShape: { reads: "small", returns: "small" },
+		},
+		recommendedFor: ["schema"],
+		sourceId: house,
+		status: "draft",
+		day: 3,
+	});
+	addSkill({
+		slug: "postgres-index-review",
+		name: "Postgres index review",
+		description: "Check every list query has an index that serves it.",
+		contentMd:
+			"# Postgres index review\n\nRun EXPLAIN on each list query and add the index its filter and order need.",
+		layer: "stack",
+		recommendedFor: ["schema", "performance"],
+		sourceId: quillstone,
+		status: "approved",
+		day: 3,
+	});
+	addSkill({
+		slug: "browser-flow-recorder",
+		name: "Browser flow recorder",
+		description: "Record a user flow and replay it as a test.",
+		contentMd:
+			"# Browser flow recorder\n\nRecord the flow once, then replay it on every change and compare.",
+		layer: "stack",
+		capability: {
+			grants: ["browser:read", "fs:write-tests"],
+			ioShape: { reads: "large", returns: "small" },
+		},
+		recommendedFor: ["frontend-tests", "accessibility"],
+		sourceId: quillstone,
+		status: "approved",
+		day: 4,
+	});
+	addSkill({
+		slug: "booking-holds",
+		name: "Booking holds",
+		description: "Hold a slot while payment completes, then release it.",
+		contentMd:
+			"# Booking holds\n\nA hold expires on its own. Payment converts it, and nothing else does.",
+		layer: "domain",
+		recommendedFor: ["domain"],
+		sourceId: commons,
+		status: "retired",
+		day: 4,
+		endDay: 20,
+	});
+	addSkill({
+		slug: "invoice-rounding",
+		name: "Invoice rounding",
+		description: "Round once, at the invoice total, never per line.",
+		contentMd:
+			"# Invoice rounding\n\nKeep line amounts exact. Round the total once, half to even.",
+		layer: "domain",
+		recommendedFor: ["domain", "backend-tests"],
+		sourceId: commons,
+		status: "draft",
+		day: 5,
 	});
 
 	return rows;
