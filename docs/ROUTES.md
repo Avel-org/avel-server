@@ -83,7 +83,7 @@ Twelve links in three groups, per ruling 3 of `avel-web/design/AVEL-DESIGN.md` (
 /presets/:id                       🖥   preset editor
 
 /playbooks                         🖥   process per mission type
-/playbooks?playbook=:missionType   🖥   playbook detail: a modal over /playbooks, named in the URL
+/playbooks/:missionType            🖥   playbook builder
 
 /settings/repositories             🖥   RepoPolicy
 /settings/connections              🖥   Connection lifecycle
@@ -226,9 +226,9 @@ Library management.
 
 **A badge never claims more enforcement than the running system provides.** A capability is enforced by its room; where no room is enforcing it, the badge says so. A badge that implies enforcement that isn't happening is the product lying about itself. See `SKILLS.md`.
 
-### `/playbooks?playbook=:missionType` 🖥
+### `/playbooks/:missionType` 🖥
 
-A modal over `/playbooks`, named in the URL (avel-web ruling 35, approved 2026-10-10). Read-only until playbook writes are specced.
+The playbook builder, a page (avel-web ruling 35 amended, 2026-10-10). It writes through `playbooks.create` and `playbooks.update`, and its Versions tab reads `playbooks.versions`. An edit is refused while a mission of that type is active or halted.
 
 
 Gates (`mandatory | warn` only) · `waves_applicable` · `deliverable` · `required_fields` · `default_preset_id`.

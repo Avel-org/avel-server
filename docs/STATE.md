@@ -18,7 +18,7 @@
 |---|---|
 | Command Center modules (`COMMAND-CENTER.md`) | **15**, numbered 0–14 |
 | Core entities | **20** + SkillSource (supporting catalog): 18 built, `Dispatch` specced 2026-10-06 for module 6, and `File` specced 2026-10-06 for after the first mission. Every one has a field list (`DATA-CONTRACTS-V2.md`). |
-| Database tables built | **24** — the 18 entities, SkillSource, `role_skills`, `mission_skills`, and Better Auth's `session`, `account` and `verification`. Migrations `0000`–`0019` applied. |
+| Database tables built | **24** — the 18 entities, SkillSource, `role_skills`, `mission_skills`, and Better Auth's `session`, `account` and `verification`. Migrations `0000`–`0020` applied. |
 | Error codes in `src/contract/shared/errors.ts` | **22** — 6 generic · `NOT_OPERATOR` · 2 route · 12 `BLAST-RADIUS.md` · `GITHUB_REJECTED` |
 | Roles (`ROLES.md`) | **35** — 23 model · 11 code · 1 human |
 | Model agents — target, horizontal cut (`ROSTER-V2.md`) | **13** in every mission (A 3 · B 5 · C 3 · D 2), plus up to 2: concurrency when required, incident on demand |
@@ -40,7 +40,7 @@ Legend: ⬜ not started · ◐ partly built · ✅ built.
 | 0 | Foundation | ✅ |
 | 1 | Intake | ✅ |
 | 2 | Repo read | ✅ GitHub only; Next.js app-router layouts return no cut |
-| 3 | Mission planner | ◐ plan read and write with its mechanical check, `template_ref`/`template_version`, playbook reads, `computeCoherence` (the first-wave block and the vertical-cut roles warning). Playbook writes not built |
+| 3 | Mission planner | ◐ plan read and write with its mechanical check, `template_ref`/`template_version`, playbook reads and writes with versions, `computeCoherence` (the first-wave block and the vertical-cut roles warning) |
 | 4 | Roles and roster | ✅ catalog reads and writes, roster reads and writes, apply-preset, mission skills, preset create and update. Agent template writes come with module 5 |
 | 5 | Identity generator | ⬜ |
 | 6 | Dispatch and runner | ⬜ |
@@ -75,6 +75,8 @@ Legend: ⬜ not started · ◐ partly built · ✅ built.
 - **Canon chat (decided 2026-10-06) has no proposal kind yet.** `Proposal.kind` and the `proposal_kind` enum hold `next_module · calibration · post_delivery · intake_questions`. Chat suggestions need a kind, added in the same change as the code that writes them, not before. Proposals (module 14) come after the first mission (decided 2026-10-06), so the Canon chat stays not built until then.
 - **Agents cannot call the API yet.** The design was decided on 2026-10-06 and is specced: Dispatch, the firm roster, and a dispatch-scoped token (`DECISIONS-V2.md`, *Decided 2026-10-06: agents call the API*). The per-family table of what agents may do is specced too (`ROLES.md`, 2026-10-06). Unbuilt: all four, `Intake.drafted_by_dispatch_id`, and the error codes `DISPATCH_CLOSED` and `AGENT_NOT_PERMITTED`. Also unbuilt: the runner's `system` credential, `Finding.reported_by_dispatch_id`, and the idempotency keys on agent-reachable creates (`DATA-CONTRACTS-V2.md`, *Idempotency*). Until then, every route accepts only the operator. It is built before the first mission, the first of two exceptions to the 2026-10-05 schema freeze (decided 2026-10-06).
 - **The plan check is not yet enforced anywhere.** `PUT /api/missions/:id/plan` saves a plan that fails `checkPlan` and reports the issues. Nothing refuses to move a mission out of `draft` on a failing plan, because no route moves it yet. The dispatch unit (modules 6 + 7 + 8) must call `checkPlan` before a mission goes active.
+- **`playbook_in_use` is not race-proof.** A playbook edit reads that type's missions without locking them, so a mission that turns active during the edit is not stopped. No route activates a mission yet. The dispatch unit's activation must lock the playbook row (`FOR SHARE`) so the rule holds.
+- **The preset "Used by" read scans ActivityLog.** `GET /api/presets/:id/applications` filters on `action` and `payload->>'presetId'`, which no index serves. Fine at today's volume; an expression index is a migration.
 - **One approved intake per mission is assumed, not enforced.** The plan route reads the approving Intake by `mission_id`. Approval mints the mission id, so it is 1:1 today, but `intake.mission_id` has no unique index. Adding one is a schema change under the freeze.
 - **The coherence disjointness warning is deferred** (decided 2026-10-10). `writable_paths` has no exclusion form, so the canonical vertical layout, where feature agents exclude test files, cannot be expressed and would always warn. It waits until exclusions are designed, after the first mission. A human's foundations entry will be exempt.
 - **Finding has no reference to the dispatch that wrote it.** `Finding.reported_by_dispatch_id` is specced (decided 2026-10-06) and built before module 9.

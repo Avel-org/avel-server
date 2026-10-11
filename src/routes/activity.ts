@@ -11,11 +11,28 @@ type Row = typeof activityLog.$inferSelect & {
 };
 
 /**
+ * The columns actorDisplay reads. Select them with activity_log left-joined
+ * to user on actor_user_id, roster_entry on actor_roster_entry_id, and
+ * agent_template on the entry's template, with no live(): a removed entry
+ * or template still names who acted.
+ */
+export const actorColumns = {
+	login: user.githubLogin,
+	agentName: agentTemplate.name,
+	territory: rosterEntry.territory,
+};
+
+type ActorRow = Pick<
+	Row,
+	"id" | "actorKind" | "login" | "agentName" | "territory"
+>;
+
+/**
  * The actor's label. The CHECKs on activity_log tie each kind to its foreign
  * key, and the foreign keys keep the joined rows, so a missing name is a
  * broken row: a 500, never a made-up label.
  */
-function actorDisplay(row: Row): string {
+export function actorDisplay(row: ActorRow): string {
 	switch (row.actorKind) {
 		case "system":
 			return "System";
@@ -83,9 +100,7 @@ export function activityRoutes(deps: RouteDeps) {
 				db
 					.select({
 						...getTableColumns(activityLog),
-						login: user.githubLogin,
-						agentName: agentTemplate.name,
-						territory: rosterEntry.territory,
+						...actorColumns,
 					})
 					.from(activityLog)
 					// One query, no per-row lookups. No live(): a removed roster

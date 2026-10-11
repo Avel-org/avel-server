@@ -1,18 +1,37 @@
 import { tsr } from "@ts-rest/serverless/fetch";
-import { and, desc, eq, ilike, inArray, type SQL, sql } from "drizzle-orm";
+import {
+	and,
+	desc,
+	eq,
+	getTableName,
+	ilike,
+	inArray,
+	type SQL,
+	sql,
+} from "drizzle-orm";
+import { z } from "zod";
 import {
 	ok,
 	type Preset,
 	type PresetAgent,
+	type PresetApplication,
 	type PresetListQuery,
 	page,
 	presetContract,
 } from "../contract";
 import { logActivity } from "../db/activity";
-import { rosterPreset } from "../db/schema";
+import {
+	activityLog,
+	agentTemplate,
+	mission,
+	rosterEntry,
+	rosterPreset,
+	user,
+} from "../db/schema";
 import { live, stamp, touch } from "../db/schema/columns";
 import type { PresetAgent as StoredAgent } from "../db/schema/work";
 import { withTx } from "../db/tx";
+import { actorColumns, actorDisplay } from "./activity";
 import { requirePresetAgents } from "./roster";
 import {
 	after,
@@ -59,6 +78,70 @@ function toStored(agents: PresetAgent[]): StoredAgent[] {
 	}));
 }
 
+/** What applyPreset writes on its roster.preset_applied row. */
+const appliedPayload = z.object({
+	presetId: z.string().uuid(),
+	presetVersion: z.number().int().positive(),
+	added: z.array(z.string().uuid()),
+	removed: z.array(z.string().uuid()),
+});
+
+/**
+ * The preset's roster.preset_applied rows. payload->>'presetId' is raw sql,
+ * so the column is written table-qualified: unqualified, it would bind to
+ * whichever joined table has a "payload" column first.
+ */
+function appliedFilter(presetId: string): SQL | undefined {
+	const payload = sql`${sql.identifier(getTableName(activityLog))}.${sql.identifier(activityLog.payload.name)}`;
+	return and(
+		eq(activityLog.action, "roster.preset_applied"),
+		sql`${payload}->>'presetId' = ${presetId}`,
+	);
+}
+
+/** The keyset position shared.ts pages on: (at desc, id desc), as /api/activity. */
+const appliedPosition = { createdAt: activityLog.at, id: activityLog.id };
+
+type ApplicationRow = {
+	id: string;
+	at: Date;
+	actorKind: PresetApplication["actor"]["kind"];
+	actorUserId: string | null;
+	missionId: string;
+	payload: unknown;
+	login: string | null;
+	agentName: string | null;
+	territory: string | null;
+	missionStatus: NonNullable<PresetApplication["mission"]>["status"] | null;
+	missionType: string | null;
+};
+
+/** A payload that does not parse is a broken row: a 500, never a guess. */
+function toApplication(row: ApplicationRow): PresetApplication {
+	const payload = appliedPayload.safeParse(row.payload);
+	if (!payload.success) {
+		throw new Error(
+			`activity ${row.id}: roster.preset_applied payload does not parse`,
+		);
+	}
+	return {
+		missionId: row.missionId,
+		mission:
+			row.missionStatus !== null && row.missionType !== null
+				? { status: row.missionStatus, type: row.missionType }
+				: null,
+		presetVersion: payload.data.presetVersion,
+		appliedAt: row.at.toISOString(),
+		actor: {
+			kind: row.actorKind,
+			userId: row.actorUserId,
+			display: actorDisplay(row),
+		},
+		added: payload.data.added.length,
+		removed: payload.data.removed.length,
+	};
+}
+
 function filtersFor(query: PresetListQuery): SQL | undefined {
 	return and(
 		live(rosterPreset),
@@ -99,6 +182,60 @@ export function presetRoutes(deps: RouteDeps) {
 				.where(and(eq(rosterPreset.id, params.id), live(rosterPreset)));
 			if (!row) throw notFound("preset", params.id);
 			return { status: 200, body: ok(toWire(row)) };
+		},
+
+		applications: async ({ params, query }) => {
+			const db = deps.db();
+			const [preset] = await db
+				.select({ id: rosterPreset.id })
+				.from(rosterPreset)
+				.where(and(eq(rosterPreset.id, params.id), live(rosterPreset)));
+			if (!preset) throw notFound("preset", params.id);
+			const filters = appliedFilter(params.id);
+			const [rows, [counted]] = await Promise.all([
+				db
+					.select({
+						id: activityLog.id,
+						at: activityLog.at,
+						actorKind: activityLog.actorKind,
+						actorUserId: activityLog.actorUserId,
+						missionId: activityLog.entityId,
+						payload: activityLog.payload,
+						...actorColumns,
+						missionStatus: mission.status,
+						missionType: mission.type,
+					})
+					.from(activityLog)
+					.leftJoin(user, eq(user.id, activityLog.actorUserId))
+					.leftJoin(
+						rosterEntry,
+						eq(rosterEntry.id, activityLog.actorRosterEntryId),
+					)
+					.leftJoin(
+						agentTemplate,
+						eq(agentTemplate.id, rosterEntry.agentTemplateId),
+					)
+					// live() in the join, so a deleted mission reads as null.
+					.leftJoin(
+						mission,
+						and(eq(mission.id, activityLog.entityId), live(mission)),
+					)
+					.where(and(filters, after(appliedPosition, query.cursor)))
+					.orderBy(desc(activityLog.at), desc(activityLog.id))
+					.limit(query.limit + 1),
+				db
+					.select({ total: sql<number>`count(*)`.mapWith(Number) })
+					.from(activityLog)
+					.where(filters),
+			]);
+			const { items, nextCursor } = toPage(
+				rows.map((r) => ({ ...r, createdAt: r.at })),
+				query.limit,
+			);
+			return {
+				status: 200,
+				body: page(items.map(toApplication), nextCursor, counted?.total ?? 0),
+			};
 		},
 
 		create: async ({ body }, ctx) => {

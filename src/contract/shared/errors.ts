@@ -86,6 +86,8 @@ export const PRECONDITION_REASONS = [
 	"connection_scope_mismatch",
 	"connection_credential_missing",
 	"plan_changes_approved_brief",
+	"preset_misses_first_wave",
+	"playbook_in_use",
 ] as const;
 
 export const preconditionReason = z.enum(PRECONDITION_REASONS);

@@ -82,6 +82,8 @@ describe("the error envelope is a discriminated union on code", () => {
 			"connection_scope_mismatch",
 			"connection_credential_missing",
 			"plan_changes_approved_brief",
+			"preset_misses_first_wave",
+			"playbook_in_use",
 		]);
 	});
 

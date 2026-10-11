@@ -1,11 +1,13 @@
 import { initContract } from "@ts-rest/core";
 import { z } from "zod";
+import { activityActorKind } from "./activity";
 import { wave } from "./agent-template";
 import { missionCut } from "./mission";
 import { addRosterEntryBody } from "./roster";
 import { successEnvelope } from "./shared/envelope";
 import { pageEnvelope, pageQuery } from "./shared/pagination";
 import { oneOrMany, searchQuery } from "./shared/query";
+import { missionStatus } from "./shared/status";
 
 const c = initContract();
 
@@ -98,6 +100,32 @@ export const updatePresetBody = z
 export type CreatePresetBody = z.infer<typeof createPresetBody>;
 export type UpdatePresetBody = z.infer<typeof updatePresetBody>;
 
+/**
+ * One time the preset was applied to a mission, read from its
+ * roster.preset_applied ActivityLog row. The log is append-only, so an
+ * application stays listed after its mission is deleted.
+ */
+export const presetApplicationSchema = z.object({
+	missionId: z.string().uuid(),
+	/** The mission now, or null when it has been deleted since. */
+	mission: z.object({ status: missionStatus, type: z.string() }).nullable(),
+	/** The preset's version when it was applied. */
+	presetVersion: z.number().int().positive(),
+	appliedAt: iso,
+	/** Who applied it. display resolves as on GET /api/activity. */
+	actor: z.object({
+		kind: activityActorKind,
+		/** Set exactly when kind is operator. */
+		userId: z.string().uuid().nullable(),
+		display: z.string(),
+	}),
+	/** Roster entries the application added, and removed (replace: true). */
+	added: z.number().int().nonnegative(),
+	removed: z.number().int().nonnegative(),
+});
+
+export type PresetApplication = z.infer<typeof presetApplicationSchema>;
+
 const byId = z.object({ id: z.string().uuid() });
 
 export const presetContract = c.router({
@@ -127,5 +155,14 @@ export const presetContract = c.router({
 		body: updatePresetBody,
 		responses: { 200: successEnvelope(presetSchema) },
 		summary: "A missing or deleted preset is 404",
+	},
+	applications: {
+		method: "GET",
+		path: "/api/presets/:id/applications",
+		pathParams: byId,
+		query: pageQuery,
+		responses: { 200: pageEnvelope(presetApplicationSchema) },
+		summary:
+			"Where the preset was applied, newest first. A missing or deleted preset is 404",
 	},
 });
