@@ -11,6 +11,7 @@ import type {
 	exportTable,
 	mission,
 	playbook,
+	roleSkills,
 	rosterEntry,
 	rosterPreset,
 	skill,
@@ -59,6 +60,9 @@ export const SEED_MARKER_ID = seedId(1);
 
 export const SEED_REQUEST_ID = "seed";
 
+/** The template-booking commit the seeded missions were built from. Made up; it only has to be 40 hex. */
+export const BOOKING_TEMPLATE_SHA = "b00c1e9b00c1e9b00c1e9b00c1e9b00c1e9b00c1";
+
 type Row<T extends { $inferInsert: unknown }> = T["$inferInsert"];
 
 export interface SeedRows {
@@ -74,6 +78,7 @@ export interface SeedRows {
 	activityLog: Row<typeof activityLog>[];
 	skillSource: Row<typeof skillSource>[];
 	skill: Row<typeof skill>[];
+	roleSkills: Row<typeof roleSkills>[];
 }
 
 type MissionStatus = Row<typeof mission>["status"];
@@ -93,6 +98,7 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 		activityLog: [],
 		skillSource: [],
 		skill: [],
+		roleSkills: [],
 	};
 
 	const log = (
@@ -307,7 +313,8 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 		["reviews/**"],
 	);
 
-	// The full-build playbook and its default preset.
+	// The template-booking playbook and its default preset. A template's
+	// playbook is keyed by the template's slug (DECISIONS-V2, 2026-10-12).
 	const preset = ids.next();
 	rows.rosterPreset.push({
 		id: preset,
@@ -326,8 +333,8 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 	});
 	rows.playbook.push({
 		id: ids.next(),
-		missionType: "full-build",
-		name: "Full build",
+		missionType: "template-booking",
+		name: "Booking template",
 		wavesApplicable: ["A", "B", "C", "D", "E"],
 		gates: [
 			{ gate: "phase1-close", policy: "mandatory" },
@@ -366,7 +373,11 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 			id,
 			engagementId: m.engagementId,
 			origin: m.engagementId === null ? "internal" : "client",
-			type: m.type ?? "full-build",
+			// Built from template-booking unless a type is given; a templated
+			// mission's type is its template_ref.
+			type: m.type ?? "template-booking",
+			templateRef: m.type === undefined ? "template-booking" : null,
+			templateVersion: m.type === undefined ? BOOKING_TEMPLATE_SHA : null,
 			brief: m.brief ?? { summary: m.summary },
 			sprintN: m.sprint,
 			status,
@@ -826,8 +837,9 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 			type: s.capability ? ("capability" as const) : ("knowledge" as const),
 			layer: s.layer,
 		};
+		const id = ids.next();
 		rows.skill.push({
-			id: ids.next(),
+			id,
 			slug: s.slug,
 			name: s.name,
 			...hashed,
@@ -842,8 +854,9 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 			createdAt: at(s.day),
 			updatedAt: at(s.endDay ?? s.day),
 		});
+		return id;
 	};
-	addSkill({
+	const contractFirst = addSkill({
 		slug: "contract-first-api",
 		name: "Contract-first API",
 		description: "Write the route's shapes before its handler.",
@@ -857,7 +870,7 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 		status: "approved",
 		day: 2,
 	});
-	addSkill({
+	const migrationRunner = addSkill({
 		slug: "schema-migration-runner",
 		name: "Schema migration runner",
 		description: "Generate and apply one forward-only migration.",
@@ -926,6 +939,33 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 		status: "draft",
 		day: 5,
 	});
+
+	// Added last, so every earlier seed id stays where it was. An approved
+	// role-layer capability with a read grant and a write grant, and
+	// role_skills rows, so Atlas (schema, contract) shows tool rows on the
+	// access route. The draft runner is attached too and shows nothing:
+	// only approved skills are delivered.
+	const inspector = addSkill({
+		slug: "schema-inspector",
+		name: "Schema inspector",
+		description: "Read the live schema, then apply one migration.",
+		contentMd:
+			"# Schema inspector\n\nRead the tables before changing them. Apply one forward-only migration.",
+		layer: "role",
+		capability: {
+			grants: ["db:read", "db:migrate"],
+			ioShape: { reads: "small", returns: "small" },
+		},
+		recommendedFor: ["schema"],
+		sourceId: house,
+		status: "approved",
+		day: 6,
+	});
+	rows.roleSkills.push(
+		{ role: "schema", skillId: inspector },
+		{ role: "schema", skillId: migrationRunner },
+		{ role: "contract", skillId: contractFirst },
+	);
 
 	return rows;
 }

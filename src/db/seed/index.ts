@@ -40,6 +40,7 @@ const COUNTED = [
 	"activity_log",
 	"skill_source",
 	"skill",
+	"role_skills",
 ] as const;
 
 /**
@@ -76,6 +77,7 @@ export async function runSeed(url: string): Promise<SeedResult> {
 				await tx.insert(schema.activityLog).values(rows.activityLog);
 				await tx.insert(schema.skillSource).values(rows.skillSource);
 				await tx.insert(schema.skill).values(rows.skill);
+				await tx.insert(schema.roleSkills).values(rows.roleSkills);
 			});
 			status = "seeded";
 		}

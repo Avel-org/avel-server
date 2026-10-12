@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+	type AccessSkill,
+	accessFor,
 	createSkillBody,
 	createSkillSourceBody,
 	FIRM_ROLES,
@@ -102,12 +104,38 @@ describe("seed skill catalog", () => {
 	it("keeps the mission ids avel-web references", () => {
 		const byId = (id: string) => rows.mission.find((m) => m.id === id);
 		expect(byId("3fcd1ce4-5eed-4000-8000-000000000036")).toMatchObject({
-			type: "full-build",
+			type: "template-booking",
+			templateRef: "template-booking",
 			status: "draft",
 		});
 		expect(byId("fbd64a0e-5eed-4000-8000-000000000110")).toMatchObject({
 			type: "discovery",
+			templateRef: null,
 			status: "draft",
 		});
+	});
+
+	it("gives a seeded agent tool rows, one read and one held write", () => {
+		const atlas = rows.agentTemplate.find((t) => t.slug === "atlas");
+		if (!atlas) throw new Error("no atlas in the seed");
+		const { rows: access } = accessFor({
+			roles: atlas.roles,
+			writablePaths: atlas.writablePaths,
+			skills: rows.skill as AccessSkill[],
+			roleSkills: rows.roleSkills,
+			missionSkillIds: [],
+		});
+		expect(
+			access.flatMap((r) =>
+				r.kind === "grant" ? [`${r.skillSlug}/${r.grant}=${r.mode}`] : [],
+			),
+		).toEqual([
+			"schema-inspector/db:read=read",
+			"schema-inspector/db:migrate=write_held",
+		]);
+		const roleSkill = (id: string) => rows.skill.find((x) => x.id === id);
+		for (const r of rows.roleSkills) {
+			expect(roleSkill(r.skillId)?.layer).toBe("role");
+		}
 	});
 });
