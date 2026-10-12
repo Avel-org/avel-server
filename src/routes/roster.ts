@@ -1,6 +1,9 @@
 import { tsr } from "@ts-rest/serverless/fetch";
 import { and, asc, eq, inArray, isNull, type SQL } from "drizzle-orm";
 import {
+	type AccessOverride,
+	accessFor,
+	checkAccessOverrides,
 	FIRM_ROLES,
 	isMissionAttachable,
 	type MissionSkill,
@@ -18,6 +21,7 @@ import {
 	missionSkills,
 	rosterEntry,
 	rosterPreset,
+	type StoredAccessOverride,
 	skill,
 	skillSource,
 } from "../db/schema";
@@ -77,6 +81,18 @@ const templateSummary = {
 	roles: agentTemplate.roles,
 };
 
+const toStored = (o: AccessOverride): StoredAccessOverride => ({
+	skill_id: o.skillId,
+	grant: o.grant,
+	mode: o.mode,
+});
+
+const fromStored = (o: StoredAccessOverride): AccessOverride => ({
+	skillId: o.skill_id,
+	grant: o.grant,
+	mode: o.mode,
+});
+
 function toWire(entry: EntryRow, template: TemplateRow): RosterEntry {
 	return {
 		id: entry.id,
@@ -92,6 +108,7 @@ function toWire(entry: EntryRow, template: TemplateRow): RosterEntry {
 		tokenHardCeiling: entry.tokenHardCeiling,
 		grain: entry.grain,
 		absorbedBoundaries: entry.absorbedBoundaries,
+		accessOverrides: entry.accessOverrides?.map(fromStored) ?? null,
 		createdAt: entry.createdAt.toISOString(),
 		updatedAt: entry.updatedAt.toISOString(),
 	};
@@ -238,6 +255,61 @@ function defaultCeilings(
 	};
 }
 
+/**
+ * The overrides to store, or a 422. Checked against the tool rows accessFor
+ * derives for this entry now: its template's roles, the live capability
+ * skills, and the mission's attached skills.
+ */
+async function requireValidOverrides(
+	tx: Tx,
+	missionId: string,
+	agentTemplateId: string,
+	writablePaths: string[] | null,
+	overrides: AccessOverride[] | null,
+): Promise<StoredAccessOverride[] | null> {
+	if (overrides === null || overrides.length === 0) return null;
+	const [template] = await tx
+		.select({
+			roles: agentTemplate.roles,
+			writablePaths: agentTemplate.writablePaths,
+		})
+		.from(agentTemplate)
+		.where(eq(agentTemplate.id, agentTemplateId));
+	if (!template)
+		throw new Error(`roster entry template ${agentTemplateId} is missing`);
+	const skills = await tx
+		.select({
+			id: skill.id,
+			slug: skill.slug,
+			type: skill.type,
+			layer: skill.layer,
+			status: skill.status,
+			recommendedFor: skill.recommendedFor,
+			grants: skill.grants,
+		})
+		.from(skill)
+		.where(and(eq(skill.type, "capability"), live(skill)));
+	const attached = await tx
+		.select({ skillId: missionSkills.skillId })
+		.from(missionSkills)
+		.where(eq(missionSkills.missionId, missionId));
+	const { rows } = accessFor({
+		roles: template.roles,
+		writablePaths: writablePaths ?? template.writablePaths,
+		skills,
+		missionSkillIds: attached.map((a) => a.skillId),
+	});
+	const issues = checkAccessOverrides(rows, overrides);
+	if (issues.length > 0) {
+		throw new ApiError(
+			"PRECONDITION_FAILED",
+			"An access override names no tool row the agent has, repeats one, or widens one",
+			{ details: { reason: "access_override_invalid", issues } },
+		);
+	}
+	return overrides.map(toStored);
+}
+
 async function missionSkillList(
 	db: Executor,
 	missionId: string,
@@ -356,8 +428,19 @@ export function rosterRoutes(deps: RouteDeps) {
 						),
 					);
 				if (!current) throw notFound("roster entry", entryId);
-				const next = { ...current, ...body };
+				const { accessOverrides, ...fields } = body;
+				const next = { ...current, ...fields };
 				requireValidEntry(next);
+				const stored =
+					accessOverrides === undefined
+						? undefined
+						: await requireValidOverrides(
+								tx,
+								missionId,
+								current.agentTemplateId,
+								next.writablePaths,
+								accessOverrides,
+							);
 				if (body.territory !== undefined) {
 					await requireNoDuplicate(
 						tx,
@@ -369,7 +452,11 @@ export function rosterRoutes(deps: RouteDeps) {
 				}
 				await tx
 					.update(rosterEntry)
-					.set({ ...body, ...touch(deps.clock) })
+					.set({
+						...fields,
+						...(stored === undefined ? {} : { accessOverrides: stored }),
+						...touch(deps.clock),
+					})
 					.where(eq(rosterEntry.id, entryId));
 				await logActivity(tx, deps, {
 					actorKind: "operator",

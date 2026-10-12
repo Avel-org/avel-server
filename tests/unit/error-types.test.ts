@@ -84,6 +84,8 @@ describe("the error envelope is a discriminated union on code", () => {
 			"plan_changes_approved_brief",
 			"preset_misses_first_wave",
 			"playbook_in_use",
+			"access_override_invalid",
+			"template_type_mismatch",
 		]);
 	});
 

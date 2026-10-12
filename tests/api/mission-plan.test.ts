@@ -67,7 +67,7 @@ async function seed(tx: Tx, ns: string, approvedBy: string) {
 			id: missionId,
 			origin: "client",
 			engagementId,
-			type: "full-build",
+			type: "template-booking",
 			brief: APPROVED,
 			sprintN: 1,
 			status: "draft",
@@ -183,6 +183,26 @@ describe.skipIf(!process.env.DATABASE_URL)("mission plan", () => {
 			const logs = await logRows(s.draft);
 			expect(logs.map((l) => l.action)).toEqual(["mission.plan_updated"]);
 			expect(logs[0]?.payload).toMatchObject({ modules: 2, checkPassed: true });
+		});
+	});
+
+	it("refuses a template other than the mission's type, and keeps the row", async () => {
+		await withApi(async ({ signIn, operatorId, call, tx, ns, logRows }) => {
+			await signIn();
+			const s = await seed(tx, ns, await operatorId());
+			const res = await put(call, s.draft, {
+				brief: PLANNED,
+				templateRef: "template-audit",
+				templateVersion: SHA,
+			});
+			const error = await expectReason(res, "template_type_mismatch");
+			expect(error.message).toContain("template-audit");
+			const [row] = await tx
+				.select()
+				.from(mission)
+				.where(eq(mission.id, s.draft));
+			expect(row?.templateRef).toBeNull();
+			expect(await logRows(s.draft)).toEqual([]);
 		});
 	});
 

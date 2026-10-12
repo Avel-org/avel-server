@@ -88,6 +88,8 @@ export const PRECONDITION_REASONS = [
 	"plan_changes_approved_brief",
 	"preset_misses_first_wave",
 	"playbook_in_use",
+	"access_override_invalid",
+	"template_type_mismatch",
 ] as const;
 
 export const preconditionReason = z.enum(PRECONDITION_REASONS);
@@ -104,7 +106,7 @@ export const preconditionDetails = z
 		engagementId: z.string().uuid().optional(),
 		/** The connection the precondition was about, where there is one. */
 		connectionId: z.string().uuid().optional(),
-		/** What a mechanical check found (intake_check_failed) or what a plan changed (plan_changes_approved_brief), in a stable order. */
+		/** What a mechanical check found (intake_check_failed, access_override_invalid) or what a plan changed (plan_changes_approved_brief), in a stable order. */
 		issues: z
 			.array(
 				z

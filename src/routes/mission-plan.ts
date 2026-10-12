@@ -100,6 +100,7 @@ export function missionPlanRoutes(deps: RouteDeps) {
 					.select({
 						status: mission.status,
 						engagementId: mission.engagementId,
+						type: mission.type,
 					})
 					.from(mission)
 					.where(and(eq(mission.id, params.id), live(mission)))
@@ -110,6 +111,20 @@ export function missionPlanRoutes(deps: RouteDeps) {
 						"PRECONDITION_FAILED",
 						`A ${m.status} mission's plan cannot change`,
 						{ details: { reason: "mission_not_editable" } },
+					);
+				}
+				// A template's playbook is keyed by its slug, and missions join
+				// their playbook on type, so the two must agree.
+				if (body.templateRef !== null && body.templateRef !== m.type) {
+					throw new ApiError(
+						"PRECONDITION_FAILED",
+						`A ${m.type} mission cannot record template ${body.templateRef}: a templated mission's type is its template`,
+						{
+							details: {
+								reason: "template_type_mismatch",
+								...(m.engagementId ? { engagementId: m.engagementId } : {}),
+							},
+						},
 					);
 				}
 				const approved = await approvedBrief(tx, params.id);

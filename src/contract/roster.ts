@@ -1,6 +1,7 @@
 import { initContract } from "@ts-rest/core";
 import { z } from "zod";
 import { agentKind, role, wave } from "./agent-template";
+import { accessOverride } from "./shared/access";
 import { successEnvelope } from "./shared/envelope";
 import { skillListItem } from "./skill";
 import { removedSchema } from "./skill-source";
@@ -51,6 +52,8 @@ export const rosterEntrySchema = z.object({
 	tokenHardCeiling: tokens,
 	grain,
 	absorbedBoundaries: z.array(z.string()),
+	/** Narrows accessFor's tool rows for this mission. Null when there are none. */
+	accessOverrides: z.array(accessOverride).nullable(),
 	createdAt: iso,
 	updatedAt: iso,
 });
@@ -147,9 +150,17 @@ export const addRosterEntryBody = z
 	.extend({ agentTemplateId: z.string().uuid() })
 	.strict();
 
-/** Any subset of fields, at least one. The template is not one of them. */
+/**
+ * Any subset of fields, at least one. The template is not one of them.
+ * accessOverrides replaces the whole list; null or an empty list clears it.
+ * Each must name a tool row the agent has, once, and only narrow it
+ * (422 access_override_invalid, with issues).
+ */
 export const updateRosterEntryBody = z
-	.object(entryFields)
+	.object({
+		...entryFields,
+		accessOverrides: z.array(accessOverride).max(200).nullable(),
+	})
 	.partial()
 	.strict()
 	.refine((body) => Object.keys(body).length > 0, {
