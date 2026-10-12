@@ -19,6 +19,7 @@ import {
 	agentTemplate,
 	mission,
 	missionSkills,
+	roleSkills,
 	rosterEntry,
 	rosterPreset,
 	type StoredAccessOverride,
@@ -256,19 +257,17 @@ function defaultCeilings(
 }
 
 /**
- * The overrides to store, or a 422. Checked against the tool rows accessFor
- * derives for this entry now: its template's roles, the live capability
- * skills, and the mission's attached skills.
+ * What accessFor needs for one entry, loaded narrowly: the template's roles
+ * and paths, the role_skills rows for those roles, the mission's attached
+ * skills, and only the live capability skills among them.
  */
-async function requireValidOverrides(
-	tx: Tx,
+async function entryAccessInput(
+	db: Executor,
 	missionId: string,
 	agentTemplateId: string,
 	writablePaths: string[] | null,
-	overrides: AccessOverride[] | null,
-): Promise<StoredAccessOverride[] | null> {
-	if (overrides === null || overrides.length === 0) return null;
-	const [template] = await tx
+) {
+	const [template] = await db
 		.select({
 			roles: agentTemplate.roles,
 			writablePaths: agentTemplate.writablePaths,
@@ -277,28 +276,65 @@ async function requireValidOverrides(
 		.where(eq(agentTemplate.id, agentTemplateId));
 	if (!template)
 		throw new Error(`roster entry template ${agentTemplateId} is missing`);
-	const skills = await tx
-		.select({
-			id: skill.id,
-			slug: skill.slug,
-			type: skill.type,
-			layer: skill.layer,
-			status: skill.status,
-			recommendedFor: skill.recommendedFor,
-			grants: skill.grants,
-		})
-		.from(skill)
-		.where(and(eq(skill.type, "capability"), live(skill)));
-	const attached = await tx
+	const viaRole =
+		template.roles.length === 0
+			? []
+			: await db
+					.select({ role: roleSkills.role, skillId: roleSkills.skillId })
+					.from(roleSkills)
+					.where(inArray(roleSkills.role, template.roles));
+	const attached = await db
 		.select({ skillId: missionSkills.skillId })
 		.from(missionSkills)
 		.where(eq(missionSkills.missionId, missionId));
-	const { rows } = accessFor({
+	const ids = [
+		...new Set([
+			...viaRole.map((r) => r.skillId),
+			...attached.map((a) => a.skillId),
+		]),
+	];
+	const skills =
+		ids.length === 0
+			? []
+			: await db
+					.select({
+						id: skill.id,
+						slug: skill.slug,
+						type: skill.type,
+						layer: skill.layer,
+						status: skill.status,
+						recommendedFor: skill.recommendedFor,
+						grants: skill.grants,
+					})
+					.from(skill)
+					.where(
+						and(
+							inArray(skill.id, ids),
+							eq(skill.type, "capability"),
+							live(skill),
+						),
+					);
+	return {
 		roles: template.roles,
 		writablePaths: writablePaths ?? template.writablePaths,
 		skills,
+		roleSkills: viaRole,
 		missionSkillIds: attached.map((a) => a.skillId),
-	});
+	};
+}
+
+/** The overrides to store, or a 422 against the tool rows accessFor derives now. */
+async function requireValidOverrides(
+	tx: Tx,
+	missionId: string,
+	agentTemplateId: string,
+	writablePaths: string[] | null,
+	overrides: AccessOverride[] | null,
+): Promise<StoredAccessOverride[] | null> {
+	if (overrides === null || overrides.length === 0) return null;
+	const { rows } = accessFor(
+		await entryAccessInput(tx, missionId, agentTemplateId, writablePaths),
+	);
 	const issues = checkAccessOverrides(rows, overrides);
 	if (issues.length > 0) {
 		throw new ApiError(
@@ -346,6 +382,36 @@ export function rosterRoutes(deps: RouteDeps) {
 				status: 200,
 				body: ok(await missionSkillList(db, params.missionId)),
 			};
+		},
+
+		access: async ({ params }) => {
+			const db = deps.db();
+			await requireLiveMission(db, params.missionId);
+			const [entry] = await db
+				.select({
+					agentTemplateId: rosterEntry.agentTemplateId,
+					writablePaths: rosterEntry.writablePaths,
+					accessOverrides: rosterEntry.accessOverrides,
+				})
+				.from(rosterEntry)
+				.where(
+					and(
+						eq(rosterEntry.id, params.entryId),
+						eq(rosterEntry.missionId, params.missionId),
+						live(rosterEntry),
+					),
+				);
+			if (!entry) throw notFound("roster entry", params.entryId);
+			const access = accessFor({
+				...(await entryAccessInput(
+					db,
+					params.missionId,
+					entry.agentTemplateId,
+					entry.writablePaths,
+				)),
+				overrides: entry.accessOverrides?.map(fromStored) ?? null,
+			});
+			return { status: 200, body: ok(access) };
 		},
 
 		add: async ({ params, body }, ctx) => {

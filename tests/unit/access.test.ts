@@ -43,12 +43,26 @@ const knowledge: AccessSkill = {
 	grants: null,
 };
 
+/** role_skills rows attaching every role-layer skill given to schema. */
+const viaSchema = (skills: AccessSkill[]) =>
+	skills
+		.filter((s) => s.layer === "role")
+		.map((s) => ({ role: "schema" as const, skillId: s.id }));
+
 const base: AccessInput = {
 	roles: ["schema", "frontend-tests"],
 	writablePaths: ["src/db/"],
 	skills: [browser, migrate, knowledge],
+	roleSkills: viaSchema([migrate, knowledge]),
 	missionSkillIds: [browser.id],
 };
+
+/** base with other skills, each role-layer one attached to schema. */
+const withSkills = (skills: AccessSkill[]): AccessInput => ({
+	...base,
+	skills,
+	roleSkills: viaSchema(skills),
+});
 
 const grants = (input: AccessInput) =>
 	accessFor(input)
@@ -114,24 +128,63 @@ describe("accessFor", () => {
 		]);
 		const draft = { ...migrate, status: "draft" as const };
 		const retired = { ...migrate, id: id(9), status: "retired" as const };
-		expect(grants({ ...base, skills: [draft, retired] })).toEqual([]);
+		expect(grants(withSkills([draft, retired]))).toEqual([]);
+	});
+
+	it("takes a role-layer skill from role_skills, not from recommendedFor", () => {
+		const attachedElsewhere = capability(10, "attached", ["db:read"], {
+			recommendedFor: ["interface"],
+		});
+		const onlyRecommended = capability(11, "recommended", ["db:migrate"]);
+		expect(
+			grants({
+				...base,
+				skills: [attachedElsewhere, onlyRecommended],
+				roleSkills: [{ role: "schema", skillId: attachedElsewhere.id }],
+			}),
+		).toEqual(["attached/db:read=read"]);
+	});
+
+	it("ignores role_skills rows for roles the agent does not hold", () => {
+		expect(
+			grants({
+				...base,
+				skills: [migrate],
+				roleSkills: [{ role: "interface", skillId: migrate.id }],
+			}),
+		).toEqual([]);
+	});
+
+	it("lists overrides that match no row as stale, never silently", () => {
+		const gone = {
+			skillId: id(99),
+			grant: "db:migrate",
+			mode: "none" as const,
+		};
+		const live = {
+			skillId: migrate.id,
+			grant: "db:migrate",
+			mode: "none" as const,
+		};
+		expect(
+			accessFor({ ...base, overrides: [gone, live] }).staleOverrides,
+		).toEqual([gone]);
+		expect(accessFor(base).staleOverrides).toEqual([]);
 	});
 
 	it("makes no row for a knowledge skill", () => {
-		expect(grants({ ...base, skills: [knowledge] })).toEqual([]);
+		expect(grants(withSkills([knowledge]))).toEqual([]);
 	});
 
 	it("makes one row for a grant listed twice", () => {
 		const twice = capability(4, "twice", ["db:read", "db:read"]);
-		expect(grants({ ...base, skills: [twice] })).toEqual([
-			"twice/db:read=read",
-		]);
+		expect(grants(withSkills([twice]))).toEqual(["twice/db:read=read"]);
 	});
 
 	it("sorts by code unit, not locale", () => {
 		const upper = capability(5, "Zeta", ["a:b"]);
 		const lower = capability(6, "alpha", ["a:b"]);
-		expect(grants({ ...base, skills: [lower, upper] })).toEqual([
+		expect(grants(withSkills([lower, upper]))).toEqual([
 			"Zeta/a:b=write_held",
 			"alpha/a:b=write_held",
 		]);
@@ -209,10 +262,9 @@ describe("checkAccessOverrides", () => {
 	});
 
 	it("refuses raising a read grant", () => {
-		const derivedRead = accessFor({
-			...base,
-			skills: [capability(7, "reader", ["db:read"])],
-		}).rows;
+		const derivedRead = accessFor(
+			withSkills([capability(7, "reader", ["db:read"])]),
+		).rows;
 		const raise = { skillId: id(7), grant: "db:read", mode: "read" as const };
 		expect(checkAccessOverrides(derivedRead, [raise])).toEqual([]);
 		// The only raise left for a read row is through a mode the schema

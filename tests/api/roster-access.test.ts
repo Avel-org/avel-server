@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import {
+	agentAccess,
 	errorEnvelope,
 	rosterEntrySchema,
 	successEnvelope,
@@ -10,6 +11,7 @@ import {
 	agentTemplate,
 	mission,
 	missionSkills,
+	roleSkills,
 	rosterEntry,
 	skill,
 	skillSource,
@@ -20,6 +22,7 @@ import { type ApiHarness, clock, withApi } from "./support";
 
 const entryOne = successEnvelope(rosterEntrySchema);
 const roster = successEnvelope(rosterEntrySchema.array());
+const accessOne = successEnvelope(agentAccess);
 
 type Call = ApiHarness["call"];
 
@@ -78,6 +81,9 @@ async function seed(tx: Tx, ns: string) {
 	};
 	const migrate = await newSkill("migrate", "role", ["db:migrate", "db:read"]);
 	const explain = await newSkill("explain", "stack", ["db:explain"]);
+	// Recommended for schema but attached to no role: the agent never gets it.
+	const unattached = await newSkill("unattached", "role", ["db:vacuum"]);
+	await tx.insert(roleSkills).values({ role: "schema", skillId: migrate });
 
 	const newMission = async (status: "draft" | "active") => {
 		const missionId = id();
@@ -109,7 +115,7 @@ async function seed(tx: Tx, ns: string) {
 	};
 	const draft = await newMission("draft");
 	const active = await newMission("active");
-	return { migrate, explain, draft, active };
+	return { migrate, explain, unattached, draft, active };
 }
 
 function patch(
@@ -238,6 +244,19 @@ describe.skipIf(!process.env.DATABASE_URL)("roster access overrides", () => {
 		});
 	});
 
+	it("refuses a role skill recommended for the role but not attached to it", async () => {
+		await withApi(async ({ signIn, call, tx, ns }) => {
+			await signIn();
+			const s = await seed(tx, ns);
+			const res = await patch(call, s.draft, {
+				accessOverrides: [
+					{ skillId: s.unattached, grant: "db:vacuum", mode: "none" },
+				],
+			});
+			await expectInvalid(res, [[0]]);
+		});
+	});
+
 	it("refuses a mode above read as a body problem", async () => {
 		await withApi(async ({ signIn, call, tx, ns }) => {
 			await signIn();
@@ -265,6 +284,89 @@ describe.skipIf(!process.env.DATABASE_URL)("roster access overrides", () => {
 			expect(res.status).toBe(422);
 			const { error } = errorEnvelope.parse(await res.json());
 			expect(error.details).toEqual({ reason: "mission_not_editable" });
+		});
+	});
+
+	it("answers the entry's access, with its overrides applied", async () => {
+		await withApi(async ({ signIn, call, tx, ns }) => {
+			await signIn();
+			const s = await seed(tx, ns);
+			await patch(call, s.draft, {
+				accessOverrides: [
+					{ skillId: s.migrate, grant: "db:migrate", mode: "none" },
+				],
+			});
+			const res = await call(
+				`/api/missions/${s.draft.missionId}/roster/${s.draft.entryId}/access`,
+			);
+			expect(res.status).toBe(200);
+			const access = accessOne.parse(await res.json()).data;
+			expect(access).toEqual({
+				enforced: false,
+				rows: [
+					{ kind: "repository", mode: "write_held", scope: ["src/db/**"] },
+					{
+						kind: "grant",
+						skillId: s.migrate,
+						skillSlug: `${ns}-migrate`,
+						grant: "db:migrate",
+						system: "db",
+						derivedMode: "write_held",
+						mode: "none",
+					},
+					{
+						kind: "grant",
+						skillId: s.migrate,
+						skillSlug: `${ns}-migrate`,
+						grant: "db:read",
+						system: "db",
+						derivedMode: "read",
+						mode: "read",
+					},
+					{ kind: "delivery", mode: "send_after_approval" },
+				],
+				staleOverrides: [],
+			});
+		});
+	});
+
+	it("shows an override whose skill left the mission as stale", async () => {
+		await withApi(async ({ signIn, call, tx, ns }) => {
+			await signIn();
+			const s = await seed(tx, ns);
+			await tx.insert(missionSkills).values({
+				missionId: s.draft.missionId,
+				skillId: s.explain,
+				source: "manual",
+			});
+			const override = {
+				skillId: s.explain,
+				grant: "db:explain",
+				mode: "none",
+			};
+			await patch(call, s.draft, { accessOverrides: [override] });
+			await call(`/api/missions/${s.draft.missionId}/skills/${s.explain}`, {
+				method: "DELETE",
+			});
+			const res = await call(
+				`/api/missions/${s.draft.missionId}/roster/${s.draft.entryId}/access`,
+			);
+			const access = accessOne.parse(await res.json()).data;
+			expect(access.staleOverrides).toEqual([override]);
+			expect(
+				access.rows.some((r) => r.kind === "grant" && r.skillId === s.explain),
+			).toBe(false);
+		});
+	});
+
+	it("answers 404 for an entry on another mission", async () => {
+		await withApi(async ({ signIn, call, tx, ns }) => {
+			await signIn();
+			const s = await seed(tx, ns);
+			const res = await call(
+				`/api/missions/${s.active.missionId}/roster/${s.draft.entryId}/access`,
+			);
+			expect(res.status).toBe(404);
 		});
 	});
 });

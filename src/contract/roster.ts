@@ -1,7 +1,7 @@
 import { initContract } from "@ts-rest/core";
 import { z } from "zod";
 import { agentKind, role, wave } from "./agent-template";
-import { accessOverride } from "./shared/access";
+import { accessOverride, agentAccess } from "./shared/access";
 import { successEnvelope } from "./shared/envelope";
 import { skillListItem } from "./skill";
 import { removedSchema } from "./skill-source";
@@ -211,6 +211,14 @@ export const rosterContract = c.router({
 		pathParams: byMission,
 		responses: { 200: successEnvelope(z.array(missionSkillSchema)) },
 		summary: "The live skills attached to the mission, oldest skill first",
+	},
+	access: {
+		method: "GET",
+		path: "/api/missions/:missionId/roster/:entryId/access",
+		pathParams: byEntry,
+		responses: { 200: successEnvelope(agentAccess) },
+		summary:
+			"accessFor on this entry, computed by the server: role_skills for its roles, the mission's skills, its overrides. Not enforced until module 7",
 	},
 	add: {
 		method: "POST",

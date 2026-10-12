@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Role } from "../agent-template";
 import type { SkillListItem } from "../skill";
+import type { ValidationIssue } from "./errors";
 
 /**
  * Access (DATA-CONTRACTS-V2, Access). Derived, never stored: mounts decide
@@ -22,14 +23,23 @@ export const accessMode = z.enum(ACCESS_MODES);
 
 export type AccessMode = z.infer<typeof accessMode>;
 
-/** An override only narrows, so it never names a mode above read. */
-export const accessOverrideMode = z.enum(["none", "read"]);
+/** What a grant derives to. */
+export const grantDerivedMode = accessMode.extract(["read", "write_held"]);
 
-/** One tool row, lowered for one agent on one mission. */
+/** What a tool row can be: its derived mode, or lower. */
+export const grantRowMode = accessMode.extract(["none", "read", "write_held"]);
+
+/** An override only narrows, so it never names a mode above read. */
+export const accessOverrideMode = accessMode.extract(["none", "read"]);
+
+/**
+ * One tool row, lowered for one agent on one mission. The grant is matched
+ * verbatim; skill writes trim grants, so a stored grant has no edge spaces.
+ */
 export const accessOverride = z
 	.object({
 		skillId: z.string().uuid(),
-		grant: z.string().trim().min(1).max(200),
+		grant: z.string().min(1).max(200),
 		mode: accessOverrideMode,
 	})
 	.strict();
@@ -39,7 +49,7 @@ export type AccessOverride = z.infer<typeof accessOverride>;
 export const accessRow = z.discriminatedUnion("kind", [
 	z.object({
 		kind: z.literal("repository"),
-		mode: z.enum(["write_held", "read"]),
+		mode: accessMode.extract(["write_held", "read"]),
 		/** The resolved writable paths. */
 		scope: z.array(z.string()),
 	}),
@@ -50,13 +60,13 @@ export const accessRow = z.discriminatedUnion("kind", [
 		grant: z.string(),
 		/** The grant up to its first ':', or the whole grant without one. */
 		system: z.string(),
-		derivedMode: z.enum(["read", "write_held"]),
+		derivedMode: grantDerivedMode,
 		/** The override's mode when one names this row, else derivedMode. */
-		mode: z.enum(["none", "read", "write_held"]),
+		mode: grantRowMode,
 	}),
 	z.object({
 		kind: z.literal("delivery"),
-		mode: z.literal("send_after_approval"),
+		mode: accessMode.extract(["send_after_approval"]),
 	}),
 ]);
 
@@ -68,82 +78,118 @@ export const agentAccess = z.object({
 	/** False until module 7: a surface shows every row as recorded, not enforced. */
 	enforced: z.literal(false),
 	rows: z.array(accessRow),
+	/**
+	 * Overrides that name no tool row the agent has now: the skill left, or
+	 * its grant was renamed. Shown so a lost narrowing is never silent.
+	 */
+	staleOverrides: z.array(accessOverride),
 });
 
 export type AgentAccess = z.infer<typeof agentAccess>;
+
+/** One role_skills row: a role-layer skill attached to a role. */
+export type RoleSkill = { role: Role; skillId: string };
+
+export type AgentSkillsInput<T> = {
+	roles: readonly Role[];
+	/** Candidates; skillsForAgent picks this agent's. */
+	skills: readonly T[];
+	/** role_skills rows. Rows for roles the agent does not hold are ignored. */
+	roleSkills: readonly RoleSkill[];
+	/** The skills attached to the mission (mission_skills). */
+	missionSkillIds: readonly string[];
+};
+
+/**
+ * The skills an agent receives (DATA-CONTRACTS-V2, Skill): approved, and
+ * either a role-layer skill that role_skills attaches to one of its roles,
+ * or a stack or domain skill attached to the mission and recommended for one
+ * of its roles. Dispatch delivers the same set. Sorted by slug with a
+ * code-unit compare, never the locale.
+ */
+export function skillsForAgent<
+	T extends Pick<
+		SkillListItem,
+		"id" | "slug" | "layer" | "status" | "recommendedFor"
+	>,
+>(input: AgentSkillsInput<T>): T[] {
+	const roles = new Set<Role>(input.roles);
+	const viaRole = new Set(
+		input.roleSkills.filter((r) => roles.has(r.role)).map((r) => r.skillId),
+	);
+	const attached = new Set(input.missionSkillIds);
+	return input.skills
+		.filter(
+			(s) =>
+				s.status === "approved" &&
+				(s.layer === "role"
+					? viaRole.has(s.id)
+					: attached.has(s.id) && s.recommendedFor.some((r) => roles.has(r))),
+		)
+		.sort((a, b) => (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0));
+}
 
 export type AccessSkill = Pick<
 	SkillListItem,
 	"id" | "slug" | "type" | "layer" | "status" | "recommendedFor" | "grants"
 >;
 
-export type AccessInput = {
-	roles: readonly Role[];
+export type AccessInput = AgentSkillsInput<AccessSkill> & {
 	/** Resolved (resolveWritablePaths), never an entry's null. */
 	writablePaths: readonly string[];
-	/** Any skills; accessFor picks the ones this agent has. */
-	skills: readonly AccessSkill[];
-	/** The skills attached to the mission. */
-	missionSkillIds: readonly string[];
 	overrides?: readonly AccessOverride[] | null;
 };
 
-const RANK = { none: 0, read: 1, write_held: 2 } as const;
+const RANK: Record<z.infer<typeof grantRowMode>, number> = {
+	none: 0,
+	read: 1,
+	write_held: 2,
+};
 
-/** Split at the first ':'. The verb is null when there is no ':'. */
-function parseGrant(grant: string): { system: string; verb: string | null } {
+/** Split at the first ':'. Only the verb `read` reads; anything else, unparsed included, overstates rather than hides. */
+export function parseGrant(grant: string): {
+	system: string;
+	derivedMode: z.infer<typeof grantDerivedMode>;
+} {
 	const at = grant.indexOf(":");
-	if (at === -1) return { system: grant, verb: null };
-	return { system: grant.slice(0, at), verb: grant.slice(at + 1) };
+	return at === -1
+		? { system: grant, derivedMode: "write_held" }
+		: {
+				system: grant.slice(0, at),
+				derivedMode: grant.slice(at + 1) === "read" ? "read" : "write_held",
+			};
 }
 
-/** Only the verb `read` reads. Anything else, unparsed included, overstates rather than hides. */
-export function grantMode(grant: string): "read" | "write_held" {
-	return parseGrant(grant).verb === "read" ? "read" : "write_held";
+/** A grant's derived mode. */
+export function grantMode(grant: string): z.infer<typeof grantDerivedMode> {
+	return parseGrant(grant).derivedMode;
 }
 
 const rowKey = (skillId: string, grant: string) => `${skillId}\u0000${grant}`;
 
-/**
- * The capability skills this agent has: approved, recommended for one of its
- * roles, and either role-layer or attached to the mission. Sorted by slug
- * with a code-unit compare, never the locale.
- */
-function heldCapabilities(input: AccessInput): AccessSkill[] {
-	const roles = new Set<Role>(input.roles);
-	const attached = new Set(input.missionSkillIds);
-	return input.skills
-		.filter(
-			(s) =>
-				s.type === "capability" &&
-				s.status === "approved" &&
-				s.recommendedFor.some((r) => roles.has(r)) &&
-				(s.layer === "role" || attached.has(s.id)),
-		)
-		.sort((a, b) => (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0));
-}
-
 export function accessFor(input: AccessInput): AgentAccess {
-	const overrides = new Map<string, AccessOverride["mode"]>();
+	const overrides = new Map<string, AccessOverride>();
 	for (const o of input.overrides ?? []) {
 		const key = rowKey(o.skillId, o.grant);
-		if (!overrides.has(key)) overrides.set(key, o.mode);
+		if (!overrides.has(key)) overrides.set(key, o);
 	}
 
 	const grantRows: GrantRow[] = [];
-	for (const skill of heldCapabilities(input)) {
-		const seen = new Set<string>();
+	const used = new Set<string>();
+	for (const skill of skillsForAgent(input)) {
+		if (skill.type !== "capability") continue;
 		for (const grant of skill.grants ?? []) {
-			if (seen.has(grant)) continue;
-			seen.add(grant);
-			const derivedMode = grantMode(grant);
-			const override = overrides.get(rowKey(skill.id, grant));
+			const key = rowKey(skill.id, grant);
+			if (used.has(key)) continue;
+			used.add(key);
+			const { system, derivedMode } = parseGrant(grant);
+			const override = overrides.get(key)?.mode;
 			grantRows.push({
 				kind: "grant",
 				skillId: skill.id,
 				skillSlug: skill.slug,
 				grant,
-				system: parseGrant(grant).system,
+				system,
 				derivedMode,
 				mode:
 					override !== undefined && RANK[override] < RANK[derivedMode]
@@ -164,10 +210,14 @@ export function accessFor(input: AccessInput): AgentAccess {
 			...grantRows,
 			{ kind: "delivery", mode: "send_after_approval" },
 		],
+		staleOverrides: [...overrides]
+			.filter(([key]) => !used.has(key))
+			.map(([, o]) => o),
 	};
 }
 
-export type AccessIssue = { path: (string | number)[]; message: string };
+/** The 422 details' issue: a ValidationIssue without a validator code. */
+export type AccessIssue = Omit<ValidationIssue, "code">;
 
 /**
  * What the roster update refuses (access_override_invalid), in override

@@ -71,7 +71,7 @@ src/contract/
 | `agentTemplates` · `skills` | list · get · get-by-slug (`/by-slug/:slug`, the live row), read-only (module 4). Skills embed their source; the list item leaves out the markdown | templates: `q` · `kind` · `role` · `wave` (array overlap) · `engagementId`. Skills: `q` · `layer` · `type` · `status` · `role` · `sourceId`. Both: cursor · `meta.total` |
 | `skillSources` | list · get, read-only (module 4), with a live `skillCount` | `q` · `kind` · cursor · `meta.total` |
 | `connections` | list · get · create (module 2), operator-only. `credentialRef` must look like an env var name; only the name is stored | `engagementId` · cursor |
-| `roster` | list · add · update · remove · applyPreset (`POST /api/missions/:missionId/roster/apply-preset`, all or nothing; refuses a non-empty roster unless `replace`) · skills · attachSkill · detachSkill (module 4). Writes need a `draft` mission (422 `mission_not_editable`). Update takes `accessOverrides`, which only narrow (422 `access_override_invalid`, with `issues`); `null` or `[]` clears them, stored as null | — |
+| `roster` | list · access (`GET …/roster/:entryId/access`, see *Access*) · add · update · remove · applyPreset (`POST /api/missions/:missionId/roster/apply-preset`, all or nothing; refuses a non-empty roster unless `replace`) · skills · attachSkill · detachSkill (module 4). Writes need a `draft` mission (422 `mission_not_editable`). Update takes `accessOverrides`, which only narrow (422 `access_override_invalid`, with `issues`); `null` or `[]` clears them, stored as null | — |
 | `presets` | list · get · create (201) · update (`PATCH`, any subset, at least one field; `agents` replaces the list; every update adds 1 to `version`) (module 4). Agents must name live, rosterable templates (422 `agent_template_not_found`, `template_not_rosterable`), each at most once per territory (409 `CONFLICT`), the same rules apply-preset meets. A missing or deleted preset is 404. No delete: `Playbook.default_preset_id` is a NOT NULL FK. applications (`GET /api/presets/:id/applications`, "Used by"): the preset's `roster.preset_applied` rows, newest first, each `{ missionId, mission: { status, type } | null when deleted, presetVersion, appliedAt, actor, added, removed }`; paged, `meta.total`; 404 for a missing or deleted preset | `q` · `cut` · cursor · `meta.total` |
 | `playbooks` | list · getForType (`GET /api/playbooks/by-type/:missionType`, the live row, else 404) · create (`POST`, 201; a live mission type is 409) · update (`PUT …/by-type/:missionType`, a full replace, `version` + 1, mission type immutable) · versions (`GET …/by-type/:missionType/versions`, newest first, from the ActivityLog snapshots; `[current]` when none are logged) (module 3). Writes check: gates from the closed vocabulary, each once; waves non-empty, unique, in `WAVES` order; a live default preset (422 `preset_not_found`) that staffs the earliest wave (422 `preset_misses_first_wave`). Update is refused while a live mission of that type is `active` or `halted` (422 `playbook_in_use`) | `q` (name) · cursor · `meta.total` |
 | `missionPlans` | get · update (`GET`/`PUT /api/missions/:id/plan`, module 3). The response carries the brief (null when the stored one predates the brief shape), `approvedBrief` (the approving Intake's brief, which the plan may not change; null when no Intake created the mission), `templateRef`, `templateVersion`, and `check: { passed, issues }` from `checkPlan`. Update replaces the plan on a `draft` mission (422 `mission_not_editable`), saves whether or not the check passes, refuses any change to the approved brief (422 `plan_changes_approved_brief`, with `issues`), and refuses a `templateRef` other than the mission's `type` (422 `template_type_mismatch`) | — |
@@ -952,24 +952,28 @@ Warnings are playbook-relative — read the playbook's `gates`, so absences a pl
 ## Access
 
 ```
-accessFor({ roles, writablePaths, skills, missionSkillIds, overrides }) → { enforced: false, rows: AccessRow[] }
+skillsForAgent({ roles, skills, roleSkills, missionSkillIds }) → the agent's skills, by slug
+accessFor({ roles, writablePaths, skills, roleSkills, missionSkillIds, overrides })
+  → { enforced: false, rows: AccessRow[], staleOverrides: AccessOverride[] }
 
 AccessMode = 'none' | 'read' | 'write_held' | 'send_after_approval'
 AccessRow  = { kind: 'repository', mode: 'write_held' | 'read', scope: string[] }
            | { kind: 'grant', skillId, skillSlug, grant, system, derivedMode: 'read' | 'write_held', mode: 'none' | 'read' | 'write_held' }
            | { kind: 'delivery', mode: 'send_after_approval' }
 AccessOverride = { skillId, grant, mode: 'none' | 'read' }
+
+GET /api/missions/:missionId/roster/:entryId/access    accessFor on one entry, computed by the server
 ```
 
-*As built 2026-10-12* (`src/contract/shared/access.ts`). Pure, like `computeCoherence`: both sides import it. Reasons are in `DECISIONS-V2.md`, *Access modes are derived*.
+*As built 2026-10-12* (`src/contract/shared/access.ts`). Pure, like `computeCoherence`: both sides import it. Why it is derived, why there is no `write` mode, and why delivery is never an agent's: `DECISIONS-V2.md`, *Access modes are derived*.
 
+- **`skillsForAgent` is the skills an agent receives** (*Skill*, the join tables): approved, and either a `role`-layer skill that `role_skills` attaches to one of its roles, or a `stack` or `domain` skill attached to the mission and recommended for one of its roles. Dispatch delivers the same set.
+- **Tool rows come from its capability skills,** one row per grant. Knowledge skills make no row. `system` is the grant up to its first `:`, or the whole grant when it has none. `derivedMode` is `read` when the verb after the `:` is exactly `read`, else `write_held`. `mode` is the override's mode when an override names the row, else `derivedMode`. An override matches its grant verbatim; skill writes trim grants.
 - **`writablePaths` is resolved** (`resolveWritablePaths`). The repository row is `write_held` when it is non-empty and `read` when it is empty. Its scope is the paths.
-- **Tool rows come from capability skills** that are approved and recommended for at least one of the agent's roles. A `role`-layer skill counts on its own. A `stack` or `domain` skill counts only when attached to the mission (`missionSkillIds`). Knowledge skills are text, not tools, and make no row.
-- **One row per grant.** `system` is the grant up to its first `:`, or the whole grant when it has none. `derivedMode` is `read` when the verb after the `:` is exactly `read`, else `write_held`. `mode` is the override's mode when an override names the row, else `derivedMode`. Overrides that name no row are ignored on read; the write refuses them.
-- **Order is fixed:** the repository row, then tool rows by skill slug and then grant order, then the delivery row.
-- **The delivery row is always present and never overridable.** Agents never deliver.
+- **Order is fixed:** the repository row, then tool rows by skill slug and then grant order, then the delivery row, which is always present and never overridable.
+- **`staleOverrides`** lists stored overrides that name no row now, because the skill left the mission, lost its role, or renamed the grant. A lost narrowing is shown, never silent. The write refuses such overrides. What a room does with a stale one is module 7's to decide.
 - **`enforced` is `false` until module 7.** A surface shows every row as recorded, not enforced.
-- **No `write` mode.** Every file an agent writes is held until the gate passes, so nothing would derive it.
+- **The route computes it on the server,** because no route reads `role_skills`. It loads only the entry's role skills and the mission's skills. Same 404s as the roster.
 
 `checkAccessOverrides(rows, overrides)` is exported too. It returns the issues the roster update refuses with, in a stable order.
 
