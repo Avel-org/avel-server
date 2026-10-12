@@ -34,6 +34,7 @@ src/contract/
   activity.ts         module 13 (read only)
   intake.ts           module 1
   playbook.ts         module 3
+  template.ts         module 3 — template reads from the template repositories (decided 2026-10-12)
   agent-template.ts   module 4; identity versions with module 5
   skill.ts            module 4
   skill-source.ts     module 4
@@ -52,6 +53,7 @@ src/contract/
     pagination.ts     cursor pagination
     status.ts         MISSION_STATUSES, EXPORT_STATUSES
     coherence.ts      computeCoherence — pure, imported by both sides
+    access.ts         accessFor — pure, imported by both sides (decided 2026-10-12)
 ```
 
 **A route group is added with the module that uses it.** No route group exists without a module behind it. Every group above lands with the module named beside it, in `COMMAND-CENTER.md`'s numbering (labeled 2026-10-06). The two module 13 groups, `mission` reads and `activity`, are read-only routes for surfaces that exist before the modules that write their rows.
@@ -475,7 +477,7 @@ version · deleted_at · timestamps
 id
 engagement_id?         FK → Engagement — required when origin = 'client', null when 'internal' (CHECK)
 origin                 'internal' | 'client'
-type                   text — joins Playbook.mission_type, no FK
+type                   text — joins Playbook.mission_type, no FK; equals template_ref when that is set (decided 2026-10-12)
 brief                  jsonb, NOT NULL
 sprint_n
 status                 'draft' | 'active' | 'halted' | 'shipped' | 'archived'
@@ -521,6 +523,10 @@ Gate vocabulary is closed: `phase1-close · alignment · qa · security · rollb
 
 **References a preset; never lists agents.** Squad composition is RosterPreset's; the Playbook owns process.
 
+**What it owns** (decided 2026-10-12, reasons in `DECISIONS-V2.md`): which waves run, switched on or off in the fixed A to E order; the gates that apply, as a set with a policy each; the deliverable; and the required fields. It never holds domain obligations, the cut, or thresholds. The planner, the runner, the gate and render read it. This row is canonical: a template repository's `.avel/playbook.md` is generated from it.
+
+**A template's playbook is keyed by the template's slug.** A mission with a template has `type` equal to its `template_ref`, so the existing join on `mission_type` finds the template's playbook. A plan update that sets a `template_ref` other than the mission's `type` is refused (422 `template_type_mismatch`) `[specced]`. A mission with no template keeps a playbook keyed by its type, such as `discovery`.
+
 ### RosterEntry
 One agent customized for one mission, or one standing agent of the firm.
 
@@ -536,12 +542,15 @@ token_soft_ceiling?    integer — warn and log, do not stop; default 1.5× esti
 token_hard_ceiling?    integer — halt the dispatch; default 3× estimate
 grain                  'merged' | 'default' | 'split'
 absorbed_boundaries    text[] — when grain is 'merged', the boundaries it owns
+access_overrides?      jsonb { skill_id, grant, mode: 'none' | 'read' }[] — narrows accessFor's tool rows, per mission; [specced] 2026-10-12
 deleted_at · timestamps         deleted_at added 2026-10-05, as built
 ```
 
 *As built 2026-10-05:* the three token fields are nullable. A RosterEntry exists before it is dispatched, and no dispatch entity exists yet to carry a NOT NULL. Until one does, "required before dispatch" is `[attestation]`. *Specced 2026-10-06:* `Dispatch` carries the binding estimate and ceilings as NOT NULL. These three fields stay as the planning default a dispatch is created from.
 
 Whether an agent is on a mission = whether its RosterEntry exists and is active. Skills are a relation.
+
+**`access_overrides` only narrows** `[specced]` 2026-10-12. Each override names one tool row from `accessFor` by `skill_id` and `grant`, and lowers it to `read` or `none`. It is written through the roster entry update (`PATCH`, `accessOverrides`; `null` clears it) while the mission is a draft. An override that names no tool row the agent has, raises a mode, or repeats a row is refused (422 `access_override_invalid`, with `issues`). It is the freeze exception recorded in `DECISIONS-V2.md`, *Per-agent overrides*. Nothing enforces it until module 7.
 
 **The firm roster** `[specced]`. Canon, Trace and Uno work for the agency between missions rather than inside one, so their entries have `scope = 'firm'` and no mission. A CHECK requires `mission_id` exactly when `scope = 'mission'`. A firm entry has no `territory`, `writable_paths`, or `absorbed_boundaries`: firm agents write no files. A partial unique index allows at most one live firm entry per `agent_template_id` (decided 2026-10-06), so there is one Canon. Without a firm entry, an agent working outside a mission could not be named by `ActivityLog.actor_roster_entry_id`, and its actions could not be attributed.
 
@@ -921,7 +930,7 @@ CoherenceEntry = { id, active, waves, kind, roles, writablePaths }   — writabl
 
 Computable from the mount table. This enforces the rule that owning territory disqualifies you from judging a seam, mechanically rather than by good intentions.
 
-**The hard block:** the mission must contain at least one active agent in the **earliest wave its playbook declares**. For `full-build` that resolves to wave `A`; for `discovery` it resolves to whatever that playbook starts with.
+**The hard block:** the mission must contain at least one active agent in the **earliest wave its playbook declares**. For `template-booking` that resolves to wave `A`; for `discovery` it resolves to whatever that playbook starts with.
 
 Warnings are playbook-relative — read the playbook's `gates`, so absences a playbook doesn't declare aren't flagged.
 
@@ -937,6 +946,54 @@ Warnings are playbook-relative — read the playbook's `gates`, so absences a pl
 - **Determinism in the render.** No clock, no randomness, no unstable ordering in rendered bytes.
 - **Zod defines shape once.** Tables derive via `drizzle-zod`; the contract imports the same schemas. One definition, three consumers.
 - **Enums are pgEnums when code branches on them**; catalogs are tables when they're labels that grow.
+
+---
+
+## Access
+
+```
+accessFor({ roles, writablePaths, skills, missionSkillIds, overrides }) → { enforced: false, rows: AccessRow[] }
+
+AccessMode = 'none' | 'read' | 'write_held' | 'send_after_approval'
+AccessRow  = { kind: 'repository', mode: 'write_held' | 'read', scope: string[] }
+           | { kind: 'grant', skillId, skillSlug, grant, system, derivedMode: 'read' | 'write_held', mode: 'none' | 'read' | 'write_held' }
+           | { kind: 'delivery', mode: 'send_after_approval' }
+AccessOverride = { skillId, grant, mode: 'none' | 'read' }
+```
+
+`[specced]` 2026-10-12, `src/contract/shared/access.ts`. Pure, like `computeCoherence`: both sides import it. Reasons are in `DECISIONS-V2.md`, *Access modes are derived*.
+
+- **`writablePaths` is resolved** (`resolveWritablePaths`). The repository row is `write_held` when it is non-empty and `read` when it is empty. Its scope is the paths.
+- **Tool rows come from capability skills** that are approved and recommended for at least one of the agent's roles. A `role`-layer skill counts on its own. A `stack` or `domain` skill counts only when attached to the mission (`missionSkillIds`). Knowledge skills are text, not tools, and make no row.
+- **One row per grant.** `system` is the grant up to its first `:`, or the whole grant when it has none. `derivedMode` is `read` when the verb after the `:` is exactly `read`, else `write_held`. `mode` is the override's mode when an override names the row, else `derivedMode`. Overrides that name no row are ignored on read; the write refuses them.
+- **Order is fixed:** the repository row, then tool rows by skill slug and then grant order, then the delivery row.
+- **The delivery row is always present and never overridable.** Agents never deliver.
+- **`enforced` is `false` until module 7.** A surface shows every row as recorded, not enforced.
+- **No `write` mode.** Every file an agent writes is held until the gate passes, so nothing would derive it.
+
+`checkAccessOverrides(rows, overrides)` is exported too. It returns the issues the roster update refuses with, in a stable order.
+
+## Templates
+
+A template is not an entity. It is read from its repository (`TEMPLATES.md`, *Where templates live*), and no table holds it (decided 2026-10-12).
+
+```
+GET /api/templates           every template in the allowlist, in allowlist order
+GET /api/templates/:slug     one; a slug not in the allowlist is 404
+
+Template = {
+  slug                 the repository name, e.g. 'template-booking'; the mission template_ref and the playbook mission_type
+  readable             false when the repository or its manifest could not be read
+  name? · scope? · startingState?     from .avel/template.json; null when not readable
+  latestSha?           the default branch's head, 40 lowercase hex; null when not readable
+  defaultPresetId?     the template's live playbook's default preset; null when it has no playbook
+  missionCount         live missions with this template_ref
+}
+scope          'full-stack' | 'frontend' | 'backend' | 'integration' | 'data' | 'automation' | 'migration' | 'audit'
+startingState  'greenfield' | 'brownfield'
+```
+
+`[specced]` 2026-10-12. The allowlist is configuration under source control and is bounded, so the list is not paged. A `TemplateSource` gateway in `AppDeps` does the reading. Production reads GitHub, and dev and tests read a fixture, so the route works on `avel_dev` under dev preview. One unreadable repository marks its own row and never fails the list.
 
 ---
 

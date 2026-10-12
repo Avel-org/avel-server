@@ -754,6 +754,58 @@ Decided by the operator when module 3 started. Module 4's preset create and upda
 - **Playbook versions come from the activity log.** Every write logs the full playbook as written, so the history is a query over those rows, with no history table under the freeze.
 - **The default preset must staff the playbook's earliest wave** (`preset_misses_first_wave`). Otherwise every mission that takes the defaults starts blocked by coherence. A playbook has no cut of its own, so "the preset's cut fits" had nothing to compare against.
 - **Refused requests are not logged** (decided 2026-10-10). Every ActivityLog row is written in its mutation's transaction, so a row means the change applied. Logging refusals waits until agents call the API, where a refused agent action is worth a record.
+
+## Decided 2026-10-12: templates, playbooks and access
+
+The operator decided how templates, playbooks and agent permissions work, when the frontend restructured its catalog pages. Shapes are in `DATA-CONTRACTS-V2.md` (*Playbook*, *RosterEntry*, *Templates*, *Access*). This records why.
+
+### What a playbook owns
+
+A playbook is the process for one kind of mission. The operator writes it, never an agent (`TEMPLATES.md`, *Who builds what*).
+
+- **It owns** which waves run, the gates that apply with their policy, the deliverable, and the required fields.
+- **It names a default preset and never lists agents.** Squad composition is RosterPreset's.
+- **It does not own** domain obligations (the template's `obligations.md`), the cut (derived from the repository), or thresholds such as the mutation floor (global and versioned).
+- **Waves are switched on or off, never reordered.** The order is the global A to E (`ROSTER-V2.md`). A playbook that could reorder waves would reopen the phase model.
+- **Gates are a set, not positions between waves.** Which gate names exist, and how they map to the four gate stages, is open until module 9. Attaching gates to waves was considered and left to module 9's design: nothing can act on it before the runner and the gate exist.
+- **It has four readers:** the planner (coherence), the runner (which waves to dispatch), the gate (which gates, with which policy), and render (what to package).
+- **The database row is canonical.** A template repository's `.avel/playbook.md` is generated from it and never edited by hand. Two editable copies of one policy would drift.
+- **It holds no step-by-step workflow.** The executable Playbook stays demoted (*Sequencing corrections*).
+- **It is an entity, not a role.** `ROLES.md` lists what agents or code hold. Nothing holds a playbook.
+
+### A template's playbook is keyed by its slug
+
+A templated mission's `type` equals its `template_ref`, and that template's playbook has the same slug as its `mission_type`. Keying by scope and starting state was the alternative. `template-booking` and `template-fullstack` are both full stack and greenfield, so that key would not name one template.
+
+- **Not every playbook is a template's.** A mission with no template keeps a playbook keyed by its type, such as `discovery`.
+- **Code enforces it where a template is set.** A plan that names a template other than the mission's type is refused (`template_type_mismatch`). A CHECK would be a migration under the freeze.
+
+### Templates are read from their repositories
+
+Templates are not database rows. Each one lives in its own repository (`TEMPLATES.md`, *Where templates live*), and the Command Center reads them.
+
+- **The list of templates is configuration under source control:** an allowlist of repository slugs. Discovering them from the GitHub organization would make the list whatever happens to exist there, and would need an organization-wide credential.
+- **Each template repository carries `.avel/template.json`** with its name, scope and starting state. Nothing machine-readable said those before, and parsing a README would be a guess.
+- **A `TemplateSource` gateway reads them,** beside `RepoSource`. Production reads GitHub. Dev and tests read a fixture, so the page works on `avel_dev` under dev preview with no token.
+- **A table was the alternative.** It would have been a freeze exception holding a copy of what the repositories already hold.
+
+### Access modes are derived
+
+What an agent may touch is computed by a pure function in the contract (`accessFor`), not stored. The facts that decide it already exist: mounts decide what an agent writes, a capability's grants decide which tools its room holds, and the operator runs delivery. A stored mode beside each would be a second copy that drifts.
+
+- **Four modes:** `none`, `read`, `write_held` and `send_after_approval`. Every file an agent writes is held until the gate passes, and anything that leaves the firm goes through the operator, so no agent action lands directly. A `write` mode was proposed and left out, because nothing would derive it.
+- **A grant's mode comes from its form, `system:verb`.** The verb `read` gives `read`, and any other verb gives `write_held`. Grants are free text, so a grant not in that form shows as `write_held`. That overstates access rather than hiding it.
+- **Nothing enforces it until module 7.** Rooms are what make grants and mounts real. Until then every result carries `enforced: false`, and a surface must say so. Showing it as live would be `[attestation]`.
+
+### Per-agent overrides, a freeze exception
+
+The operator wants a per-agent toggle on each tool. A derived mode cannot switch one agent's tool off, so `RosterEntry.access_overrides` is added: a nullable jsonb, scoped to the mission like `writable_paths`. It is an exception to the 2026-10-05 freeze, decided by the operator on 2026-10-12.
+
+- **An override only narrows.** It lowers a grant to `read` or `none`, never raises one. A toggle that widened access would grant what the room's ceiling and the skill's review never approved.
+- **Only tool grants can be overridden.** The repository row follows `writable_paths`, which already has its per-mission override, and delivery is never an agent's.
+- **It is set while the mission is a draft,** like every other roster change.
+- **The mission-wide toggle is the existing skill attach and detach,** for stack and domain skills.
+
 ---
 
 ## Open questions
