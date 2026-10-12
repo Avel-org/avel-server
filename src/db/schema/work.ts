@@ -181,6 +181,13 @@ export const mission = pgTable(
 	],
 );
 
+/** An AccessOverride as stored: snake_case, like PresetAgent. */
+export interface StoredAccessOverride {
+	skill_id: string;
+	grant: string;
+	mode: "none" | "read";
+}
+
 /** One agent customized for one mission. */
 export const rosterEntry = pgTable(
 	"roster_entry",
@@ -203,6 +210,8 @@ export const rosterEntry = pgTable(
 		tokenHardCeiling: integer("token_hard_ceiling"),
 		grain: grain("grain").notNull(),
 		absorbedBoundaries: text("absorbed_boundaries").array().notNull(),
+		// Narrows accessFor's tool rows for this mission; null means none.
+		accessOverrides: jsonb("access_overrides").$type<StoredAccessOverride[]>(),
 		...softDelete,
 		...timestamps,
 	},

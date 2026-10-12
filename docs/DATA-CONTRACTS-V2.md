@@ -1024,6 +1024,7 @@ As built, from `drizzle/` (2026-10-05). Each table comes after every table its f
 | `0018` | ActivityLog enum values | `preset.created`, `preset.updated`, entity type `roster_preset` |
 | `0019` | Mission plan | `mission.template_ref`, `template_version` under CHECK `mission_template_complete`; `mission.plan_updated` |
 | `0020` | ActivityLog enum values | `playbook.created`, `playbook.updated`, entity type `playbook` |
+| `0021` | Roster access overrides | `roster_entry.access_overrides`, nullable jsonb; the freeze exception of 2026-10-12 |
 
 `0001`–`0006` create 24 tables: 2 + 3 + 8 + 4 + 6 + 1.
 

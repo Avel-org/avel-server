@@ -1,0 +1,1 @@
+ALTER TABLE "roster_entry" ADD COLUMN "access_overrides" jsonb;
