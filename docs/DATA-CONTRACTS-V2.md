@@ -961,7 +961,7 @@ AccessRow  = { kind: 'repository', mode: 'write_held' | 'read', scope: string[] 
 AccessOverride = { skillId, grant, mode: 'none' | 'read' }
 ```
 
-`[specced]` 2026-10-12, `src/contract/shared/access.ts`. Pure, like `computeCoherence`: both sides import it. Reasons are in `DECISIONS-V2.md`, *Access modes are derived*.
+*As built 2026-10-12* (`src/contract/shared/access.ts`). Pure, like `computeCoherence`: both sides import it. Reasons are in `DECISIONS-V2.md`, *Access modes are derived*.
 
 - **`writablePaths` is resolved** (`resolveWritablePaths`). The repository row is `write_held` when it is non-empty and `read` when it is empty. Its scope is the paths.
 - **Tool rows come from capability skills** that are approved and recommended for at least one of the agent's roles. A `role`-layer skill counts on its own. A `stack` or `domain` skill counts only when attached to the mission (`missionSkillIds`). Knowledge skills are text, not tools, and make no row.

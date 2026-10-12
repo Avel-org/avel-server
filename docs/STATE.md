@@ -41,7 +41,7 @@ Legend: ⬜ not started · ◐ partly built · ✅ built.
 | 1 | Intake | ✅ |
 | 2 | Repo read | ✅ GitHub only; Next.js app-router layouts return no cut |
 | 3 | Mission planner | ◐ plan read and write with its mechanical check, `template_ref`/`template_version`, playbook reads and writes with versions, `computeCoherence` (the first-wave block and the vertical-cut roles warning) |
-| 4 | Roles and roster | ✅ catalog reads and writes, roster reads and writes, apply-preset, mission skills, preset create and update. Agent template writes come with module 5 |
+| 4 | Roles and roster | ✅ catalog reads and writes, roster reads and writes, apply-preset, mission skills, preset create and update, `accessFor` (derived access, not enforced until module 7). Agent template writes come with module 5 |
 | 5 | Identity generator | ⬜ |
 | 6 | Dispatch and runner | ⬜ |
 | 7 | Sandbox rooms | ⬜ |

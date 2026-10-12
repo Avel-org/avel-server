@@ -27,6 +27,7 @@ export * from "./playbook";
 export * from "./preset";
 export * from "./repo-read";
 export * from "./roster";
+export * from "./shared/access";
 export * from "./shared/coherence";
 export * from "./shared/envelope";
 export * from "./shared/errors";
