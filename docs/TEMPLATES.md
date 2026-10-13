@@ -186,7 +186,7 @@ template-fullstack/
 ├── .avel/
 │   ├── template.json              name, scope, starting state — operator authors
 │   ├── playbook.md                phases and gates — generated from the Playbook row
-│   ├── roster-preset.json         cut, grain, composition — operator authors
+│   ├── roster-preset.json         cut, grain, composition — generated from the RosterPreset row
 │   ├── obligations.md             domain rules — operator authors
 │   └── conventions/               layering, testing, naming — operator authors
 ├── packs/                         vertical domain packs — see below
@@ -197,7 +197,7 @@ template-fullstack/
 
 `gate.yml` is committed before any agent writes code, so the first commit is already checked.
 
-**The Playbook row is canonical** (decided 2026-10-12). The operator writes it in the Command Center, and `playbook.md` is generated from it, never edited by hand. The playbook's `mission_type` is the repository's name. `template.json` is what the Command Center reads to list templates, alongside an allowlist of template repositories. See `DECISIONS-V2.md`, *Decided 2026-10-12*.
+**The Playbook and RosterPreset rows are canonical** (decided 2026-10-12). The operator writes both in the Command Center, and `playbook.md` and `roster-preset.json` are generated from them, never edited by hand. The playbook's `mission_type` is the repository's name. `template.json` is what the Command Center reads to list templates, alongside an allowlist of template repositories. See `DECISIONS-V2.md`, *Decided 2026-10-12*.
 
 ### The first three
 

@@ -769,7 +769,7 @@ A playbook is the process for one kind of mission. The operator writes it, never
 - **Waves are switched on or off, never reordered.** The order is the global A to E (`ROSTER-V2.md`). A playbook that could reorder waves would reopen the phase model.
 - **Gates are a set, not positions between waves.** Which gate names exist, and how they map to the four gate stages, is open until module 9. Attaching gates to waves was considered and left to module 9's design: nothing can act on it before the runner and the gate exist.
 - **It has four readers:** the planner (coherence), the runner (which waves to dispatch), the gate (which gates, with which policy), and render (what to package).
-- **The database row is canonical.** A template repository's `.avel/playbook.md` is generated from it and never edited by hand. Two editable copies of one policy would drift.
+- **The database row is canonical.** A template repository's `.avel/playbook.md` is generated from it and never edited by hand. Two editable copies of one policy would drift. The same rule holds for the template's default preset: the RosterPreset row is canonical, and `.avel/roster-preset.json` is generated from it (decided by the operator later the same day).
 - **It holds no step-by-step workflow.** The executable Playbook stays demoted (*Sequencing corrections*).
 - **It is an entity, not a role.** `ROLES.md` lists what agents or code hold. Nothing holds a playbook.
 
