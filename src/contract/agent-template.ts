@@ -1,8 +1,10 @@
 import { initContract } from "@ts-rest/core";
 import { z } from "zod";
+import { agentAccess } from "./shared/access";
 import { successEnvelope } from "./shared/envelope";
 import { pageEnvelope, pageQuery } from "./shared/pagination";
 import { oneOrMany, searchQuery } from "./shared/query";
+import { missionStatus } from "./shared/status";
 
 const c = initContract();
 
@@ -122,6 +124,22 @@ export const agentTemplateListQuery = pageQuery.extend({
 
 export type AgentTemplateListQuery = z.infer<typeof agentTemplateListQuery>;
 
+/** Where one agent sits: a live roster entry on a live mission. */
+export const agentRosterEntrySchema = z.object({
+	entryId: z.string().uuid(),
+	missionId: z.string().uuid(),
+	mission: z.object({
+		type: z.string(),
+		status: missionStatus,
+		sprintN: z.number().int(),
+		engagementId: z.string().uuid().nullable(),
+	}),
+	active: z.boolean(),
+	territory: z.string().nullable(),
+});
+
+export type AgentRosterEntry = z.infer<typeof agentRosterEntrySchema>;
+
 const byId = z.object({ id: z.string().uuid() });
 const bySlug = z.object({ slug: z.string().min(1).max(200) });
 
@@ -146,5 +164,22 @@ export const agentTemplateContract = c.router({
 		pathParams: bySlug,
 		responses: { 200: successEnvelope(agentTemplateSchema) },
 		summary: "The live template with this slug. A deleted one is reached by id",
+	},
+	rosterEntries: {
+		method: "GET",
+		path: "/api/agent-templates/:id/roster-entries",
+		pathParams: byId,
+		// Unpaginated: bounded by missions, one entry per territory each.
+		responses: { 200: successEnvelope(z.array(agentRosterEntrySchema)) },
+		summary:
+			"The template's live roster entries on live missions, newest mission first",
+	},
+	access: {
+		method: "GET",
+		path: "/api/agent-templates/:id/access",
+		pathParams: byId,
+		responses: { 200: successEnvelope(agentAccess) },
+		summary:
+			"accessFor outside any mission: role_skills for its roles, no mission skills, no overrides. Not enforced until module 7",
 	},
 });

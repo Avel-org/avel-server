@@ -257,13 +257,14 @@ function defaultCeilings(
 }
 
 /**
- * What accessFor needs for one entry, loaded narrowly: the template's roles
+ * What accessFor needs for one agent, loaded narrowly: the template's roles
  * and paths, the role_skills rows for those roles, the mission's attached
- * skills, and only the live capability skills among them.
+ * skills (none outside a mission), and only the live capability skills among
+ * them.
  */
-async function entryAccessInput(
+export async function entryAccessInput(
 	db: Executor,
-	missionId: string,
+	missionId: string | null,
 	agentTemplateId: string,
 	writablePaths: string[] | null,
 ) {
@@ -283,10 +284,13 @@ async function entryAccessInput(
 					.select({ role: roleSkills.role, skillId: roleSkills.skillId })
 					.from(roleSkills)
 					.where(inArray(roleSkills.role, template.roles));
-	const attached = await db
-		.select({ skillId: missionSkills.skillId })
-		.from(missionSkills)
-		.where(eq(missionSkills.missionId, missionId));
+	const attached =
+		missionId === null
+			? []
+			: await db
+					.select({ skillId: missionSkills.skillId })
+					.from(missionSkills)
+					.where(eq(missionSkills.missionId, missionId));
 	const ids = [
 		...new Set([
 			...viaRole.map((r) => r.skillId),
