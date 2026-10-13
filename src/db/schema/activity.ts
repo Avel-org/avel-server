@@ -61,6 +61,8 @@ export const activityAction = pgEnum("activity_action", [
 	"mission.plan_updated",
 	"playbook.created",
 	"playbook.updated",
+	"agent_template.updated",
+	"agent_template.identity_regenerated",
 ]);
 
 export const activityEntityType = pgEnum("activity_entity_type", [
@@ -76,6 +78,7 @@ export const activityEntityType = pgEnum("activity_entity_type", [
 	"roster_entry",
 	"roster_preset",
 	"playbook",
+	"agent_template",
 ]);
 
 /**

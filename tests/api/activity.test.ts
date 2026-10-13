@@ -104,8 +104,6 @@ async function seed(
 		kind: "feature",
 		roles: ["domain"],
 		waveDefaults: ["A"],
-		identityMd: "#",
-		depthMd: "#",
 		writablePaths: ["src/**"],
 		version: 1,
 		...stamp(clock),

@@ -16,18 +16,37 @@ import {
 	type AgentTemplateListQuery,
 	accessFor,
 	agentTemplateContract,
+	type IdentityVersion,
+	type IdentityVersionSummary,
+	identityVersionContract,
 	ok,
 	page,
+	ROLE_RUNNER,
+	type Role,
 } from "../contract";
+import { logActivity } from "../db/activity";
+import {
+	type IdentityState,
+	type IdentityVersion as IdentityVersionRow,
+	identityStates,
+	regenerateIdentity,
+	versionByNumber,
+	versionByRef,
+	versionsBySha,
+	versionsFor,
+} from "../db/identity";
 import { agentTemplate, mission, rosterEntry } from "../db/schema";
-import { live } from "../db/schema/columns";
-import type { Executor } from "../db/tx";
+import { live, touch } from "../db/schema/columns";
+import { type Executor, withTx } from "../db/tx";
+import type { IdentityRefusal } from "../lib/identity";
+import { mergeAllowed } from "../lib/roles";
 import { ApiError } from "../middleware/errors";
 import { entryAccessInput } from "./roster";
 import {
 	after,
 	containsPattern,
 	notFound,
+	operatorOf,
 	type RequestContext,
 	type RouteDeps,
 	toPage,
@@ -35,7 +54,13 @@ import {
 
 type Row = typeof agentTemplate.$inferSelect;
 
-function toWire(row: Row): AgentTemplate {
+const NO_IDENTITY: IdentityState = {
+	version: null,
+	stale: false,
+	staleInputs: [],
+};
+
+function toWire(row: Row, identity: IdentityState): AgentTemplate {
 	return {
 		id: row.id,
 		slug: row.slug,
@@ -44,13 +69,53 @@ function toWire(row: Row): AgentTemplate {
 		roles: row.roles,
 		engagementId: row.engagementId,
 		waveDefaults: row.waveDefaults,
+		title: row.title,
 		description: row.description,
-		identityMd: row.identityMd,
-		depthMd: row.depthMd,
 		writablePaths: row.writablePaths,
+		identityVersion: identity.version?.number ?? null,
+		identitySha256: identity.version?.sha256 ?? null,
+		identityStale: identity.stale,
+		staleInputs: identity.staleInputs,
 		version: row.version,
 		createdAt: row.createdAt.toISOString(),
 		updatedAt: row.updatedAt.toISOString(),
+	};
+}
+
+/** The rows with their identity state, loaded in one batch. */
+async function withIdentity(
+	db: Executor,
+	rows: Row[],
+): Promise<AgentTemplate[]> {
+	const states = await identityStates(
+		db,
+		rows.map((r) => r.id),
+	);
+	return rows.map((r) => toWire(r, states.get(r.id) ?? NO_IDENTITY));
+}
+
+function versionSummary(
+	slug: string,
+	v: IdentityVersionRow,
+): IdentityVersionSummary {
+	return {
+		ref: `${slug}@v${v.number}`,
+		number: v.number,
+		sha256: v.sha256,
+		identityTokens: v.identityTokens,
+		depthTokens: v.depthTokens,
+		generatedBy: v.generatedBy,
+		createdAt: v.createdAt.toISOString(),
+	};
+}
+
+function versionWire(slug: string, v: IdentityVersionRow): IdentityVersion {
+	return {
+		...versionSummary(slug, v),
+		agentTemplateId: v.agentTemplateId,
+		identityMd: v.identityMd,
+		depthMd: v.depthMd,
+		inputs: v.inputs,
 	};
 }
 
@@ -84,6 +149,72 @@ async function liveTemplate(db: Executor, id: string): Promise<Row> {
 	return row;
 }
 
+function refusalError(r: IdentityRefusal): ApiError {
+	if (r.refused === "identity_role_unsupported") {
+		return new ApiError(
+			"PRECONDITION_FAILED",
+			"Only model roles get an identity; this template holds one that is not",
+			{ details: { reason: "identity_role_unsupported" } },
+		);
+	}
+	return new ApiError(
+		"PRECONDITION_FAILED",
+		`The ${r.file} file would be ${r.tokens} tokens, over the cap of ${r.cap}`,
+		{
+			details: {
+				reason: "identity_over_token_cap",
+				file: r.file,
+				tokens: r.tokens,
+				cap: r.cap,
+			},
+		},
+	);
+}
+
+/**
+ * Roles no agent may hold: a code role is a pipeline function, never on an
+ * agent (ROLES.md, The runtime test), and foundations is the operator's
+ * RosterEntry, which covers nothing else. One issue per offending role.
+ */
+function unassignable(roles: readonly Role[]) {
+	const issues: { path: (string | number)[]; message: string }[] = [];
+	roles.forEach((r, i) => {
+		if (ROLE_RUNNER[r] === "code") {
+			issues.push({
+				path: ["roles", i],
+				message: `${r} is a code role: a pipeline function, never held by an agent`,
+			});
+		} else if (r === "foundations" && roles.length > 1) {
+			issues.push({
+				path: ["roles", i],
+				message:
+					"foundations is the operator's role and is never held with another",
+			});
+		}
+	});
+	return issues;
+}
+
+/** Refuses a role set no agent may cover, unassignable roles first. */
+function checkRoles(roles: readonly Role[]): void {
+	const issues = unassignable(roles);
+	if (issues.length > 0) {
+		throw new ApiError(
+			"PRECONDITION_FAILED",
+			"These roles cannot be held by an agent",
+			{ details: { reason: "agent_role_not_assignable", issues } },
+		);
+	}
+	const merge = mergeAllowed(roles);
+	if (!merge.ok) {
+		throw new ApiError(
+			"PRECONDITION_FAILED",
+			"Roles merge within one side only, and the fixture merges with nothing",
+			{ details: { reason: "agent_roles_cross_sides", sides: merge.sides } },
+		);
+	}
+}
+
 export function agentTemplateRoutes(deps: RouteDeps) {
 	return tsr.platformContext<RequestContext>().router(agentTemplateContract, {
 		list: async ({ query }) => {
@@ -104,14 +235,130 @@ export function agentTemplateRoutes(deps: RouteDeps) {
 			const { items, nextCursor } = toPage(rows, query.limit);
 			return {
 				status: 200,
-				body: page(items.map(toWire), nextCursor, counted?.total ?? 0),
+				body: page(
+					await withIdentity(db, items),
+					nextCursor,
+					counted?.total ?? 0,
+				),
 			};
 		},
 
-		get: async ({ params }) => ({
-			status: 200,
-			body: ok(toWire(await liveTemplate(deps.db(), params.id))),
-		}),
+		get: async ({ params }) => {
+			const db = deps.db();
+			const [wire] = await withIdentity(db, [
+				await liveTemplate(db, params.id),
+			]);
+			return { status: 200, body: ok(wire as AgentTemplate) };
+		},
+
+		identityVersions: async ({ params }) => {
+			const db = deps.db();
+			const template = await liveTemplate(db, params.id);
+			const versions = await versionsFor(db, template.id);
+			return {
+				status: 200,
+				body: ok(versions.map((v) => versionSummary(template.slug, v))),
+			};
+		},
+
+		identityVersion: async ({ params }) => {
+			const db = deps.db();
+			const template = await liveTemplate(db, params.id);
+			const v = await versionByNumber(db, template.id, params.number);
+			if (!v) {
+				throw new ApiError(
+					"NOT_FOUND",
+					`No identity version ${params.number} for ${template.slug}`,
+				);
+			}
+			return { status: 200, body: ok(versionWire(template.slug, v)) };
+		},
+
+		// Logged only when a version is created. The identity in force is the
+		// version matching the template's current inputs, so it switches when
+		// the inputs change, never here; a 200 (unchanged or reused) changes
+		// nothing and leaves no trace.
+		regenerateIdentity: async ({ params }, ctx) => {
+			const operator = operatorOf(ctx);
+			const { slug, result } = await withTx(deps.db(), async (tx) => {
+				const template = await liveTemplate(tx, params.id);
+				const result = await regenerateIdentity(tx, template.id, {
+					clock: deps.clock,
+					ids: deps.ids,
+					operatorId: operator.id,
+				});
+				if (!result) throw notFound("agent template", params.id);
+				if ("refused" in result) throw refusalError(result);
+				if (result.created) {
+					await logActivity(tx, deps, {
+						actorKind: "operator",
+						actorUserId: operator.id,
+						action: "agent_template.identity_regenerated",
+						entityType: "agent_template",
+						entityId: template.id,
+						requestId: ctx.requestId,
+						payload: {
+							number: result.version.number,
+							sha256: result.version.sha256,
+						},
+					});
+				}
+				return { slug: template.slug, result };
+			});
+			const version = versionSummary(slug, result.version);
+			return result.created
+				? { status: 201, body: ok({ created: true as const, version }) }
+				: {
+						status: 200,
+						body: ok({
+							created: false as const,
+							reused: result.reused === true,
+							version,
+						}),
+					};
+		},
+
+		// Does not regenerate the identity: a roles or writablePaths change
+		// reads stale until the operator regenerates.
+		update: async ({ params, body }, ctx) => {
+			const operator = operatorOf(ctx);
+			if (body.roles) checkRoles(body.roles);
+			const wire = await withTx(deps.db(), async (tx) => {
+				// Locked FOR UPDATE, so concurrent updates bump the version one at a time.
+				const [current] = await tx
+					.select({ version: agentTemplate.version })
+					.from(agentTemplate)
+					.where(and(eq(agentTemplate.id, params.id), live(agentTemplate)))
+					.for("update");
+				if (!current) throw notFound("agent template", params.id);
+				const [updated] = await tx
+					.update(agentTemplate)
+					.set({
+						...body,
+						version: current.version + 1,
+						...touch(deps.clock),
+					})
+					.where(eq(agentTemplate.id, params.id))
+					.returning();
+				if (!updated)
+					throw new Error("a locked agent template was not updatable");
+				await logActivity(tx, deps, {
+					actorKind: "operator",
+					actorUserId: operator.id,
+					action: "agent_template.updated",
+					entityType: "agent_template",
+					entityId: params.id,
+					requestId: ctx.requestId,
+					payload: {
+						fields: Object.keys(body).sort(),
+						version: updated.version,
+					},
+				});
+				const [wire] = await withIdentity(tx, [updated]);
+				return wire as AgentTemplate;
+			});
+			return { status: 200, body: ok(wire) };
+		},
 
 		rosterEntries: async ({ params }) => {
 			const db = deps.db();
@@ -183,7 +430,35 @@ export function agentTemplateRoutes(deps: RouteDeps) {
 					`No agent template with slug ${params.slug}`,
 				);
 			}
-			return { status: 200, body: ok(toWire(row)) };
+			const [wire] = await withIdentity(deps.db(), [row]);
+			return { status: 200, body: ok(wire as AgentTemplate) };
+		},
+	});
+}
+
+const SHA256 = /^[0-9a-f]{64}$/;
+
+/**
+ * A recorded agent_version_sha256 must always resolve to its text
+ * (DATA-CONTRACTS-V2, CompletionReport), so a sha finds versions of deleted
+ * templates too. A ref names a live template's slug.
+ */
+export function identityVersionRoutes(deps: RouteDeps) {
+	return tsr.platformContext<RequestContext>().router(identityVersionContract, {
+		get: async ({ params }) => {
+			const db = deps.db();
+			const v = SHA256.test(params.ref)
+				? (await versionsBySha(db, params.ref))[0]
+				: await versionByRef(db, params.ref);
+			if (!v) {
+				throw new ApiError("NOT_FOUND", `No identity version ${params.ref}`);
+			}
+			const [template] = await db
+				.select({ slug: agentTemplate.slug })
+				.from(agentTemplate)
+				.where(eq(agentTemplate.id, v.agentTemplateId));
+			if (!template) throw new Error("identity version without its template");
+			return { status: 200, body: ok(versionWire(template.slug, v)) };
 		},
 	});
 }

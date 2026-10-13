@@ -333,16 +333,18 @@ Paths are illustrative. Concrete globs come from the client project and are stor
 | Fenn | `fixtures/golden/` | the render specification only — never render source or output |
 | Kel | `services/`, `domain/` — excluding tests | `db/`, `contract/` |
 | Dunn | `routes/`, `api/`, `integrations/` — excluding tests | `services/`, `contract/` |
-| Gat | `auth/`, `middleware/` — excluding tests | `db/`, `contract/` |
+| Gat | `auth/`, `middleware/`, `permissions/policy.json` — excluding tests | `db/`, `contract/` |
 | Ghost | `lib/`, `stores/`, `hooks/`, `types/` — excluding tests | `contract/` |
 | Leon | `components/`, `app/` — excluding tests | `primitives/`, `tokens/`, `types/` |
 | Iyo | `tests/backend/` | all source |
 | Nemi | `tests/frontend/` | all source |
 | Raze | `tests/property/` | all source |
 | Brennan | `findings/spec-judgment/` | everything |
-| Zane | `findings/security-review/`, `findings/compliance-review/`, `permissions/policy.json` | everything, incl. the security surface doc |
+| Zane | `findings/security-review/`, `findings/compliance-review/` | everything, incl. the security surface doc and `permissions/policy.json` |
 | Kodie | `findings/concurrency/` | everything, plus load-test and race-detection output |
 | Grim | `incidents/`, runbooks | everything, plus observability signals |
+
+**The auth role writes `permissions/policy.json`; security review only reads it** (J, 2026-10-13). A judge never grades a file it wrote.
 
 ### Edges
 
@@ -379,7 +381,7 @@ CounselOS is the reference implementation. Six feature agents (transactions, doc
 | Nemi | `backend-tests`, `frontend-tests` | Test paths across all features | always |
 | Raze | `property-tests` | `tests/property/` | always |
 | Brennan | `spec-judgment` | `findings/spec-judgment/` | always |
-| Zane | `security-review`, `compliance-review` | `findings/`, permission policy | always |
+| Zane | `security-review`, `compliance-review` | `findings/`; reads the permission policy | always |
 | Kodie | `concurrency` | `findings/concurrency/` | conditional — real-time or concurrent writes |
 | Grim | `incident-response` | `incidents/` | on demand — after delivery, on an incident |
 
@@ -451,7 +453,7 @@ The provisioning phase can be the operator. The convention-keeping phase is wher
 | Verification | `apps/api/test/`, `apps/web/e2e/`, `**/*.spec.ts`, `**/*.test.ts`, `**/*.test.tsx` | all source |
 | Property tests | `tests/property/` | all source |
 | Spec judgment | `findings/spec-judgment/` | everything |
-| Security | `findings/security-review/`, `findings/compliance-review/`, `permissions/policy.json` | all source, all features |
+| Security | `findings/security-review/`, `findings/compliance-review/` | all source, all features, `permissions/policy.json` |
 | Concurrency | `findings/concurrency/` | all source, load-test output |
 | Incident | `incidents/`, runbooks | all source, observability signals |
 

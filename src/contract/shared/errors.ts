@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SIDES } from "../role-labels";
 
 /**
  * The one error code union. Every error envelope carries one of these, and
@@ -90,6 +91,10 @@ export const PRECONDITION_REASONS = [
 	"playbook_in_use",
 	"access_override_invalid",
 	"template_type_mismatch",
+	"identity_over_token_cap",
+	"identity_role_unsupported",
+	"agent_roles_cross_sides",
+	"agent_role_not_assignable",
 ] as const;
 
 export const preconditionReason = z.enum(PRECONDITION_REASONS);
@@ -106,7 +111,15 @@ export const preconditionDetails = z
 		engagementId: z.string().uuid().optional(),
 		/** The connection the precondition was about, where there is one. */
 		connectionId: z.string().uuid().optional(),
-		/** What a mechanical check found (intake_check_failed, access_override_invalid) or what a plan changed (plan_changes_approved_brief), in a stable order. */
+		/** agent_roles_cross_sides: the sides the roles span, in SIDES order. */
+		sides: z.array(z.enum(SIDES)).optional(),
+		/** identity_over_token_cap: the generated file that went over. */
+		file: z.enum(["identity", "depth"]).optional(),
+		/** identity_over_token_cap: that file's estimated tokens. */
+		tokens: z.number().int().nonnegative().optional(),
+		/** identity_over_token_cap: the cap it went over. */
+		cap: z.number().int().positive().optional(),
+		/** What a mechanical check found (intake_check_failed, access_override_invalid, agent_role_not_assignable) or what a plan changed (plan_changes_approved_brief), in a stable order. */
 		issues: z
 			.array(
 				z

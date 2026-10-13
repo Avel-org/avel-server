@@ -1,10 +1,12 @@
 import type { Brief } from "../../contract/intake";
 import { fixedClock } from "../../lib/clock";
+import { generateIdentity, type IdentitySkill } from "../../lib/identity";
 import type { IdGenerator } from "../../lib/ids";
 import { skillContentSha256 } from "../../lib/skill-hash";
 import { DEV_BOOKING_SHA } from "../../lib/templates";
 import type {
 	activityLog,
+	agentIdentityVersion,
 	agentTemplate,
 	client,
 	connection,
@@ -71,6 +73,7 @@ export interface SeedRows {
 	engagement: Row<typeof engagement>[];
 	connection: Row<typeof connection>[];
 	agentTemplate: Row<typeof agentTemplate>[];
+	agentIdentityVersion: Row<typeof agentIdentityVersion>[];
 	rosterPreset: Row<typeof rosterPreset>[];
 	playbook: Row<typeof playbook>[];
 	mission: Row<typeof mission>[];
@@ -82,6 +85,229 @@ export interface SeedRows {
 	roleSkills: Row<typeof roleSkills>[];
 }
 
+type AgentSpec = {
+	name: string;
+	title: string;
+	kind: "horizontal" | "feature";
+	roles: Row<typeof agentTemplate>["roles"];
+	waves: Row<typeof agentTemplate>["waveDefaults"];
+	writablePaths: string[];
+	description: string;
+};
+
+/**
+ * The operator and the fifteen builder agents, roles per ROSTER-V2's name
+ * register (J, 2026-10-13). Canon, Grim, Trace and Uno are left out. Paths
+ * are the horizontal mount table's, as globs; Atlas, which owns one feature
+ * at a time, gets that feature's paths on its roster entry. Gat writes the
+ * permission policy and Zane only findings (J, 2026-10-13).
+ */
+const AGENTS = {
+	operator: {
+		name: "Axis",
+		title: "Operator",
+		kind: "horizontal",
+		roles: ["foundations"],
+		waves: ["A"],
+		writablePaths: ["**"],
+		description:
+			"The person who runs the mission. Sets up the shared groundwork before any agent starts, approves plans and finished work, and makes every call an agent is not allowed to make.",
+	},
+	atlas: {
+		name: "Atlas",
+		title: "Full-stack lead",
+		kind: "feature",
+		roles: [
+			"schema",
+			"contract",
+			"domain",
+			"api-surface",
+			"integration",
+			"realtime",
+			"auth",
+			"state",
+			"interface",
+		],
+		waves: ["B"],
+		writablePaths: ["src/features/**", "src/app/**"],
+		description:
+			"Builds one whole feature from start to finish: the data it keeps, the rules it follows, the screens people use and everything connecting them. Works only inside that feature and never writes the tests that check it.",
+	},
+	nemi: {
+		name: "Nemi",
+		title: "Frontend tester",
+		kind: "horizontal",
+		roles: ["frontend-tests"],
+		waves: ["C"],
+		writablePaths: ["tests/frontend/**"],
+		description:
+			"Writes tests that use the app the way a person would, in a browser, each tied to something the plan promised. Can read all of the code but can never change it.",
+	},
+	fenn: {
+		name: "Fenn",
+		title: "Expected-results author",
+		kind: "horizontal",
+		roles: ["fixture"],
+		waves: ["A"],
+		writablePaths: ["fixtures/golden/**"],
+		description:
+			"Writes down what the finished work should produce, working only from the plan and never looking at the code or its output. The real output is compared against these results. Changes them only when the plan changes.",
+	},
+	zane: {
+		name: "Zane",
+		title: "Security and compliance reviewer",
+		kind: "horizontal",
+		roles: ["security-review", "compliance-review"],
+		waves: ["D"],
+		writablePaths: [
+			"findings/security-review/**",
+			"findings/compliance-review/**",
+		],
+		description:
+			"Reviews the finished work for security holes and for the legal and industry rules the client must follow, using the builders' list of permissions as a map. Writes findings and never fixes them.",
+	},
+	leonora: {
+		name: "Leonora",
+		title: "Database and contract engineer",
+		kind: "horizontal",
+		roles: ["schema", "contract"],
+		waves: ["A"],
+		writablePaths: ["db/**", "migrations/**", "contract/**"],
+		description:
+			"Designs how the app stores its data and writes the agreement that sets how the front and back of the app talk to each other. Every builder works from it. Does not build features or write tests.",
+	},
+	fantem: {
+		name: "Fantem",
+		title: "Design-system engineer",
+		kind: "horizontal",
+		roles: ["design-system"],
+		waves: ["A"],
+		writablePaths: ["tokens/**", "styles/**", "primitives/**"],
+		description:
+			"Builds the shared look of the app: colours, type, spacing and the basic buttons and fields every screen is made from, so every feature looks the same. Never builds a feature or writes tests.",
+	},
+	kel: {
+		name: "Kel",
+		title: "Business-logic engineer",
+		kind: "horizontal",
+		roles: ["domain"],
+		waves: ["B"],
+		writablePaths: ["services/**", "domain/**"],
+		description:
+			"Writes the business rules: what the app may do, in what order and within which limits. Works from the agreed data design and never writes the tests that check it.",
+	},
+	dunn: {
+		name: "Dunn",
+		title: "API engineer",
+		kind: "horizontal",
+		roles: ["api-surface", "integration", "realtime"],
+		waves: ["B"],
+		writablePaths: ["routes/**", "api/**", "integrations/**"],
+		description:
+			"Builds the ways into the app: the addresses other software calls, the links to outside services and the live updates. Works from the agreed design and never writes the tests that check it.",
+	},
+	gat: {
+		name: "Gat",
+		title: "Security engineer",
+		kind: "horizontal",
+		roles: ["auth"],
+		waves: ["B"],
+		writablePaths: ["auth/**", "middleware/**", "permissions/policy.json"],
+		description:
+			"Builds sign-in and decides who may see and change what. Writes every permission down so a reviewer can try to break it. Never writes the tests that check it.",
+	},
+	ghost: {
+		name: "Ghost",
+		title: "App-data engineer",
+		kind: "horizontal",
+		roles: ["state"],
+		waves: ["B"],
+		writablePaths: ["lib/**", "stores/**", "hooks/**", "types/**"],
+		description:
+			"Handles how the screens fetch, hold and refresh the app's data, so people always see what is current. Does not build the screens and never writes the tests that check its work.",
+	},
+	leon: {
+		name: "Leon",
+		title: "Frontend engineer",
+		kind: "horizontal",
+		roles: ["interface"],
+		waves: ["B"],
+		writablePaths: ["components/**", "app/**"],
+		description:
+			"Builds the screens, pages and charts people actually use, from the shared building blocks. Never changes the shared look and never writes the tests that check the screens.",
+	},
+	iyo: {
+		name: "Iyo",
+		title: "Backend tester",
+		kind: "horizontal",
+		roles: ["backend-tests"],
+		waves: ["C"],
+		writablePaths: ["tests/backend/**"],
+		description:
+			"Writes tests for the behind-the-scenes parts of the app, each tied to something the plan promised. Can read all of the code but can never change it.",
+	},
+	raze: {
+		name: "Raze",
+		title: "Edge-case tester",
+		kind: "horizontal",
+		roles: ["property-tests"],
+		waves: ["C"],
+		writablePaths: ["tests/property/**"],
+		description:
+			"Writes tests that throw thousands of generated cases at the rules that must always hold, hunting for the unusual case nobody thought of. Can read the code but never change it.",
+	},
+	brennan: {
+		name: "Brennan",
+		title: "Spec reviewer",
+		kind: "horizontal",
+		roles: ["spec-judgment"],
+		waves: ["D"],
+		writablePaths: ["findings/spec-judgment/**"],
+		description:
+			"Checks the finished work against the plan and asks whether it does what was really meant, including when the code and its tests agree but are both wrong. Writes findings and never fixes anything.",
+	},
+	kodie: {
+		name: "Kodie",
+		title: "Concurrency reviewer",
+		kind: "horizontal",
+		roles: ["concurrency"],
+		waves: ["D"],
+		writablePaths: ["findings/concurrency/**"],
+		description:
+			"Called in when many people can act at the same moment. Looks for what breaks when two things happen at once, using load and timing test results. Writes findings and never fixes them.",
+	},
+} satisfies Record<string, AgentSpec>;
+
+type AgentSlug = keyof typeof AGENTS;
+
+/**
+ * Two templates edited after their first identity, so the catalog shows both
+ * later states. Kel's paths grew and Kel was regenerated: v2, current. Raze's
+ * path was renamed and nobody regenerated: v1, stale on writablePaths.
+ */
+const TEMPLATE_EDITS: Partial<
+	Record<
+		AgentSlug,
+		{ day: number; before: { writablePaths: string[] }; regenerated: boolean }
+	>
+> = {
+	kel: {
+		day: 8,
+		before: { writablePaths: ["services/**"] },
+		regenerated: true,
+	},
+	raze: {
+		day: 9,
+		before: { writablePaths: ["tests/properties/**"] },
+		regenerated: false,
+	},
+};
+
+/** An Atlas territory's paths, the template's globs narrowed to one feature. */
+function featurePaths(territory: string): string[] {
+	return [`src/features/${territory}/**`, `src/app/${territory}/**`];
+}
+
 type MissionStatus = Row<typeof mission>["status"];
 type ExportStatus = Row<typeof exportTable>["status"];
 
@@ -91,6 +317,7 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 		engagement: [],
 		connection: [],
 		agentTemplate: [],
+		agentIdentityVersion: [],
 		rosterPreset: [],
 		playbook: [],
 		mission: [],
@@ -246,95 +473,50 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 		{ engagementId: routes },
 	);
 
-	// Agent templates: the operator plus four agents.
-	const addTemplate = (
-		slug: string,
-		name: string,
-		kind: "horizontal" | "feature",
-		roles: Row<typeof agentTemplate>["roles"],
-		waves: Row<typeof agentTemplate>["waveDefaults"],
-		writablePaths: string[],
-		description: string,
-	) => {
+	// Agent templates: the operator and the fifteen builder agents of
+	// ROSTER-V2's name register. These five keep the ids the seed first gave
+	// them; the other eleven are added last, so no later seed id moves.
+	const templateIds = new Map<AgentSlug, string>();
+	const addTemplate = (slug: AgentSlug) => {
+		const a = AGENTS[slug];
 		const id = ids.next();
+		const edit = TEMPLATE_EDITS[slug];
 		rows.agentTemplate.push({
 			id,
 			slug,
-			name,
-			kind,
-			roles,
+			name: a.name,
+			title: a.title,
+			kind: a.kind,
+			roles: a.roles,
 			engagementId: null,
-			waveDefaults: waves,
-			description,
-			identityMd: `# ${name}\n`,
-			depthMd: "",
-			writablePaths,
-			version: 1,
+			waveDefaults: a.waves,
+			description: a.description,
+			writablePaths: a.writablePaths,
+			version: edit ? 2 : 1,
 			createdAt: at(0),
-			updatedAt: at(0),
+			updatedAt: at(edit?.day ?? 0),
 		});
+		templateIds.set(slug, id);
 		return id;
 	};
-	const operator = addTemplate(
-		"operator",
-		"Operator",
-		"horizontal",
-		["foundations"],
-		["A"],
-		["**"],
-		"The human who signs off. Approves plans, rosters and exports, and makes every call an agent may not make.",
-	);
-	const atlas = addTemplate(
-		"atlas",
-		"Atlas",
-		"horizontal",
-		["schema", "contract"],
-		["A"],
-		["src/db/**", "src/contract/**"],
-		"Lays the ground every feature builds on: the tables, the migrations and the contract the frontend reads.",
-	);
-	const nemi = addTemplate(
-		"nemi",
-		"Nemi",
-		"feature",
-		["domain", "api-surface"],
-		["B"],
-		["src/routes/**", "src/services/**"],
-		"Builds one feature's logic and endpoints, from the domain rules to the routes that serve them.",
-	);
-	const fenn = addTemplate(
-		"fenn",
-		"Fenn",
-		"horizontal",
-		["backend-tests", "frontend-tests"],
-		["C"],
-		["tests/**"],
-		"Writes the backend and frontend tests. Never modifies the code under test.",
-	);
-	const zane = addTemplate(
-		"zane",
-		"Zane",
-		"horizontal",
-		["spec-judgment", "security-review"],
-		["D"],
-		["reviews/**"],
-		"Reviews finished work against the spec and for security. Writes findings and never fixes them.",
-	);
+	const operator = addTemplate("operator");
+	const atlas = addTemplate("atlas");
+	const nemi = addTemplate("nemi");
+	const fenn = addTemplate("fenn");
+	const zane = addTemplate("zane");
 
 	// The template-booking playbook and its default preset. A template's
 	// playbook is keyed by the template's slug (DECISIONS-V2, 2026-10-12).
+	// The preset's agents are filled in once every template has an id.
 	const preset = ids.next();
+	const verticalAgents: Row<typeof rosterPreset>["agents"] = [];
 	rows.rosterPreset.push({
 		id: preset,
 		name: "Full build · vertical",
-		description: "Foundations, one feature builder, tests and review.",
+		description:
+			"The operator and the shared agents, one Atlas per feature, then tests and review.",
 		cut: "vertical",
-		agents: [
-			{ agent_template_id: atlas, waves: ["A"], estimated_tokens: 80_000 },
-			{ agent_template_id: nemi, waves: ["B"], estimated_tokens: 150_000 },
-			{ agent_template_id: fenn, waves: ["C"], estimated_tokens: 90_000 },
-			{ agent_template_id: zane, waves: ["D"], estimated_tokens: 40_000 },
-		],
+		agents: verticalAgents,
 		version: 1,
 		createdAt: at(0),
 		updatedAt: at(0),
@@ -569,7 +751,8 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 		deletedDay: 23,
 	});
 
-	// Roster entries, some inactive.
+	// Roster entries, some inactive. Every mission here is a vertical cut, so
+	// Atlas carries a territory and that feature's paths (ROSTER-V2, Naming).
 	const addEntries = (
 		missionId: string,
 		day: number,
@@ -578,9 +761,10 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 			Row<typeof rosterEntry>["waves"],
 			boolean,
 			number | null,
+			territory?: string,
 		][],
 	) => {
-		for (const [templateId, waves, active, estimate] of entries) {
+		for (const [templateId, waves, active, estimate, territory] of entries) {
 			rows.rosterEntry.push({
 				id: ids.next(),
 				missionId,
@@ -588,8 +772,8 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 				active,
 				waves,
 				customizedMd: null,
-				writablePaths: null,
-				territory: null,
+				writablePaths: territory === undefined ? null : featurePaths(territory),
+				territory: territory ?? null,
 				estimatedTokens: estimate,
 				tokenSoftCeiling: estimate === null ? null : Math.round(estimate * 1.5),
 				tokenHardCeiling: estimate === null ? null : estimate * 3,
@@ -601,27 +785,27 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 		}
 	};
 	addEntries(portal1, 1, [
-		[atlas, ["A"], true, 80_000],
-		[nemi, ["B"], true, 150_000],
-		[fenn, ["C"], true, 90_000],
+		[atlas, ["B"], true, 80_000, "accounts"],
+		[nemi, ["C"], true, 150_000],
+		[fenn, ["A"], true, 90_000],
 		[zane, ["D"], true, 40_000],
 	]);
 	addEntries(portal2, 10, [
-		[atlas, ["A"], true, 60_000],
-		[nemi, ["B"], true, 160_000],
-		[fenn, ["C"], true, 90_000],
+		[atlas, ["B"], true, 60_000, "documents"],
+		[nemi, ["C"], true, 160_000],
+		[fenn, ["A"], true, 90_000],
 		[zane, ["D"], false, null],
 	]);
 	addEntries(booking2, 13, [
-		[atlas, ["A"], true, 70_000],
-		[nemi, ["B"], true, 140_000],
-		[fenn, ["C"], false, null],
+		[atlas, ["B"], true, 70_000, "scheduling"],
+		[nemi, ["C"], true, 140_000],
+		[fenn, ["A"], false, null],
 		[zane, ["D"], true, 40_000],
 	]);
 	addEntries(internal2, 16, [
 		[operator, ["A"], true, null],
-		[atlas, ["A"], true, 50_000],
-		[nemi, ["B"], true, 120_000],
+		[atlas, ["B"], true, 50_000, "payments"],
+		[nemi, ["C"], true, 120_000],
 	]);
 
 	// Exports: previewed, pr-open, done, failed and closed.
@@ -950,8 +1134,8 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 
 	// Added last, so every earlier seed id stays where it was. An approved
 	// role-layer capability with a read grant and a write grant, and
-	// role_skills rows, so Atlas (schema, contract) shows tool rows on the
-	// access route. The draft runner is attached too and shows nothing:
+	// role_skills rows, so the agents holding schema (Atlas, Leonora) show
+	// tool rows on the access route. The draft runner is attached too and shows nothing:
 	// only approved skills are delivered.
 	const inspector = addSkill({
 		slug: "schema-inspector",
@@ -974,6 +1158,169 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 		{ role: "schema", skillId: migrationRunner },
 		{ role: "contract", skillId: contractFirst },
 	);
+
+	// Added last, so every earlier seed id stays where it was: the other
+	// eleven agents of the corrected roster.
+	for (const slug of Object.keys(AGENTS) as AgentSlug[]) {
+		if (!templateIds.has(slug)) addTemplate(slug);
+	}
+	const tid = (slug: AgentSlug) => {
+		const id = templateIds.get(slug);
+		if (id === undefined) throw new Error(`seed: no template ${slug}`);
+		return id;
+	};
+
+	// A preset uses one cut, never both: Atlas and Leonora both hold schema
+	// and contract. The vertical default has one Atlas per booking feature
+	// (TEMPLATE-BOOKING.md) and none of the six layer builders.
+	const atlasFor = (territory: string, estimate: number) => ({
+		agent_template_id: tid("atlas"),
+		waves: ["B" as const],
+		territory,
+		writable_paths: featurePaths(territory),
+		estimated_tokens: estimate,
+	});
+	const presetAgent = (slug: AgentSlug, estimate?: number) => ({
+		agent_template_id: tid(slug),
+		waves: AGENTS[slug].waves,
+		...(estimate === undefined ? {} : { estimated_tokens: estimate }),
+	});
+	verticalAgents.push(
+		presetAgent("operator"),
+		presetAgent("fantem", 40_000),
+		presetAgent("fenn", 30_000),
+		atlasFor("accounts", 120_000),
+		atlasFor("scheduling", 200_000),
+		atlasFor("notifications", 90_000),
+		presetAgent("iyo", 60_000),
+		presetAgent("nemi", 60_000),
+		presetAgent("raze", 40_000),
+		presetAgent("brennan", 30_000),
+		presetAgent("zane", 40_000),
+		presetAgent("kodie", 30_000),
+	);
+	rows.rosterPreset.push({
+		id: ids.next(),
+		name: "Full build · horizontal",
+		description:
+			"The operator and one agent per layer across every feature, then tests and review.",
+		cut: "horizontal",
+		agents: [
+			presetAgent("operator"),
+			presetAgent("leonora", 60_000),
+			presetAgent("fantem", 40_000),
+			presetAgent("fenn", 30_000),
+			presetAgent("kel", 90_000),
+			presetAgent("dunn", 90_000),
+			presetAgent("gat", 50_000),
+			presetAgent("ghost", 60_000),
+			presetAgent("leon", 120_000),
+			presetAgent("iyo", 60_000),
+			presetAgent("nemi", 60_000),
+			presetAgent("raze", 40_000),
+			presetAgent("brennan", 30_000),
+			presetAgent("zane", 40_000),
+			presetAgent("kodie", 30_000),
+		],
+		version: 1,
+		createdAt: at(0),
+		updatedAt: at(0),
+	});
+
+	// Booking sprint 2's builder moved to wave B, so the operator staffs
+	// wave A and the mission is not blocked (no_agents_in_first_wave).
+	addEntries(booking2, 13, [[operator, ["A"], true, null]]);
+
+	// Identities, generated as the regenerate route would: version 1 for each
+	// of the fifteen model agents, Kel's version 2 after its path edit, and
+	// Raze left stale. The operator's human role gets none.
+	const attachedSkills = (roles: readonly string[]): IdentitySkill[] => {
+		const skillIds = new Set(
+			rows.roleSkills
+				.filter((r) => roles.includes(r.role))
+				.map((r) => r.skillId),
+		);
+		return rows.skill
+			.filter((s) => skillIds.has(s.id))
+			.map((s) => ({
+				id: s.id,
+				slug: s.slug,
+				name: s.name,
+				description: s.description,
+				contentMd: s.contentMd,
+				avelEnhancementMd: s.avelEnhancementMd ?? null,
+				contentSha256: s.contentSha256,
+				status: s.status ?? "draft",
+			}));
+	};
+	const addVersion = (
+		slug: AgentSlug,
+		number: number,
+		writablePaths: string[],
+		when: Date,
+	) => {
+		const a = AGENTS[slug];
+		const generated = generateIdentity({
+			slug,
+			name: a.name,
+			kind: a.kind,
+			roles: a.roles,
+			writablePaths,
+			roleSkills: attachedSkills(a.roles),
+		});
+		if ("refused" in generated) {
+			throw new Error(`seed: identity for ${slug}: ${generated.refused}`);
+		}
+		const id = ids.next();
+		rows.agentIdentityVersion.push({
+			id,
+			agentTemplateId: tid(slug),
+			number,
+			identityMd: generated.identityMd,
+			depthMd: generated.depthMd,
+			sha256: generated.sha256,
+			identityTokens: generated.identityTokens,
+			depthTokens: generated.depthTokens,
+			inputs: generated.inputs,
+			generatedBy: null,
+			createdAt: when,
+		});
+		log(
+			when,
+			"agent_template.identity_regenerated",
+			"agent_template",
+			tid(slug),
+			{
+				number,
+				sha256: generated.sha256,
+			},
+		);
+	};
+	for (const slug of Object.keys(AGENTS) as AgentSlug[]) {
+		if (slug === "operator") continue;
+		const edit = TEMPLATE_EDITS[slug];
+		addVersion(
+			slug,
+			1,
+			edit?.before.writablePaths ?? AGENTS[slug].writablePaths,
+			at(1),
+		);
+		if (edit?.regenerated) {
+			addVersion(slug, 2, AGENTS[slug].writablePaths, at(edit.day, 1));
+		}
+	}
+
+	// The edits themselves, as the PATCH logs them: sorted changed keys and
+	// the version they produced. A system row like every seeded one, since
+	// the seed invents no users and an operator row needs one.
+	for (const slug of Object.keys(AGENTS) as AgentSlug[]) {
+		const edit = TEMPLATE_EDITS[slug];
+		if (!edit) continue;
+		log(at(edit.day), "agent_template.updated", "agent_template", tid(slug), {
+			fields: ["writablePaths"],
+			version: 2,
+		});
+	}
 
 	return rows;
 }

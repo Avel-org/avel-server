@@ -120,7 +120,7 @@ Twelve links in three groups, per ruling 3 of `avel-web/design/AVEL-DESIGN.md` (
 
 **Needs:** `mission.list` (paginated, `lastActivity`)
 **Empty:** first-run — this is the screen a new operator sees before anything exists. Design it as onboarding, not as a blank table.
-**Row:** client · type · sprint · status · last activity · last export result.
+**Row:** name (client · mission type · sprint), never the uuid; the id stays reachable through Copy · status · last activity · last export result.
 **Note:** `lastActivity` is the known contract/implementation disagreement. Ship the column only when the join exists; do not substitute `updatedAt` — that is row-edit time, not audited activity.
 
 ### `/missions/new` and `/missions/:id/brief` — capture 📱 offline
@@ -220,7 +220,7 @@ The approval surface. Canon has produced a structured brief and a list of open q
 
 Library management.
 
-**`/catalog/agents` has no identity editor.** Identity files are generated from the roles an agent covers, so the page shows the generated file read-only, with its version history and hashes. Changing an agent means changing a role in `ROLES.md`; a hand edit here would reintroduce the drift generation exists to prevent. `identity_md` and `depth_md` are still capped at 800 tokens, enforced on the generator's output.
+**`/catalog/agents` has no identity editor.** Identity files are generated from the roles an agent covers, so the page shows the generated file read-only, with its version history and hashes. Changing an agent means changing a role in `ROLES.md`; a hand edit here would reintroduce the drift generation exists to prevent. `identity_md` and `depth_md` are each capped at 1200 tokens, enforced on the generator's output.
 
 **`/catalog/skills` is where skills are written and reviewed.** Each shows its layer, its type, its status, the roles it is recommended for, and — for capabilities — the tools it grants. The description field shows its length live, since it is loaded into every relevant dispatch. Imported skills arrive as drafts and cannot be attached until approved.
 

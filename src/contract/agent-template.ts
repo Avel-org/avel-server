@@ -88,6 +88,27 @@ export type AgentKind = z.infer<typeof agentKind>;
 
 const iso = z.string().datetime();
 
+const sha256 = z.string().regex(/^[0-9a-f]{64}$/);
+
+/**
+ * The inputs an identity is generated from, in the order staleInputs
+ * names them. One moving makes the identity stale.
+ */
+export const IDENTITY_INPUT_FIELDS = [
+	"generatorVersion",
+	"slug",
+	"name",
+	"kind",
+	"roles",
+	"writablePaths",
+	"definitionsSha256",
+	"skills",
+] as const;
+
+export const identityInputField = z.enum(IDENTITY_INPUT_FIELDS);
+
+export type IdentityInputField = z.infer<typeof identityInputField>;
+
 /** An agent as data. Soft-deleted templates are never on the wire. */
 export const agentTemplateSchema = z.object({
 	id: z.string().uuid(),
@@ -99,18 +120,96 @@ export const agentTemplateSchema = z.object({
 	/** Null for a shared identity (Atlas), which serves every engagement. */
 	engagementId: z.string().uuid().nullable(),
 	waveDefaults: z.array(wave),
+	/** Plain words for what the agent is, such as "Frontend engineer". Written, never derived. Null until written. */
+	title: z.string().min(1).max(60).nullable(),
 	/** A plain sentence or two for the catalog card, no markdown. Null until written. */
 	description: z.string().min(1).max(280).nullable(),
-	identityMd: z.string(),
-	depthMd: z.string(),
 	/** Globs this agent may modify. A write outside them fails the ownership gate. */
 	writablePaths: z.array(z.string()),
+	/**
+	 * The identity version in force: the one generated from the template's
+	 * current inputs, else the latest. Null when none was ever generated, and
+	 * always null for the operator, whose human role gets no identity. The
+	 * text itself is read through the version routes only.
+	 */
+	identityVersion: z.number().int().positive().nullable(),
+	identitySha256: sha256.nullable(),
+	/** True when regenerating would produce a different identity. */
+	identityStale: z.boolean(),
+	/** Which inputs moved since identityVersion was generated. Empty unless stale. */
+	staleInputs: z.array(identityInputField),
 	version: z.number().int().positive(),
 	createdAt: iso,
 	updatedAt: iso,
 });
 
 export type AgentTemplate = z.infer<typeof agentTemplateSchema>;
+
+/** What an identity version was generated from (src/lib/identity.ts). */
+export const identityInputsSchema = z.object({
+	generatorVersion: z.string(),
+	slug: z.string(),
+	name: z.string(),
+	kind: agentKind,
+	roles: z.array(role),
+	writablePaths: z.array(z.string()),
+	/** Covers the role definitions used, which live in server code. */
+	definitionsSha256: sha256,
+	/** The approved role skills written in. */
+	skills: z.array(z.object({ id: z.string().uuid(), contentSha256: sha256 })),
+});
+
+export type IdentityInputs = z.infer<typeof identityInputsSchema>;
+
+/**
+ * The token cap per generated file: identity.md and depth.md each, not
+ * their sum (J, 2026-10-13). The generator refuses output over it
+ * (identity_over_token_cap), and agent_identity_version's CHECKs match it
+ * (drizzle/0024). Meters read it from here.
+ */
+export const IDENTITY_TOKEN_CAP = 1200;
+
+/** One identity version without its text, for the version list. */
+export const identityVersionSummary = z.object({
+	/** The display id, `${slug}@v${number}`, such as atlas@v3. */
+	ref: z.string(),
+	number: z.number().int().positive(),
+	/** CompletionReport.agent_version_sha256: identity.md, NUL, depth.md. */
+	sha256,
+	identityTokens: z.number().int().nonnegative(),
+	depthTokens: z.number().int().nonnegative(),
+	/** The operator who regenerated it. Null for one the seed wrote. */
+	generatedBy: z.string().uuid().nullable(),
+	createdAt: iso,
+});
+
+export type IdentityVersionSummary = z.infer<typeof identityVersionSummary>;
+
+/** One identity version with its text. Versions are never changed or deleted. */
+export const identityVersionSchema = identityVersionSummary.extend({
+	agentTemplateId: z.string().uuid(),
+	identityMd: z.string(),
+	depthMd: z.string(),
+	inputs: identityInputsSchema,
+});
+
+export type IdentityVersion = z.infer<typeof identityVersionSchema>;
+
+/** Regenerate wrote a new version. */
+export const identityRegenerated = z.object({
+	created: z.literal(true),
+	version: identityVersionSummary,
+});
+
+/**
+ * Regenerate wrote nothing: the text equals an existing version. reused is
+ * true when that version is not the latest (inputs went A, B, then A).
+ */
+export const identityUnchanged = z.object({
+	created: z.literal(false),
+	reused: z.boolean(),
+	version: identityVersionSummary,
+});
 
 export const agentTemplateListQuery = pageQuery.extend({
 	/** Case-insensitive substring of the slug or name. */
@@ -142,10 +241,53 @@ export const agentRosterEntrySchema = z.object({
 
 export type AgentRosterEntry = z.infer<typeof agentRosterEntrySchema>;
 
+/** Each value once, first occurrence kept. */
+function unique<T>(values: T[]): T[] {
+	return [...new Set(values)];
+}
+
+/** The catalog card is plain words: no markdown characters and no em dashes. */
+const MARKDOWN = /[*_`#—]/;
+
+/** Trimmed plain words, 1 to `max` characters. */
+function plainWords(max: number) {
+	return z
+		.string()
+		.trim()
+		.min(1)
+		.max(max)
+		.refine((s) => !MARKDOWN.test(s), {
+			message: "Use plain words: no *, _, `, # or em dashes",
+		});
+}
+
+/**
+ * Any subset, at least one. slug, name, kind and engagementId are not
+ * editable. null clears title or description. roles and waveDefaults are
+ * deduped. writablePaths is never empty: an agent with no writable paths is
+ * not an agent (ROSTER-V2.md, What is fixed). Every update adds 1 to
+ * version; none regenerates the identity, so a roles or writablePaths
+ * change reads stale until regenerated.
+ */
+export const updateAgentTemplateBody = z
+	.object({
+		title: plainWords(60).nullable().optional(),
+		description: plainWords(280).nullable().optional(),
+		roles: z.array(role).min(1).transform(unique).optional(),
+		waveDefaults: z.array(wave).transform(unique).optional(),
+		writablePaths: z.array(z.string().min(1)).min(1).optional(),
+	})
+	.strict()
+	.refine((body) => Object.keys(body).length > 0, {
+		message: "Give at least one field to change",
+	});
+
+export type UpdateAgentTemplateBody = z.infer<typeof updateAgentTemplateBody>;
+
 const byId = z.object({ id: z.string().uuid() });
 const bySlug = z.object({ slug: z.string().min(1).max(200) });
 
-/** Module 4: read-only. Templates are written by the identity generator (module 5). */
+/** Module 4 reads; module 5 adds the operator's edit and identity regeneration. */
 export const agentTemplateContract = c.router({
 	list: {
 		method: "GET",
@@ -167,6 +309,15 @@ export const agentTemplateContract = c.router({
 		responses: { 200: successEnvelope(agentTemplateSchema) },
 		summary: "The live template with this slug. A deleted one is reached by id",
 	},
+	update: {
+		method: "PATCH",
+		path: "/api/agent-templates/:id",
+		pathParams: byId,
+		body: updateAgentTemplateBody,
+		responses: { 200: successEnvelope(agentTemplateSchema) },
+		summary:
+			"Edits title, description, roles, waveDefaults or writablePaths. Refused (422 agent_roles_cross_sides, agent_role_not_assignable). A missing or deleted template is 404",
+	},
 	rosterEntries: {
 		method: "GET",
 		path: "/api/agent-templates/:id/roster-entries",
@@ -183,5 +334,44 @@ export const agentTemplateContract = c.router({
 		responses: { 200: successEnvelope(agentAccess) },
 		summary:
 			"accessFor outside any mission: role_skills for its roles, no mission skills, no overrides. Not enforced until module 7",
+	},
+	identityVersions: {
+		method: "GET",
+		path: "/api/agent-templates/:id/identity/versions",
+		pathParams: byId,
+		// Unpaginated: one row per regeneration that changed the text.
+		responses: { 200: successEnvelope(z.array(identityVersionSummary)) },
+		summary: "The template's identity versions, newest first, without text",
+	},
+	identityVersion: {
+		method: "GET",
+		path: "/api/agent-templates/:id/identity/versions/:number",
+		pathParams: byId.extend({ number: z.coerce.number().int().positive() }),
+		responses: { 200: successEnvelope(identityVersionSchema) },
+		summary: "One identity version with its text",
+	},
+	regenerateIdentity: {
+		method: "POST",
+		path: "/api/agent-templates/:id/identity/regenerate",
+		pathParams: byId,
+		body: c.noBody(),
+		responses: {
+			201: successEnvelope(identityRegenerated),
+			200: successEnvelope(identityUnchanged),
+		},
+		summary:
+			"Generates the identity from the template's current inputs. 201 with a new version; 200 when the text equals an existing version, reused when that version is not the latest. Refused (422 identity_over_token_cap, identity_role_unsupported)",
+	},
+});
+
+/** Resolves a recorded agent_version_sha256, or a display ref, to its text. */
+export const identityVersionContract = c.router({
+	get: {
+		method: "GET",
+		path: "/api/identity-versions/:ref",
+		pathParams: z.object({ ref: z.string().min(1).max(220) }),
+		responses: { 200: successEnvelope(identityVersionSchema) },
+		summary:
+			"A full 64-hex sha256, or slug@vN (atlas@v3). A sha names one version across all templates, deleted ones included",
 	},
 });

@@ -68,7 +68,7 @@ src/contract/
 | `missions` | list · get, read-only, for the Missions surface (module 13). Created through Intake approval once module 1 lands | `origin` (required, never both) · `status` · `q` · `clientId` (through the engagement) · `templateRef` (exact) · `sort` (`lastActivity` · `sprint` · `client`) with `direction` (nulls sort lowest) · `includeArchived` · `needsYou` · `quietBefore` (no activity since, or none) · `lastExportStatus` · cursor · `meta.total` (required here; follows every filter) · `meta.counts` (ignores the status-like filters; follows `q`, `clientId` and `templateRef`) |
 | `activity` | list, read-only, for the Activity surface (module 13). Each entry is the row's columns, nothing joined | `missionId` · `engagementId` · `clientId` (the client, its engagements and their missions) · `entityType` · `entityId` (one, or up to 100) · `actorKind`, ANDed · cursor (a position, not bound to the filters) · `meta.total` (required) |
 | `intakes` | list · get · create · revise (`PATCH`) · propose · approve · reject (module 1). A wrong state is 409. The check runs at propose and approve. Approve creates the Mission, and refuses `intake_cut_not_derived` until module 2 | `engagementId` · `status` · cursor · `meta.total` |
-| `agentTemplates` · `skills` | list · get · get-by-slug (`/by-slug/:slug`, the live row), read-only (module 4). Templates also answer rosterEntries (`GET …/:id/roster-entries`: live entries on live missions, newest mission first, each `{ entryId, missionId, mission: { type, status, sprintN, engagementId }, active, territory }`, unpaged) and access (`GET …/:id/access`: *Access* outside any mission, role skills only, no overrides). A deleted template is 404 on both. Skills embed their source; the list item leaves out the markdown | templates: `q` · `kind` · `role` · `wave` (array overlap) · `engagementId`. Skills: `q` · `layer` · `type` · `status` · `role` · `sourceId`. Both: cursor · `meta.total` |
+| `agentTemplates` · `skills` | list · get · get-by-slug (`/by-slug/:slug`, the live row), read-only (module 4). Templates also answer rosterEntries (`GET …/:id/roster-entries`: live entries on live missions, newest mission first, each `{ entryId, missionId, mission: { type, status, sprintN, engagementId }, active, territory }`, unpaged) and access (`GET …/:id/access`: *Access* outside any mission, role skills only, no overrides). A deleted template is 404 on both. Module 5 adds, for templates: update (`PATCH`, operator; title, description, roles, waveDefaults, writablePaths; refuses `agent_role_not_assignable` and `agent_roles_cross_sides`), regenerateIdentity (`POST …/:id/identity/regenerate`; 201 created, 200 unchanged or reused; refuses `identity_role_unsupported` and `identity_over_token_cap`), identityVersions (`GET …/:id/identity/versions`, newest first, no text) and identityVersion (`GET …/:id/identity/versions/:number`); and `GET /api/identity-versions/:ref`, a full sha or `slug@vN`. Template reads carry `identityVersion`, `identitySha256`, `identityStale` and `staleInputs`, never the text. Skills embed their source; the list item leaves out the markdown | templates: `q` · `kind` · `role` · `wave` (array overlap) · `engagementId`. Skills: `q` · `layer` · `type` · `status` · `role` · `sourceId`. Both: cursor · `meta.total` |
 | `skillSources` | list · get, read-only (module 4), with a live `skillCount` | `q` · `kind` · cursor · `meta.total` |
 | `connections` | list · get · create (module 2), operator-only. `credentialRef` must look like an env var name; only the name is stored | `engagementId` · cursor |
 | `roster` | list · access (`GET …/roster/:entryId/access`, see *Access*) · add · update · remove · applyPreset (`POST /api/missions/:missionId/roster/apply-preset`, all or nothing; refuses a non-empty roster unless `replace`) · skills · attachSkill · detachSkill (module 4). Writes need a `draft` mission (422 `mission_not_editable`). Update takes `accessOverrides`, which only narrow (422 `access_override_invalid`, with `issues`); `null` or `[]` clears them, stored as null | — |
@@ -317,12 +317,33 @@ kind                   'horizontal' | 'feature'
 roles                  role[] — from the closed vocabulary in ROLES.md
 engagement_id?         FK -> Engagement, nullable — engagement scoping lives on Mission
 wave_defaults          wave[]   — wave is 'A' | 'B' | 'C' | 'D' | 'E'
+title?                 text, 1 to 60 chars, plain words for what the agent is ("Frontend engineer"); written, never derived; [built] 2026-10-13, migration 0023
 description?           text, 1 to 280 chars, plain prose for the catalog card; written, never derived; [built] 2026-10-12, migration 0022
-identity_md            ≤800 tokens, Zod refinement
-depth_md               ≤800 tokens, Zod refinement
 writable_paths         text[]   ← glob patterns this agent may modify
 version · deleted_at · timestamps
 ```
+
+The identity text is not on the template. It lives in `AgentIdentityVersion`, below. Migration 0023 dropped `identity_md` and `depth_md` from this table. `[built]` 2026-10-13
+
+### AgentIdentityVersion
+One generated identity of a template. Append-only: a trigger refuses UPDATE, DELETE and TRUNCATE, so a number or a sha always names the same text.
+
+```
+id
+agent_template_id      FK -> AgentTemplate
+number                 int > 0, unique per template
+identity_md            ≤1200 tokens, always loaded
+depth_md               ≤1200 tokens, read when something uncommon comes up
+sha256                 SHA-256 of identity_md ‖ 0x00 ‖ depth_md, UTF-8; unique per template; = CompletionReport.agent_version_sha256
+identity_tokens · depth_tokens   int 0..1200, ceil(UTF-8 bytes / 3.5); 800 until migration 0024 (see `DECISIONS-V2.md`)
+inputs                 jsonb: generatorVersion, slug, name, kind, roles, writablePaths, definitionsSha256, skills [{id, contentSha256}]
+generated_by?          FK -> User; null when the seed wrote it
+created_at
+```
+
+**Generated, never written by hand** (`src/lib/identity.ts`). The inputs are the template's slug, name, kind, roles and mount, the role definitions in `src/lib/roles.ts` (server code, never in the contract), and the approved role skills that `role_skills` attaches to its roles. Draft and retired skills are left out. Per-mission paths and edges go in the dispatch brief, not here. `[built]` 2026-10-13
+
+**Current and stale.** A template's identity in force is the version whose sha equals a fresh generation, else its latest. The template is stale when a fresh generation differs, and `staleInputs` names which inputs moved. Regenerating is an explicit operator action. A sha that matches an older version reuses that row (A → B → A), so one sha is one row. The operator's template holds only the `human` role `foundations` and gets no identity. `[built]` 2026-10-13
 
 `writable_paths` backs the file-ownership check at render time: a file modified by an agent outside its declared globs is a gate failure. This is the mechanical form of "testers never modify code under test."
 
@@ -678,7 +699,7 @@ A defect a mission caught is real regardless of which agent version caught it. U
 
 **Mission 002 is `reconstructed`.** Its findings stand: the authorization defect, the error-wrapping defect, zero boundary violations across 61 files, three blockers filed and none absorbed. It is excluded from every comparison — twice over, since it also recorded no cost. Nothing is discarded, and nothing contaminates a comparison it is unfit for.
 
-**Only the hash is stored here.** Where identity text is kept is decided in module 5, under one constraint: every recorded `agent_version_sha256` must resolve to its exact identity text, or an A/B comparison cannot be reproduced. Decided 2026-10-05.
+**Only the hash is stored here.** Where identity text is kept is decided in module 5, under one constraint: every recorded `agent_version_sha256` must resolve to its exact identity text, or an A/B comparison cannot be reproduced. Decided 2026-10-05. Module 5 keeps it in `AgentIdentityVersion`, and `GET /api/identity-versions/:sha` resolves any recorded hash, including a deleted template's. `[built]` 2026-10-13
 
 **`agent_version_sha256` and `model` make improvements attributable.** When an agent's identity file changes between runs, the result is tied to exact agent content. Without these, a better run after an edit could be the edit, an easier task, or variance, and there is no way to tell. See `TEMPLATES.md` for the evaluation loop they enable.
 

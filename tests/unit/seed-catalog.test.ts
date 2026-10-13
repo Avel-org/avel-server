@@ -81,13 +81,17 @@ describe("seed skill catalog", () => {
 		expect(seen("type")).toEqual(["capability", "knowledge"]);
 	});
 
-	it("adds its rows after every earlier seed id", () => {
+	it("adds its rows after every earlier seed id, in one block", () => {
+		// Rows added later still go after the catalog (the corrected roster
+		// and its identities), so the check is: nothing else sits inside the
+		// catalog's range, and something sits right before it.
 		const seq = (id: string) => Number(id.slice(-12));
-		const earlier = [
+		const others = [
 			...rows.client,
 			...rows.engagement,
 			...rows.connection,
 			...rows.agentTemplate,
+			...rows.agentIdentityVersion,
 			...rows.rosterPreset,
 			...rows.playbook,
 			...rows.mission,
@@ -98,7 +102,10 @@ describe("seed skill catalog", () => {
 		const catalog = [...rows.skillSource, ...rows.skill].map((r) =>
 			seq(r.id as string),
 		);
-		expect(Math.min(...catalog)).toBe(Math.max(...earlier) + 1);
+		const [lo, hi] = [Math.min(...catalog), Math.max(...catalog)];
+		expect(hi - lo + 1).toBe(catalog.length);
+		expect(others.filter((n) => n >= lo && n <= hi)).toEqual([]);
+		expect(others).toContain(lo - 1);
 	});
 
 	it("keeps the mission ids avel-web references", () => {
@@ -113,6 +120,13 @@ describe("seed skill catalog", () => {
 			templateRef: null,
 			status: "draft",
 		});
+	});
+
+	it("keeps the skill id avel-web references", () => {
+		expect(
+			rows.skill.find((k) => k.id === "c83884a9-5eed-4000-8000-000000000121")
+				?.slug,
+		).toBe("schema-inspector");
 	});
 
 	it("gives a seeded agent tool rows, one read and one held write", () => {

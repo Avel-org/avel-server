@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	errorEnvelope,
+	IDENTITY_TOKEN_CAP,
 	PRECONDITION_REASONS,
 	preconditionDetails,
 	validationDetails,
@@ -86,7 +87,41 @@ describe("the error envelope is a discriminated union on code", () => {
 			"playbook_in_use",
 			"access_override_invalid",
 			"template_type_mismatch",
+			"identity_over_token_cap",
+			"identity_role_unsupported",
+			"agent_roles_cross_sides",
+			"agent_role_not_assignable",
 		]);
+	});
+
+	it("types the token-cap details: a known file and whole-number counts", () => {
+		const parses = (details: unknown) =>
+			errorEnvelope.safeParse(
+				envelope({ code: "PRECONDITION_FAILED", details }),
+			).success;
+		const over = {
+			reason: "identity_over_token_cap",
+			file: "depth",
+			tokens: IDENTITY_TOKEN_CAP + 12,
+			cap: IDENTITY_TOKEN_CAP,
+		};
+		expect(parses(over)).toBe(true);
+		expect(parses({ ...over, file: "brief" })).toBe(false);
+		expect(parses({ ...over, tokens: 81.5 })).toBe(false);
+		expect(parses({ ...over, cap: 0 })).toBe(false);
+	});
+
+	it("types the cross-sides details: known sides only", () => {
+		const parses = (details: unknown) =>
+			errorEnvelope.safeParse(
+				envelope({ code: "PRECONDITION_FAILED", details }),
+			).success;
+		const cross = {
+			reason: "agent_roles_cross_sides",
+			sides: ["author", "judge"],
+		};
+		expect(parses(cross)).toBe(true);
+		expect(parses({ ...cross, sides: ["author", "builder"] })).toBe(false);
 	});
 
 	it("requires a known reason on PRECONDITION_FAILED, and refuses extra keys", () => {

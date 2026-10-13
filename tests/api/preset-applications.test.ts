@@ -57,8 +57,6 @@ async function seed(tx: Tx, ns: string) {
 			kind: "feature",
 			roles: ["domain"],
 			waveDefaults: ["B"],
-			identityMd: "#",
-			depthMd: "",
 			writablePaths: ["src/**"],
 			version: 1,
 			...stamp(clock),

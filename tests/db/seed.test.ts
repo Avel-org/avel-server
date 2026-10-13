@@ -27,6 +27,7 @@ async function dump(dbUrl: string) {
 			"engagement",
 			"connection",
 			"agent_template",
+			"agent_identity_version",
 			"roster_preset",
 			"playbook",
 			"mission",

@@ -29,7 +29,10 @@ import {
 } from "./middleware/errors";
 import { requestId } from "./middleware/request-id";
 import { activityRoutes } from "./routes/activity";
-import { agentTemplateRoutes } from "./routes/agent-templates";
+import {
+	agentTemplateRoutes,
+	identityVersionRoutes,
+} from "./routes/agent-templates";
 import { clientRoutes } from "./routes/clients";
 import { connectionRoutes } from "./routes/connections";
 import { engagementRoutes } from "./routes/engagements";
@@ -83,6 +86,7 @@ export function createApp(deps: AppDeps) {
 		intakes: intakeRoutes({ ...routeDeps, repos: deps.repos }),
 		connections: connectionRoutes(routeDeps),
 		agentTemplates: agentTemplateRoutes(routeDeps),
+		identityVersions: identityVersionRoutes(routeDeps),
 		skills: skillRoutes(routeDeps),
 		skillSources: skillSourceRoutes(routeDeps),
 		roster: rosterRoutes(routeDeps),

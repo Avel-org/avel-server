@@ -50,8 +50,6 @@ describe.skipIf(!process.env.DATABASE_URL)("required-when constraints", () => {
 				kind: "horizontal",
 				roles: ["domain"],
 				waveDefaults: ["B"],
-				identityMd: "",
-				depthMd: "",
 				writablePaths: ["src/**"],
 				version: 1,
 				...stamp(clock),
@@ -175,8 +173,6 @@ describe.skipIf(!process.env.DATABASE_URL)("required-when constraints", () => {
 				roles: ["schema" as const],
 				waveDefaults: ["A" as const],
 				description,
-				identityMd: "",
-				depthMd: "",
 				writablePaths: ["src/db/**"],
 				version: 1,
 				...stamp(clock),
@@ -189,6 +185,34 @@ describe.skipIf(!process.env.DATABASE_URL)("required-when constraints", () => {
 			}
 			await tx.insert(agentTemplate).values(row(null));
 			await tx.insert(agentTemplate).values(row("a".repeat(280)));
+		});
+	});
+
+	it("bounds an agent's title to 1 to 60 characters once trimmed, null allowed", async () => {
+		await inRollback(async (tx, ids) => {
+			const row = (title: string | null) => ({
+				id: ids.next(),
+				slug: `quill-${ids.next()}`,
+				name: "Quill",
+				kind: "horizontal" as const,
+				roles: ["schema" as const],
+				waveDefaults: ["A" as const],
+				title,
+				writablePaths: ["src/db/**"],
+				version: 1,
+				...stamp(clock),
+			});
+			for (const title of ["", "   ", "a".repeat(61), ` ${"a".repeat(61)} `]) {
+				const err = await refusal(tx, (t) =>
+					t.insert(agentTemplate).values(row(title)),
+				);
+				expect(err.constraint_name, JSON.stringify(title)).toBe(
+					"agent_template_title_length",
+				);
+			}
+			await tx.insert(agentTemplate).values(row(null));
+			await tx.insert(agentTemplate).values(row("a".repeat(60)));
+			await tx.insert(agentTemplate).values(row(` ${"a".repeat(60)} `));
 		});
 	});
 });

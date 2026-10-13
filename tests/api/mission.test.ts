@@ -670,8 +670,6 @@ describe.skipIf(!url)("/api/missions", () => {
 					kind: "feature",
 					roles: ["domain"],
 					waveDefaults: ["A"],
-					identityMd: "#",
-					depthMd: "#",
 					writablePaths: ["src/**"],
 					version: 1,
 					...stamp(clock),

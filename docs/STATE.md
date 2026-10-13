@@ -2,7 +2,7 @@
 
 *The single source of truth for build status, counts, and gaps. **No other document may state build status, entity counts, or agent counts.** They link here.*
 
-**Last updated:** 2026-10-10
+**Last updated:** 2026-10-13
 
 ---
 
@@ -18,14 +18,14 @@
 |---|---|
 | Command Center modules (`COMMAND-CENTER.md`) | **15**, numbered 0–14 |
 | Core entities | **20** + SkillSource (supporting catalog): 18 built, `Dispatch` specced 2026-10-06 for module 6, and `File` specced 2026-10-06 for after the first mission. Every one has a field list (`DATA-CONTRACTS-V2.md`). |
-| Database tables built | **24** — the 18 entities, SkillSource, `role_skills`, `mission_skills`, and Better Auth's `session`, `account` and `verification`. Migrations `0000`–`0020` applied. |
+| Database tables built | **25** — the 18 entities, SkillSource, `role_skills`, `mission_skills`, and Better Auth's `session`, `account` and `verification` — plus `agent_identity_version` (module 5), **25** in all. Migrations `0000`–`0024` applied. |
 | Error codes in `src/contract/shared/errors.ts` | **22** — 6 generic · `NOT_OPERATOR` · 2 route · 12 `BLAST-RADIUS.md` · `GITHUB_REJECTED` |
 | Roles (`ROLES.md`) | **35** — 23 model · 11 code · 1 human |
 | Model agents — target, horizontal cut (`ROSTER-V2.md`) | **13** in every mission (A 3 · B 5 · C 3 · D 2), plus up to 2: concurrency when required, incident on demand |
 | Model agents — `template-booking` (`TEMPLATE-BOOKING.md`) | **10**, plus the operator |
 | Orchestrator | **1** — Axis, the human |
 | Roster runs so far | **2**: one feature agent (Mission 002) and one verification agent, each once |
-| Agent identity files | **0** — to be generated from `ROLES.md`, not hand-written. The 19 hand-written v1 files are superseded. |
+| Agent identity files | **0** run in a mission. The generator is built (module 5): identities come from the roles in `ROLES.md`, never hand-written. The dev seed holds 16 versions for its 15 model agents. The 19 hand-written v1 files are superseded. |
 
 Honest external framing: *a role catalog of 35 jobs, assigned to a small set of named model agents per project, plus one human operator and a set of code functions.* Never "25 AI agents," and never "18 build agents" — both describe rosters that no longer exist. <!--allow-stale-->
 
@@ -41,8 +41,8 @@ Legend: ⬜ not started · ◐ partly built · ✅ built.
 | 1 | Intake | ✅ |
 | 2 | Repo read | ✅ GitHub only; Next.js app-router layouts return no cut |
 | 3 | Mission planner | ◐ plan read and write with its mechanical check, `template_ref`/`template_version` (a templated mission's type must match), template reads from the repositories (dev fixture until the repositories exist), playbook reads and writes with versions, `computeCoherence` (the first-wave block and the vertical-cut roles warning) |
-| 4 | Roles and roster | ✅ catalog reads and writes, roster reads and writes, apply-preset, mission skills, preset create and update, `accessFor` (derived access, not enforced until module 7), per-entry access overrides, agent descriptions (seeded; set by hand once template writes land). Agent template writes come with module 5 |
-| 5 | Identity generator | ⬜ |
+| 4 | Roles and roster | ✅ catalog reads and writes, roster reads and writes, apply-preset, mission skills, preset create and update, `accessFor` (derived access, not enforced until module 7), per-entry access overrides, agent descriptions. Agent template writes are built in module 5 |
+| 5 | Identity generator | ✅ role definitions in server code (`src/lib/roles.ts`); the generator (`src/lib/identity.ts`: identity.md and depth.md from roles, mount and approved role skills; 1200-token cap per file; sha over identity, NUL, depth); `agent_identity_version`, append-only; version reads by number, sha or `slug@vN`; operator regenerate; template edits (`PATCH`: title, description, roles, waves, paths) with the merge-rule refusals; contract display labels for roles, teams, runners, sides and kinds; the dev seed's corrected roster of 15 builders plus the operator. Not yet delivered to an agent: that is dispatch (module 6) |
 | 6 | Dispatch and runner | ⬜ |
 | 7 | Sandbox rooms | ⬜ |
 | 8 | Completion records | ⬜ |
@@ -107,7 +107,7 @@ Fourteen known flaws in the agent design, all addressed in the specification and
 
 ### Content-blocked, not code-blocked
 
-- No skill library exists. The design is settled in `SKILLS.md`; the first role skills for `template-booking`'s roles come before module 5 generates identity files.
+- No skill library exists. The design is settled in `SKILLS.md`. Module 5 writes approved role skills into identities, but only the dev seed's role skills exist; the first real ones for `template-booking`'s roles are still unwritten.
 
 ### Unowned
 

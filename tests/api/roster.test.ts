@@ -68,8 +68,6 @@ async function seedLoadout(tx: Tx, ns: string) {
 			kind: "feature" as const,
 			roles: ["domain" as const, "interface" as const],
 			waveDefaults: ["B" as const],
-			identityMd: "#",
-			depthMd: "",
 			writablePaths: ["src/**"],
 			version: 1,
 			deletedAt,

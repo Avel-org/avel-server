@@ -48,9 +48,13 @@ function templateWire(row: Select<typeof agentTemplate>) {
 		engagementId: row.engagementId,
 		waveDefaults: row.waveDefaults,
 		description: row.description,
-		identityMd: row.identityMd,
-		depthMd: row.depthMd,
+		title: row.title,
 		writablePaths: row.writablePaths,
+		// A bare row has no identity version, so nothing can be stale.
+		identityVersion: null,
+		identitySha256: null,
+		identityStale: false,
+		staleInputs: [],
 		version: row.version,
 		createdAt: row.createdAt.toISOString(),
 		updatedAt: row.updatedAt.toISOString(),
@@ -207,11 +211,12 @@ describe("agentTemplateSchema", () => {
 	const seeded = buildSeed(seedIds()).agentTemplate;
 
 	it("parses every seeded template", () => {
-		expect(seeded).toHaveLength(5);
+		expect(seeded).toHaveLength(16);
 		for (const row of seeded) {
-			const wire = templateWire({ deletedAt: null, ...row } as Select<
-				typeof agentTemplate
-			>);
+			const wire = templateWire({
+				deletedAt: null,
+				...row,
+			} as Select<typeof agentTemplate>);
 			expect(agentTemplateSchema.parse(wire)).toEqual(wire);
 		}
 	});
@@ -226,9 +231,10 @@ describe("agentTemplateSchema", () => {
 	it("refuses an empty or over-long description, and takes null", () => {
 		const [first] = seeded;
 		if (!first) throw new Error("seed has no templates");
-		const wire = templateWire({ deletedAt: null, ...first } as Select<
-			typeof agentTemplate
-		>);
+		const wire = templateWire({
+			deletedAt: null,
+			...first,
+		} as Select<typeof agentTemplate>);
 		const parses = (description: string | null) =>
 			agentTemplateSchema.safeParse({ ...wire, description }).success;
 		expect(parses(null)).toBe(true);
@@ -240,9 +246,10 @@ describe("agentTemplateSchema", () => {
 	it("refuses a role outside the vocabulary", () => {
 		const [first] = seeded;
 		if (!first) throw new Error("seed has no templates");
-		const wire = templateWire({ deletedAt: null, ...first } as Select<
-			typeof agentTemplate
-		>);
+		const wire = templateWire({
+			deletedAt: null,
+			...first,
+		} as Select<typeof agentTemplate>);
 		expect(
 			agentTemplateSchema.safeParse({ ...wire, roles: ["tester"] }).success,
 		).toBe(false);

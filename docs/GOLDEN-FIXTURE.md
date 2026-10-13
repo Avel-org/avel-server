@@ -295,7 +295,7 @@ Enforced by ESLint and a bootstrap guard. Violations fail the build.
 
 ## Agent files
 
-Two per agent, each capped at 800 tokens by Zod refinement. `identity.md` is always loaded; `depth.md` is reached for when the agent hits something uncommon.
+Two per agent, each capped at 1200 tokens, enforced on the generator's output (800 until 2026-10-13). `identity.md` is always loaded; `depth.md` is reached for when the agent hits something uncommon.
 
 ```markdown
 # transactions

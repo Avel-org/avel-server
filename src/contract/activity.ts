@@ -46,6 +46,8 @@ export const activityAction = z.enum([
 	"mission.plan_updated",
 	"playbook.created",
 	"playbook.updated",
+	"agent_template.updated",
+	"agent_template.identity_regenerated",
 ]);
 
 /** Must equal the activity_entity_type pgEnum; tests/api/activity.test.ts checks it. */
@@ -62,6 +64,7 @@ export const activityEntityType = z.enum([
 	"roster_entry",
 	"roster_preset",
 	"playbook",
+	"agent_template",
 ]);
 
 export type ActivityActorKind = z.infer<typeof activityActorKind>;

@@ -86,8 +86,6 @@ async function seed(tx: Tx, ns: string) {
 			kind: "feature",
 			roles,
 			waveDefaults: ["B"],
-			identityMd: "#",
-			depthMd: "",
 			writablePaths: ["src/**"],
 			version: 1,
 			deletedAt,

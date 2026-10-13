@@ -1,7 +1,10 @@
 import { initContract } from "@ts-rest/core";
 import { z } from "zod";
 import { activityContract } from "./activity";
-import { agentTemplateContract } from "./agent-template";
+import {
+	agentTemplateContract,
+	identityVersionContract,
+} from "./agent-template";
 import { clientContract } from "./client";
 import { connectionContract } from "./connection";
 import { engagementContract } from "./engagement";
@@ -27,6 +30,7 @@ export * from "./mission-plan";
 export * from "./playbook";
 export * from "./preset";
 export * from "./repo-read";
+export * from "./role-labels";
 export * from "./roster";
 export * from "./shared/access";
 export * from "./shared/coherence";
@@ -75,6 +79,7 @@ export const contract = c.router(
 		intakes: intakeContract,
 		connections: connectionContract,
 		agentTemplates: agentTemplateContract,
+		identityVersions: identityVersionContract,
 		skills: skillContract,
 		skillSources: skillSourceContract,
 		roster: rosterContract,

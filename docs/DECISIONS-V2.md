@@ -815,6 +815,22 @@ The All agents page shows each agent as a card, and the card opens with what the
 - **It is plain prose of 1 to 280 characters,** for a card. A CHECK holds the length; the no-markdown rule is a convention the seed test holds `[attestation]`.
 - **There is no write path yet.** Template writes arrive with module 5, and the description is set by hand there.
 
+
+## Decided 2026-10-13: the identity generator
+
+Module 5 generates each agent's identity from its roles, its mount and its approved role skills. The operator approved the plan on 2026-10-13.
+
+- **The identity carries the template's mount and role-level edges only.** Per-mission paths and edges go in the dispatch brief (module 6). An identity written per mission would change its hash every mission, and a measurement keyed on it would never compare two runs.
+- **Tokens are a conservative estimate,** ceil(UTF-8 bytes / 3.5), versioned with the generator. A real tokenizer would make the hash depend on a vendor library. The estimate overcounts, so a file under the cap here is under it in practice.
+- **The cap is 1200 tokens per file.** It was 800 until the same day: Atlas, covering nine build roles, reached 730 with only two role skills, which left no room for another. The operator raised it for both files. Migration 0024 moved the CHECK.
+- **Regenerating is an explicit operator action,** never automatic. Reads say when an identity is stale and which inputs moved. A template edit that silently rewrote the identity would change what an agent runs on with nobody deciding it.
+- **One sha is one row.** Inputs that return to an earlier state find the earlier version, so A → B → A does not mint a third.
+- **Role definitions live in server code** (`src/lib/roles.ts`), never in the contract and never in a table. The contract carries display labels only.
+- **Identity text is only on the version reads.** The template list and get carry the version number, the hash and the stale flags.
+- **The operator gets no identity.** `foundations` is a human role, and an identity file for it would have no reader.
+- **`AgentTemplate.title` is added,** written, never derived, like the description: [area] plus engineer, tester or reviewer, and "lead" for Atlas alone.
+- **The auth role writes `permissions/policy.json`; security review only reads it.** A judge never grades a file it wrote. `ROSTER-V2.md` gave the file to Zane until this ruling.
+
 ---
 
 ## Open questions

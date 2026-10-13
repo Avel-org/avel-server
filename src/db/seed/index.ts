@@ -32,6 +32,7 @@ const COUNTED = [
 	"engagement",
 	"connection",
 	"agent_template",
+	"agent_identity_version",
 	"roster_preset",
 	"playbook",
 	"mission",
@@ -69,6 +70,9 @@ export async function runSeed(url: string): Promise<SeedResult> {
 				await tx.insert(schema.engagement).values(rows.engagement);
 				await tx.insert(schema.connection).values(rows.connection);
 				await tx.insert(schema.agentTemplate).values(rows.agentTemplate);
+				await tx
+					.insert(schema.agentIdentityVersion)
+					.values(rows.agentIdentityVersion);
 				await tx.insert(schema.rosterPreset).values(rows.rosterPreset);
 				await tx.insert(schema.playbook).values(rows.playbook);
 				await tx.insert(schema.mission).values(rows.mission);

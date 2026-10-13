@@ -10,13 +10,16 @@ import {
 	pgEnum,
 	pgTable,
 	text,
+	timestamp,
 	uniqueIndex,
 	uuid,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
+import type { IdentityInputs } from "../../contract/agent-template";
 import { DELIVERABLES } from "../../contract/playbook";
 import { MISSION_STATUSES } from "../../contract/shared/status";
 import { client, engagement } from "./agency";
+import { user } from "./auth";
 import { id, softDelete, timestamps } from "./columns";
 import { cut, type Gate, role, type Wave, wave } from "./enums";
 
@@ -74,10 +77,10 @@ export const agentTemplate = pgTable(
 		roles: role("roles").array().notNull(),
 		engagementId: uuid("engagement_id").references(() => engagement.id),
 		waveDefaults: wave("wave_defaults").array().notNull(),
+		/** The job title shown beside the name, such as "Backend tester". Null until written. */
+		title: text("title"),
 		/** A plain sentence or two for the catalog card. Null until written. */
 		description: text("description"),
-		identityMd: text("identity_md").notNull(),
-		depthMd: text("depth_md").notNull(),
 		writablePaths: text("writable_paths").array().notNull(),
 		version: integer("version").notNull(),
 		...softDelete,
@@ -91,6 +94,61 @@ export const agentTemplate = pgTable(
 		check(
 			"agent_template_description_length",
 			sql`char_length(${t.description}) between 1 and 280`,
+		),
+		check(
+			"agent_template_title_length",
+			sql`${t.title} is null or char_length(btrim(${t.title})) between 1 and 60`,
+		),
+	],
+);
+
+/**
+ * One generated identity of an agent template. Append-only: a trigger
+ * (drizzle/0023) refuses UPDATE, DELETE and TRUNCATE, so a version number
+ * always names the same text. generated_by is null when the seed wrote it.
+ */
+export const agentIdentityVersion = pgTable(
+	"agent_identity_version",
+	{
+		...id,
+		agentTemplateId: uuid("agent_template_id")
+			.notNull()
+			.references(() => agentTemplate.id),
+		number: integer("number").notNull(),
+		identityMd: text("identity_md").notNull(),
+		depthMd: text("depth_md").notNull(),
+		sha256: text("sha256").notNull(),
+		identityTokens: integer("identity_tokens").notNull(),
+		depthTokens: integer("depth_tokens").notNull(),
+		inputs: jsonb("inputs").$type<IdentityInputs>().notNull(),
+		generatedBy: uuid("generated_by").references(() => user.id),
+		createdAt: timestamp("created_at", {
+			withTimezone: true,
+			mode: "date",
+		}).notNull(),
+	},
+	(t) => [
+		uniqueIndex("agent_identity_version_template_number_uq").on(
+			t.agentTemplateId,
+			t.number,
+		),
+		uniqueIndex("agent_identity_version_template_sha256_uq").on(
+			t.agentTemplateId,
+			t.sha256,
+		),
+		index("agent_identity_version_sha256_idx").on(t.sha256),
+		check("agent_identity_version_number_positive", sql`${t.number} > 0`),
+		check(
+			"agent_identity_version_sha256_hex",
+			sql`${t.sha256} ~ '^[0-9a-f]{64}$'`,
+		),
+		check(
+			"agent_identity_version_identity_tokens_range",
+			sql`${t.identityTokens} between 0 and 1200`,
+		),
+		check(
+			"agent_identity_version_depth_tokens_range",
+			sql`${t.depthTokens} between 0 and 1200`,
 		),
 	],
 );
@@ -330,6 +388,10 @@ export const knowledgeEntry = pgTable(
 
 export const agentTemplateInsert = createInsertSchema(agentTemplate);
 export const agentTemplateSelect = createSelectSchema(agentTemplate);
+export const agentIdentityVersionInsert =
+	createInsertSchema(agentIdentityVersion);
+export const agentIdentityVersionSelect =
+	createSelectSchema(agentIdentityVersion);
 export const rosterPresetInsert = createInsertSchema(rosterPreset);
 export const rosterPresetSelect = createSelectSchema(rosterPreset);
 export const playbookInsert = createInsertSchema(playbook);

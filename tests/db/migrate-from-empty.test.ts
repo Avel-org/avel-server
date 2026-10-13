@@ -23,6 +23,7 @@ function withDatabase(base: string, name: string) {
 const EXPECTED_TABLES = [
 	"account",
 	"activity_log",
+	"agent_identity_version",
 	"agent_template",
 	"client",
 	"completion_report",

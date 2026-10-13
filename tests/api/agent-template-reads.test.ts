@@ -43,8 +43,6 @@ async function seed(tx: Tx, ns: string) {
 			kind: "horizontal",
 			roles: ["schema"],
 			waveDefaults: ["A"],
-			identityMd: "#",
-			depthMd: "",
 			writablePaths: ["src/db/**"],
 			version: 1,
 			deletedAt,
