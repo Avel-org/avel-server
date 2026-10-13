@@ -1,6 +1,7 @@
 import { tsr } from "@ts-rest/serverless/fetch";
-import { and, desc, eq, getTableColumns, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { type ActivityEntry, activityContract } from "../contract";
+import { touchesClient } from "../db/activity";
 import { activityLog, agentTemplate, rosterEntry, user } from "../db/schema";
 import { after, type RequestContext, type RouteDeps, toPage } from "./shared";
 
@@ -89,7 +90,12 @@ export function activityRoutes(deps: RouteDeps) {
 				query.entityType
 					? eq(activityLog.entityType, query.entityType)
 					: undefined,
-				query.entityId ? eq(activityLog.entityId, query.entityId) : undefined,
+				query.clientId
+					? touchesClient(sql`${query.clientId}::uuid`)
+					: undefined,
+				query.entityId
+					? inArray(activityLog.entityId, query.entityId)
+					: undefined,
 				query.actorKind
 					? eq(activityLog.actorKind, query.actorKind)
 					: undefined,

@@ -448,6 +448,57 @@ describe.skipIf(!url)("/api/activity", () => {
 		});
 	});
 
+	it("narrows to one client's rows, through its engagements and missions", async () => {
+		await withActivity(async (call, s, tx) => {
+			const otherClient = randomIds.next();
+			await tx.insert(client).values({
+				id: otherClient,
+				name: "Elsewhere",
+				status: "active",
+				...stamp(clock),
+			});
+			await tx.insert(activityLog).values({
+				id: randomIds.next(),
+				at: at(6),
+				actorKind: "system",
+				action: "client.created",
+				entityType: "client",
+				entityId: otherClient,
+				requestId: "req-other",
+				payload: {},
+			});
+			const { data, meta } = await listOf(
+				call,
+				`clientId=${s.clientId}&limit=100`,
+			);
+			expect(data.map((r) => r.id)).toEqual(s.newestFirst);
+			expect(meta.total).toBe(s.newestFirst.length);
+			const other = await listOf(call, `clientId=${otherClient}`);
+			expect(other.meta.total).toBe(1);
+		});
+	});
+
+	it("takes several entity ids, repeated or indexed, at most 100", async () => {
+		await withActivity(async (call, s) => {
+			const expected = [s.row.f, s.row.d, s.row.c];
+			for (const query of [
+				`entityId=${s.m1}&entityId=${s.exportId}`,
+				`entityId[0]=${s.m1}&entityId[1]=${s.exportId}`,
+			]) {
+				const { data, meta } = await listOf(call, query);
+				expect(
+					data.map((r) => r.id),
+					query,
+				).toEqual(expected);
+				expect(meta.total, query).toBe(3);
+			}
+			const many = (n: number) =>
+				Array.from({ length: n }, () => `entityId=${s.m1}`).join("&");
+			expect((await call(`/api/activity?${many(100)}`)).status).toBe(200);
+			expect((await call(`/api/activity?${many(101)}`)).status).toBe(400);
+		});
+	});
+
 	it("reads a cursor as a position, so other filters resume after it", async () => {
 		await withActivity(async (call, s) => {
 			// Two rows of e1 (f, d), so the cursor sits at d: at(3), d's id.

@@ -1,6 +1,7 @@
 import { initContract } from "@ts-rest/core";
 import { z } from "zod";
 import { pageMeta, pageQuery } from "./shared/pagination";
+import { oneOrMany } from "./shared/query";
 
 const c = initContract();
 
@@ -105,8 +106,16 @@ export type ActivityEntry = z.infer<typeof activityEntry>;
 export const activityListQuery = pageQuery.extend({
 	missionId: uuid.optional(),
 	engagementId: uuid.optional(),
+	/**
+	 * Rows on the client itself, or on any of its engagements or their
+	 * missions, deleted ones included: the rows Client.lastActivityAt reads.
+	 */
+	clientId: uuid.optional(),
 	entityType: activityEntityType.optional(),
-	entityId: uuid.optional(),
+	/** One id, or up to 100 repeated or indexed: rows on any of them. */
+	entityId: oneOrMany(uuid)
+		.refine((ids) => ids.length <= 100, { message: "At most 100 entity ids" })
+		.optional(),
 	actorKind: activityActorKind.optional(),
 });
 
