@@ -99,6 +99,8 @@ export const agentTemplateSchema = z.object({
 	/** Null for a shared identity (Atlas), which serves every engagement. */
 	engagementId: z.string().uuid().nullable(),
 	waveDefaults: z.array(wave),
+	/** A plain sentence or two for the catalog card, no markdown. Null until written. */
+	description: z.string().min(1).max(280).nullable(),
 	identityMd: z.string(),
 	depthMd: z.string(),
 	/** Globs this agent may modify. A write outside them fails the ownership gate. */

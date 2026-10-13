@@ -806,6 +806,14 @@ The operator wants a per-agent toggle on each tool. A derived mode cannot switch
 - **It is set while the mission is a draft,** like every other roster change.
 - **The mission-wide toggle is the existing skill attach and detach,** for stack and domain skills.
 
+### An agent's description, a freeze exception
+
+The All agents page shows each agent as a card, and the card opens with what the agent does. Neither the identity nor the roles say that in a sentence: the identity is instructions to the agent, and a sentence built from roles reads like a list. So `AgentTemplate.description` is added, a second exception to the 2026-10-05 freeze, decided by the operator on 2026-10-12.
+
+- **It is written, never derived.** A sentence generated from roles would say nothing the roles do not. It is null until someone writes it.
+- **It is plain prose of 1 to 280 characters,** for a card. A CHECK holds the length; the no-markdown rule is a convention the seed test holds `[attestation]`.
+- **There is no write path yet.** Template writes arrive with module 5, and the description is set by hand there.
+
 ---
 
 ## Open questions

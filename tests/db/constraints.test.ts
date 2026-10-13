@@ -164,4 +164,31 @@ describe.skipIf(!process.env.DATABASE_URL)("required-when constraints", () => {
 			expect(rows).toEqual([{ engagementId: null }]);
 		});
 	});
+
+	it("bounds an agent's description to 1 to 280 characters, null allowed", async () => {
+		await inRollback(async (tx, ids) => {
+			const row = (description: string | null) => ({
+				id: ids.next(),
+				slug: `quill-${ids.next()}`,
+				name: "Quill",
+				kind: "horizontal" as const,
+				roles: ["schema" as const],
+				waveDefaults: ["A" as const],
+				description,
+				identityMd: "",
+				depthMd: "",
+				writablePaths: ["src/db/**"],
+				version: 1,
+				...stamp(clock),
+			});
+			for (const description of ["", "a".repeat(281)]) {
+				const err = await refusal(tx, (t) =>
+					t.insert(agentTemplate).values(row(description)),
+				);
+				expect(err.constraint_name).toBe("agent_template_description_length");
+			}
+			await tx.insert(agentTemplate).values(row(null));
+			await tx.insert(agentTemplate).values(row("a".repeat(280)));
+		});
+	});
 });

@@ -44,6 +44,7 @@ function toWire(row: Row): AgentTemplate {
 		roles: row.roles,
 		engagementId: row.engagementId,
 		waveDefaults: row.waveDefaults,
+		description: row.description,
 		identityMd: row.identityMd,
 		depthMd: row.depthMd,
 		writablePaths: row.writablePaths,

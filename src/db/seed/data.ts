@@ -254,6 +254,7 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 		roles: Row<typeof agentTemplate>["roles"],
 		waves: Row<typeof agentTemplate>["waveDefaults"],
 		writablePaths: string[],
+		description: string,
 	) => {
 		const id = ids.next();
 		rows.agentTemplate.push({
@@ -264,6 +265,7 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 			roles,
 			engagementId: null,
 			waveDefaults: waves,
+			description,
 			identityMd: `# ${name}\n`,
 			depthMd: "",
 			writablePaths,
@@ -280,6 +282,7 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 		["foundations"],
 		["A"],
 		["**"],
+		"The human who signs off. Approves plans, rosters and exports, and makes every call an agent may not make.",
 	);
 	const atlas = addTemplate(
 		"atlas",
@@ -288,6 +291,7 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 		["schema", "contract"],
 		["A"],
 		["src/db/**", "src/contract/**"],
+		"Lays the ground every feature builds on: the tables, the migrations and the contract the frontend reads.",
 	);
 	const nemi = addTemplate(
 		"nemi",
@@ -296,6 +300,7 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 		["domain", "api-surface"],
 		["B"],
 		["src/routes/**", "src/services/**"],
+		"Builds one feature's logic and endpoints, from the domain rules to the routes that serve them.",
 	);
 	const fenn = addTemplate(
 		"fenn",
@@ -304,6 +309,7 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 		["backend-tests", "frontend-tests"],
 		["C"],
 		["tests/**"],
+		"Writes the backend and frontend tests. Never modifies the code under test.",
 	);
 	const zane = addTemplate(
 		"zane",
@@ -312,6 +318,7 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 		["spec-judgment", "security-review"],
 		["D"],
 		["reviews/**"],
+		"Reviews finished work against the spec and for security. Writes findings and never fixes them.",
 	);
 
 	// The template-booking playbook and its default preset. A template's

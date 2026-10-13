@@ -47,6 +47,7 @@ function templateWire(row: Select<typeof agentTemplate>) {
 		roles: row.roles,
 		engagementId: row.engagementId,
 		waveDefaults: row.waveDefaults,
+		description: row.description,
 		identityMd: row.identityMd,
 		depthMd: row.depthMd,
 		writablePaths: row.writablePaths,
@@ -213,6 +214,27 @@ describe("agentTemplateSchema", () => {
 			>);
 			expect(agentTemplateSchema.parse(wire)).toEqual(wire);
 		}
+	});
+
+	it("gives every seeded template a plain description", () => {
+		for (const row of seeded) {
+			expect(row.description?.length).toBeGreaterThan(0);
+			expect(row.description).not.toMatch(/[*_`#—]/);
+		}
+	});
+
+	it("refuses an empty or over-long description, and takes null", () => {
+		const [first] = seeded;
+		if (!first) throw new Error("seed has no templates");
+		const wire = templateWire({ deletedAt: null, ...first } as Select<
+			typeof agentTemplate
+		>);
+		const parses = (description: string | null) =>
+			agentTemplateSchema.safeParse({ ...wire, description }).success;
+		expect(parses(null)).toBe(true);
+		expect(parses("a".repeat(280))).toBe(true);
+		expect(parses("a".repeat(281))).toBe(false);
+		expect(parses("")).toBe(false);
 	});
 
 	it("refuses a role outside the vocabulary", () => {

@@ -1,0 +1,2 @@
+ALTER TABLE "agent_template" ADD COLUMN "description" text;--> statement-breakpoint
+ALTER TABLE "agent_template" ADD CONSTRAINT "agent_template_description_length" CHECK (char_length("agent_template"."description") between 1 and 280);

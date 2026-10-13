@@ -74,6 +74,8 @@ export const agentTemplate = pgTable(
 		roles: role("roles").array().notNull(),
 		engagementId: uuid("engagement_id").references(() => engagement.id),
 		waveDefaults: wave("wave_defaults").array().notNull(),
+		/** A plain sentence or two for the catalog card. Null until written. */
+		description: text("description"),
 		identityMd: text("identity_md").notNull(),
 		depthMd: text("depth_md").notNull(),
 		writablePaths: text("writable_paths").array().notNull(),
@@ -86,6 +88,10 @@ export const agentTemplate = pgTable(
 			.on(t.slug)
 			.where(isNull(t.deletedAt)),
 		index("agent_template_engagement_id_idx").on(t.engagementId),
+		check(
+			"agent_template_description_length",
+			sql`char_length(${t.description}) between 1 and 280`,
+		),
 	],
 );
 

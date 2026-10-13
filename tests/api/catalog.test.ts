@@ -95,6 +95,7 @@ async function seedCatalog(tx: Tx, ns: string) {
 		roles: ["domain"],
 		waveDefaults: ["B"],
 		engagementId,
+		description: "Builds the domain.",
 	});
 	const gone = await template(3, "gone", {
 		kind: "horizontal",
@@ -212,6 +213,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api/agent-templates", () => {
 				roles: ["domain"],
 				engagementId: nemi.engagementId,
 				waveDefaults: ["B"],
+				description: "Builds the domain.",
 				identityMd: "# nemi\n",
 				depthMd: "",
 				writablePaths: ["src/**"],
@@ -219,6 +221,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api/agent-templates", () => {
 				createdAt: at(2).toISOString(),
 				updatedAt: at(2).toISOString(),
 			});
+			expect(body.data[1]?.description).toBeNull();
 		});
 	});
 

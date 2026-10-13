@@ -317,6 +317,7 @@ kind                   'horizontal' | 'feature'
 roles                  role[] — from the closed vocabulary in ROLES.md
 engagement_id?         FK -> Engagement, nullable — engagement scoping lives on Mission
 wave_defaults          wave[]   — wave is 'A' | 'B' | 'C' | 'D' | 'E'
+description?           text, 1 to 280 chars, plain prose for the catalog card; written, never derived; [built] 2026-10-12, migration 0022
 identity_md            ≤800 tokens, Zod refinement
 depth_md               ≤800 tokens, Zod refinement
 writable_paths         text[]   ← glob patterns this agent may modify
@@ -1030,6 +1031,7 @@ As built, from `drizzle/` (2026-10-05). Each table comes after every table its f
 | `0019` | Mission plan | `mission.template_ref`, `template_version` under CHECK `mission_template_complete`; `mission.plan_updated` |
 | `0020` | ActivityLog enum values | `playbook.created`, `playbook.updated`, entity type `playbook` |
 | `0021` | Roster access overrides | `roster_entry.access_overrides`, nullable jsonb; the freeze exception of 2026-10-12 |
+| `0022` | Agent template description | `agent_template.description`, nullable text under CHECK `agent_template_description_length`; the second freeze exception of 2026-10-12 |
 
 `0001`–`0006` create 24 tables: 2 + 3 + 8 + 4 + 6 + 1.
 

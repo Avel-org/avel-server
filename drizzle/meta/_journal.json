@@ -155,6 +155,13 @@
       "when": 1791848179504,
       "tag": "0021_roster_access_overrides",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1791862048492,
+      "tag": "0022_agent_template_description",
+      "breakpoints": true
     }
   ]
 }
