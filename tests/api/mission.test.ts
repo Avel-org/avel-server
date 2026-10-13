@@ -433,6 +433,50 @@ describe.skipIf(!url)("/api/missions", () => {
 		});
 	});
 
+	it("scopes to one client, and to one template, with counts and total following", async () => {
+		await withMissions(async ({ tx, ids, call }) => {
+			const s = seeder(tx, ids);
+			const meridian = await s.client("Meridian Health");
+			const e1 = await s.engagement(meridian, "Portal");
+			const e2 = await s.engagement(meridian, "Billing");
+			const acme = await s.engagement(await s.client("Acme"), "Site");
+			const sha = "0123456789abcdef0123456789abcdef01234567";
+			const booked = {
+				templateRef: "template-booking",
+				templateVersion: sha,
+			};
+			const a = await s.mission({ engagementId: e1, ...booked });
+			const b = await s.mission({ engagementId: e2, status: "draft" });
+			const c = await s.mission({ engagementId: acme, ...booked });
+			const internal = await s.mission({ engagementId: null, ...booked });
+
+			const forClient = await listOf(
+				call,
+				`origin=client&clientId=${meridian}`,
+			);
+			expect(forClient.data.map((m) => m.id).sort()).toEqual([a, b].sort());
+			expect(forClient.meta.total).toBe(2);
+			expect(forClient.meta.counts.byStatus).toMatchObject({
+				active: 1,
+				draft: 1,
+			});
+
+			const idsFor = async (query: string) =>
+				(await listOf(call, query)).data.map((m) => m.id).sort();
+			expect(
+				await idsFor("origin=client&templateRef=template-booking"),
+			).toEqual([a, c].sort());
+			expect(
+				await idsFor("origin=internal&templateRef=template-booking"),
+			).toContain(internal);
+			expect(
+				await idsFor(
+					`origin=client&clientId=${meridian}&templateRef=template-booking`,
+				),
+			).toEqual([a]);
+		});
+	});
+
 	it("derives needsYou from the last export only, and counts it", async () => {
 		await withMissions(async ({ tx, ids, call }) => {
 			const s = seeder(tx, ids);

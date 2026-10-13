@@ -94,7 +94,14 @@ function base(db: Executor, missionId?: string) {
 	return { lx, la, needsYou };
 }
 
-function scope(origin: Origin, includeArchived: boolean, q?: string) {
+function scope(query: {
+	origin: Origin;
+	includeArchived: boolean;
+	q?: string;
+	clientId?: string;
+	templateRef?: string;
+}) {
+	const { origin, includeArchived, q } = query;
 	const pattern = q ? containsPattern(q) : undefined;
 	return and(
 		live(mission),
@@ -110,6 +117,8 @@ function scope(origin: Origin, includeArchived: boolean, q?: string) {
 					ilike(mission.type, pattern),
 				)
 			: undefined,
+		query.clientId ? eq(client.id, query.clientId) : undefined,
+		query.templateRef ? eq(mission.templateRef, query.templateRef) : undefined,
 	);
 }
 
@@ -339,7 +348,7 @@ export function missionRoutes(deps: RouteDeps) {
 			const key = sortKey(query.sort, b.la.at);
 			const dir = query.direction ?? key.defaultDir;
 			const tag = cursorTag(query.sort, dir, key.defaultDir);
-			const where = scope(query.origin, query.includeArchived, query.q);
+			const where = scope(query);
 			const cursor = query.cursor
 				? decodeCursor(query.cursor, query.sort, tag)
 				: undefined;

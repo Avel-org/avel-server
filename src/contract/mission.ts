@@ -87,6 +87,10 @@ export const missionListQuery = pageQuery.extend({
 		.optional(),
 	/** Case-insensitive substring of the client name, engagement name or mission type. */
 	q: z.string().trim().min(1).max(200).optional(),
+	/** Keeps the missions of this client's engagements. A scope, like q: meta.counts follows it. */
+	clientId: z.string().uuid().optional(),
+	/** Keeps missions whose plan names this template (templateRef). A scope, like q. */
+	templateRef: z.string().min(1).max(200).optional(),
 	sort: missionSort.default("lastActivity"),
 	/** Archived missions are hidden unless true, even when status=archived is asked for. */
 	includeArchived: queryBoolean,
@@ -123,7 +127,7 @@ export const missionListMeta = pageMeta.extend({
 	 */
 	total: z.number().int().nonnegative(),
 	/**
-	 * Counts over the same origin, q and includeArchived as the list, but NOT
+	 * Counts over the same origin, q, clientId, templateRef and includeArchived as the list, but NOT
 	 * the status, needsYou, quietBefore or lastExportStatus filters, so a
 	 * status strip can show every count while one filter is selected.
 	 */
