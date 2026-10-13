@@ -788,6 +788,7 @@ Templates are not database rows. Each one lives in its own repository (`TEMPLATE
 - **Each template repository carries `.avel/template.json`** with its name, scope and starting state. Nothing machine-readable said those before, and parsing a README would be a guess.
 - **A `TemplateSource` gateway reads them,** beside `RepoSource`. Production reads GitHub. Dev and tests read a fixture, so the page works on `avel_dev` under dev preview with no token.
 - **A table was the alternative.** It would have been a freeze exception holding a copy of what the repositories already hold.
+- **A template's cover image lives in its repository too,** named by an optional `cover` in the manifest and served by the server, same-origin, at the head commit. The browser never reaches GitHub, so the token stays in the gateway and private repositories work. It is the first response that is not a JSON envelope, so it is a route outside the contract, like Better Auth's. The bytes are checked by signature, never by extension, because a file named `.png` can be SVG or HTML, and either could run script if served under the app's origin.
 
 ### Access modes are derived
 

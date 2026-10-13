@@ -74,7 +74,7 @@ src/contract/
 | `roster` | list · access (`GET …/roster/:entryId/access`, see *Access*) · add · update · remove · applyPreset (`POST /api/missions/:missionId/roster/apply-preset`, all or nothing; refuses a non-empty roster unless `replace`) · skills · attachSkill · detachSkill (module 4). Writes need a `draft` mission (422 `mission_not_editable`). Update takes `accessOverrides`, which only narrow (422 `access_override_invalid`, with `issues`); `null` or `[]` clears them, stored as null | — |
 | `presets` | list · get · create (201) · update (`PATCH`, any subset, at least one field; `agents` replaces the list; every update adds 1 to `version`) (module 4). Agents must name live, rosterable templates (422 `agent_template_not_found`, `template_not_rosterable`), each at most once per territory (409 `CONFLICT`), the same rules apply-preset meets. A missing or deleted preset is 404. No delete: `Playbook.default_preset_id` is a NOT NULL FK. applications (`GET /api/presets/:id/applications`, "Used by"): the preset's `roster.preset_applied` rows, newest first, each `{ missionId, mission: { status, type } | null when deleted, presetVersion, appliedAt, actor, added, removed }`; paged, `meta.total`; 404 for a missing or deleted preset | `q` · `cut` · cursor · `meta.total` |
 | `playbooks` | list · getForType (`GET /api/playbooks/by-type/:missionType`, the live row, else 404) · create (`POST`, 201; a live mission type is 409) · update (`PUT …/by-type/:missionType`, a full replace, `version` + 1, mission type immutable) · versions (`GET …/by-type/:missionType/versions`, newest first, from the ActivityLog snapshots; `[current]` when none are logged) (module 3). Writes check: gates from the closed vocabulary, each once; waves non-empty, unique, in `WAVES` order; a live default preset (422 `preset_not_found`) that staffs the earliest wave (422 `preset_misses_first_wave`). Update is refused while a live mission of that type is `active` or `halted` (422 `playbook_in_use`) | `q` (name) · cursor · `meta.total` |
-| `templates` | list · get (`/api/templates/:slug`; a slug outside the allowlist is 404), read-only. See *Templates* | — |
+| `templates` | list · get (`/api/templates/:slug`; a slug outside the allowlist is 404), read-only, and the cover image at `/api/templates/:slug/cover`, outside the contract. See *Templates* | — |
 | `missionPlans` | get · update (`GET`/`PUT /api/missions/:id/plan`, module 3). The response carries the brief (null when the stored one predates the brief shape), `approvedBrief` (the approving Intake's brief, which the plan may not change; null when no Intake created the mission), `templateRef`, `templateVersion`, and `check: { passed, issues }` from `checkPlan`. Update replaces the plan on a `draft` mission (422 `mission_not_editable`), saves whether or not the check passes, refuses any change to the approved brief (422 `plan_changes_approved_brief`, with `issues`), and refuses a `templateRef` other than the mission's `type` (422 `template_type_mismatch`) | — |
 | `intakes.readRepo` | `POST /api/intakes/:id/read-repo` (module 2): pins the commit, reads the tarball, writes the derived fields and the repo columns. Never changes status | — |
 
@@ -986,12 +986,14 @@ A template is not an entity. It is read from its repository (`TEMPLATES.md`, *Wh
 ```
 GET /api/templates           every template in the allowlist, in allowlist order
 GET /api/templates/:slug     one; a slug not in the allowlist is 404
+GET /api/templates/:slug/cover?sha=   the cover image itself, not an envelope; refusals are envelopes
 
 Template = {
   slug                 the repository name, e.g. 'template-booking'; the mission template_ref and the playbook mission_type
   readable             false when the repository or its manifest could not be read
   name? · scope? · startingState?     from .avel/template.json; null when not readable
   latestSha?           the default branch's head, 40 lowercase hex; null when not readable
+  cover?               { url, alt }: url is /api/templates/:slug/cover?sha=<latestSha>; null when the manifest names no cover
   defaultPresetId?     the template's live playbook's default preset; null when it has no playbook
   missionCount         live missions with this template_ref
 }
@@ -999,7 +1001,7 @@ scope          'full-stack' | 'frontend' | 'backend' | 'integration' | 'data' | 
 startingState  'greenfield' | 'brownfield'
 ```
 
-*As built 2026-10-12* (`src/contract/template.ts`, `src/routes/templates.ts`). The allowlist is `TEMPLATE_REPOS` in `src/lib/templates.ts`, configuration under source control and bounded, so the list is not paged. A `TemplateSource` gateway in `AppDeps` (`src/gateways/template-source.ts`) carries the allowlist and does the reading: GitHub when `AVEL_TEMPLATE_OWNER` and `AVEL_TEMPLATE_GITHUB_TOKEN` are set, the dev fixture otherwise outside production, and every row unreadable in production without them. The manifest is refused unless it is exactly `{ name, scope, startingState }`. One unreadable repository marks its own row and never fails the list. `missionCount` counts live missions only.
+*As built 2026-10-12* (`src/contract/template.ts`, `src/routes/templates.ts`). The allowlist is `TEMPLATE_REPOS` in `src/lib/templates.ts`, configuration under source control and bounded, so the list is not paged. A `TemplateSource` gateway in `AppDeps` (`src/gateways/template-source.ts`) carries the allowlist and does the reading: GitHub when `AVEL_TEMPLATE_OWNER` and `AVEL_TEMPLATE_GITHUB_TOKEN` are set, the dev fixture otherwise outside production, and every row unreadable in production without them. The manifest is refused unless it is exactly `{ name, scope, startingState, cover? }`, where `cover` is `{ path, alt }`: a repository-relative `.png`, `.jpg`, `.jpeg` or `.webp` path with no leading slash and no `..`. The cover route serves the file at the head commit only when its bytes are a PNG, JPEG or WebP by signature and at most 1 MB (`TEMPLATE_COVER_MAX_BYTES`, the most GitHub's contents API inlines), with `nosniff`; anything else is 404, so a listed `cover.url` can still 404 and an `<img>` needs a fallback. With `sha` equal to the head it is cached as immutable, otherwise `no-cache`. The dev fixture serves a generated cover for `template-booking` (`src/lib/dev-covers/`). One unreadable repository marks its own row and never fails the list. `missionCount` counts live missions only.
 
 ---
 

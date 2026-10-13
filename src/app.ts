@@ -43,7 +43,7 @@ import { rosterRoutes } from "./routes/roster";
 import type { RequestContext } from "./routes/shared";
 import { skillSourceRoutes } from "./routes/skill-sources";
 import { skillRoutes } from "./routes/skills";
-import { templateRoutes } from "./routes/templates";
+import { templateCover, templateRoutes } from "./routes/templates";
 
 export type AppDeps = {
 	clock: Clock;
@@ -111,6 +111,9 @@ export function createApp(deps: AppDeps) {
 			}),
 		),
 	);
+
+	// An image, not an envelope, so it sits outside the contract router.
+	app.get("/api/templates/:slug/cover", templateCover(deps.templates));
 
 	app.all("/api/*", async (ctx) => {
 		const id = ctx.get("requestId");

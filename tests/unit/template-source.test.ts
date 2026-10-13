@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	TEMPLATE_COVER_MAX_BYTES,
 	templateManifest,
 	templateRef,
 	templateVersion,
@@ -8,6 +9,7 @@ import { BOOKING_TEMPLATE_SHA } from "../../src/db/seed/data";
 import {
 	fixtureTemplateSource,
 	githubTemplateSource,
+	imageType,
 	MANIFEST_PATH,
 	parseManifest,
 	unreadableTemplates,
@@ -15,6 +17,7 @@ import {
 import {
 	DEV_BOOKING_SHA,
 	DEV_TEMPLATE_READS,
+	devTemplateFiles,
 	TEMPLATE_REPOS,
 } from "../../src/lib/templates";
 
@@ -67,6 +70,29 @@ describe("parseManifest", () => {
 		expect(parseManifest(JSON.stringify(MANIFEST))).toEqual(MANIFEST);
 	});
 
+	it("reads a cover, and refuses one outside the repository or not an image", () => {
+		const withCover = (cover: unknown) =>
+			parseManifest(JSON.stringify({ ...MANIFEST, cover }));
+		const alt = "Slots";
+		expect(withCover({ path: ".avel/cover.png", alt })).toEqual({
+			...MANIFEST,
+			cover: { path: ".avel/cover.png", alt },
+		});
+		expect(withCover({ path: "docs/shot.JPEG", alt })).not.toBeNull();
+		expect(withCover({ path: "a/b.webp", alt })).not.toBeNull();
+		for (const path of [
+			"/etc/cover.png",
+			"../cover.png",
+			"a/../../cover.png",
+			"cover.svg",
+			"cover.png?raw=1",
+			"",
+		])
+			expect(withCover({ path, alt }), path).toBeNull();
+		expect(withCover({ path: "c.png", alt: " " })).toBeNull();
+		expect(withCover({ path: "c.png", alt, size: 1 })).toBeNull();
+	});
+
 	it("refuses bad JSON, an unknown scope, and extra keys", () => {
 		expect(parseManifest("{")).toBeNull();
 		expect(
@@ -110,6 +136,78 @@ describe("githubTemplateSource", () => {
 	});
 });
 
+describe("imageType", () => {
+	const bytes = (...b: number[]) => new Uint8Array([...b, 0, 0, 0, 0]);
+	it("names PNG, JPEG and WebP by signature", () => {
+		expect(
+			imageType(bytes(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)),
+		).toBe("image/png");
+		expect(imageType(bytes(0xff, 0xd8, 0xff, 0xe0))).toBe("image/jpeg");
+		const riff = [0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4];
+		expect(imageType(bytes(...riff, 0x57, 0x45, 0x42, 0x50))).toBe(
+			"image/webp",
+		);
+	});
+
+	it("refuses anything else, whatever it is named", () => {
+		const text = (t: string) => new Uint8Array(Buffer.from(t, "utf8"));
+		expect(
+			imageType(text("<svg xmlns='http://www.w3.org/2000/svg'/>")),
+		).toBeNull();
+		expect(imageType(text("<html><script>x</script></html>"))).toBeNull();
+		expect(
+			imageType(
+				bytes(0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x41, 0x56, 0x45),
+			),
+		).toBeNull();
+		expect(imageType(new Uint8Array())).toBeNull();
+	});
+});
+
+describe("githubTemplateSource file", () => {
+	const fileFetch = (body: Record<string, unknown>, status = 200) => {
+		const calls: string[] = [];
+		const fetch = (async (input: string | URL | Request) => {
+			calls.push(String(input instanceof Request ? input.url : input));
+			return Response.json(body, { status });
+		}) as typeof globalThis.fetch;
+		return { fetch, calls };
+	};
+
+	it("reads a file's bytes at the commit it is given", async () => {
+		const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+		const gh = fileFetch({
+			type: "file",
+			encoding: "base64",
+			content: png.toString("base64"),
+		});
+		const got = await source(gh.fetch).file(
+			"template-booking",
+			SHA,
+			".avel/cover.png",
+		);
+		expect(got && Buffer.from(got).equals(png)).toBe(true);
+		const url = new URL(gh.calls[0] ?? "");
+		expect(url.pathname).toBe(
+			"/repos/avel-org/template-booking/contents/.avel%2Fcover.png",
+		);
+		expect(url.searchParams.get("ref")).toBe(SHA);
+	});
+
+	it("answers null over 1 MB, where GitHub sends no content, and for a missing file", async () => {
+		const big = fileFetch({ type: "file", encoding: "none", content: "" });
+		expect(
+			await source(big.fetch).file("template-booking", SHA, "c.png"),
+		).toBeNull();
+		const errors: string[] = [];
+		const gone = fileFetch({ message: "Not Found" }, 404);
+		expect(
+			await source(gone.fetch, errors).file("template-booking", SHA, "c.png"),
+		).toBeNull();
+		expect(errors).toEqual(["template-booking"]);
+	});
+});
+
 describe("template configuration", () => {
 	it("lists slugs a mission's templateRef can hold, once each", () => {
 		for (const slug of TEMPLATE_REPOS)
@@ -134,6 +232,24 @@ describe("template configuration", () => {
 		expect(DEV_TEMPLATE_READS["template-booking"]?.headSha).toBe(
 			DEV_BOOKING_SHA,
 		);
+	});
+
+	it("gives the dev template-booking a cover that is a PNG under the cap", async () => {
+		const read = DEV_TEMPLATE_READS["template-booking"];
+		const path = read?.manifest.cover?.path ?? "";
+		const bytes = devTemplateFiles()[`template-booking/${path}`];
+		if (!bytes) throw new Error("no dev cover");
+		expect(imageType(bytes)).toBe("image/png");
+		expect(bytes.byteLength).toBeLessThanOrEqual(TEMPLATE_COVER_MAX_BYTES);
+		const fixture = fixtureTemplateSource(
+			TEMPLATE_REPOS,
+			DEV_TEMPLATE_READS,
+			devTemplateFiles(),
+		);
+		expect(
+			await fixture.file("template-booking", DEV_BOOKING_SHA, path),
+		).toEqual(bytes);
+		expect(await fixture.file("template-booking", SHA, path)).toBeNull();
 	});
 
 	it("serves fixtures by slug, and lists without reading when unreadable", async () => {

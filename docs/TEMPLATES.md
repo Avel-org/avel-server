@@ -184,7 +184,7 @@ A template is not starter code. It is starter code plus the configuration that g
 template-fullstack/
 ├── src/                           scaffold — built by agents
 ├── .avel/
-│   ├── template.json              name, scope, starting state — operator authors
+│   ├── template.json              name, scope, starting state, optional cover — operator authors
 │   ├── playbook.md                phases and gates — generated from the Playbook row
 │   ├── roster-preset.json         cut, grain, composition — generated from the RosterPreset row
 │   ├── obligations.md             domain rules — operator authors

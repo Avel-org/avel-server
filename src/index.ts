@@ -18,7 +18,11 @@ import {
 import { systemClock } from "./lib/clock";
 import { randomIds } from "./lib/ids";
 import { createLogger } from "./lib/logger";
-import { DEV_TEMPLATE_READS, TEMPLATE_REPOS } from "./lib/templates";
+import {
+	DEV_TEMPLATE_READS,
+	devTemplateFiles,
+	TEMPLATE_REPOS,
+} from "./lib/templates";
 
 // Node does not read .env on its own; drizzle.config.ts and the seed do the
 // same. loadEnvFile never overrides a variable that is already set, so real
@@ -59,7 +63,11 @@ if (templateOwner && templateToken) {
 	);
 	templates = unreadableTemplates(TEMPLATE_REPOS);
 } else {
-	templates = fixtureTemplateSource(TEMPLATE_REPOS, DEV_TEMPLATE_READS);
+	templates = fixtureTemplateSource(
+		TEMPLATE_REPOS,
+		DEV_TEMPLATE_READS,
+		devTemplateFiles(),
+	);
 }
 
 const auth = createAuth({
