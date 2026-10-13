@@ -63,7 +63,7 @@ src/contract/
 | Group | Routes | List query |
 |---|---|---|
 | `health` | `GET /api/health` (public; `data.preview` reports dev preview) | — |
-| `clients` | list · get · create · update. Closing a client with an active engagement is refused (422 `client_has_active_engagements`) | `q` (name or primary contact, case-insensitive, LIKE-escaped) · cursor · `meta.total` |
+| `clients` | list · get · create · update. Closing a client with an active engagement is refused (422 `client_has_active_engagements`) | `q` (name or primary contact, case-insensitive, LIKE-escaped) · `status` · cursor · `meta.total` (follows `q` and `status`). Each row carries `lastActivityAt`, the newest ActivityLog entry on the client, its engagements or their missions |
 | `engagements` | list · get · create · update · close. Close revokes the engagement's live Connections and returns `revokedConnections` | `clientId` · `status` · cursor |
 | `missions` | list · get, read-only, for the Missions surface (module 13). Created through Intake approval once module 1 lands | `origin` (required, never both) · `status` · `q` · `clientId` (through the engagement) · `templateRef` (exact) · `sort` (`lastActivity` · `sprint` · `client`) with `direction` (nulls sort lowest) · `includeArchived` · `needsYou` · `quietBefore` (no activity since, or none) · `lastExportStatus` · cursor · `meta.total` (required here; follows every filter) · `meta.counts` (ignores the status-like filters; follows `q`, `clientId` and `templateRef`) |
 | `activity` | list, read-only, for the Activity surface (module 13). Each entry is the row's columns, nothing joined | `missionId` · `engagementId` · `entityType` · `entityId` · `actorKind`, ANDed · cursor (a position, not bound to the filters) · `meta.total` (required) |

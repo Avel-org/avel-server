@@ -12,7 +12,7 @@ import {
 	type Table,
 } from "drizzle-orm";
 import { type Client, clientContract, ok, page } from "../contract";
-import { logActivity } from "../db/activity";
+import { logActivity, touchesClient } from "../db/activity";
 import { client, engagement } from "../db/schema";
 import { live, stamp, touch } from "../db/schema/columns";
 import { type Executor, withTx } from "../db/tx";
@@ -62,6 +62,10 @@ const withCounts = {
 			and ${engagementIsLive}
 			and ${q(engagement, engagement.status)} = 'active'
 	)`.mapWith(Number),
+	lastActivityAt: sql<string | null>`(
+		select max("activity_log"."at") from "activity_log"
+		where ${touchesClient(q(client, client.id))}
+	)`,
 };
 
 type Row = {
@@ -74,6 +78,7 @@ type Row = {
 	updatedAt: Date;
 	engagementCount: number;
 	activeEngagementCount: number;
+	lastActivityAt: string | Date | null;
 };
 
 /** Database row (snake_case columns, Dates) to wire shape (camelCase, ISO strings). */
@@ -86,6 +91,10 @@ function toWire(row: Row): Client {
 		notesMd: row.notesMd,
 		engagementCount: row.engagementCount,
 		activeEngagementCount: row.activeEngagementCount,
+		lastActivityAt:
+			row.lastActivityAt === null
+				? null
+				: new Date(row.lastActivityAt).toISOString(),
 		createdAt: row.createdAt.toISOString(),
 		updatedAt: row.updatedAt.toISOString(),
 	};
@@ -106,6 +115,7 @@ export function clientRoutes(deps: RouteDeps) {
 			const pattern = query.q ? containsPattern(query.q) : undefined;
 			const filters = and(
 				live(client),
+				query.status ? eq(client.status, query.status) : undefined,
 				pattern
 					? or(
 							ilike(client.name, pattern),
@@ -152,7 +162,7 @@ export function clientRoutes(deps: RouteDeps) {
 					...stamp(deps.clock),
 				};
 				await tx.insert(client).values(values);
-				await logActivity(tx, deps, {
+				const log = await logActivity(tx, deps, {
 					actorKind: "operator",
 					actorUserId: operator.id,
 					action: "client.created",
@@ -161,7 +171,12 @@ export function clientRoutes(deps: RouteDeps) {
 					requestId: ctx.requestId,
 					payload: { name: values.name },
 				});
-				return { ...values, engagementCount: 0, activeEngagementCount: 0 };
+				return {
+					...values,
+					engagementCount: 0,
+					activeEngagementCount: 0,
+					lastActivityAt: log.at,
+				};
 			});
 			return { status: 201, body: ok(toWire(row)) };
 		},

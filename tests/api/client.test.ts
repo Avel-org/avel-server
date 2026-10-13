@@ -10,9 +10,11 @@ import {
 } from "../../src/contract";
 import { closeDb } from "../../src/db/client";
 import {
+	activityLog,
 	client,
 	clientStatus as clientStatusEnum,
 	engagement,
+	mission,
 } from "../../src/db/schema";
 import { remove, stamp } from "../../src/db/schema/columns";
 import { clock, idsFailingAt, withApi } from "./support";
@@ -45,6 +47,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api/clients", () => {
 				notesMd: null,
 				engagementCount: 0,
 				activeEngagementCount: 0,
+				lastActivityAt: clock.now().toISOString(),
 				createdAt: clock.now().toISOString(),
 			});
 			const logs = await logRows(data.id);
@@ -274,6 +277,130 @@ describe.skipIf(!process.env.DATABASE_URL)("/api/clients", () => {
 				engagementCount: 2,
 				activeEngagementCount: 1,
 			});
+		});
+	});
+
+	it("filters by status, with the total following", async () => {
+		await withApi(async ({ signIn, call, tx, ns }) => {
+			await signIn();
+			const row = (n: number, status: "active" | "closed") => ({
+				id: `${ns}-0000-4000-8000-${n.toString(16).padStart(12, "0")}`,
+				name: `Status ${ns} ${n}`,
+				status,
+				...stamp(clock),
+			});
+			await tx
+				.insert(client)
+				.values([row(1, "active"), row(2, "closed"), row(3, "closed")]);
+			const names = async (status: string) => {
+				const body = list.parse(
+					await (
+						await call(`/api/clients?q=${ns}&status=${status}&limit=1`)
+					).json(),
+				);
+				return { total: body.meta.total, status: body.data[0]?.status };
+			};
+			expect(await names("closed")).toEqual({ total: 2, status: "closed" });
+			expect(await names("active")).toEqual({ total: 1, status: "active" });
+			expect((await call("/api/clients?status=paused")).status).toBe(400);
+		});
+	});
+
+	it("takes lastActivityAt from the client, its engagements and their missions, never another client", async () => {
+		await withApi(async ({ signIn, call, tx, ns }) => {
+			await signIn();
+			let n = 0xa00;
+			const id = () => {
+				n += 1;
+				return `${ns}-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
+			};
+			const day = (d: number) =>
+				new Date(clock.now().getTime() + d * 86_400_000);
+			const newClient = async () => {
+				const clientId = id();
+				await tx.insert(client).values({
+					id: clientId,
+					name: `Activity ${ns} ${n}`,
+					status: "active",
+					...stamp(clock),
+				});
+				const engagementId = id();
+				await tx.insert(engagement).values({
+					id: engagementId,
+					clientId,
+					name: "Portal",
+					status: "active",
+					startedAt: clock.now(),
+					...stamp(clock),
+				});
+				const missionId = id();
+				await tx.insert(mission).values({
+					id: missionId,
+					origin: "client",
+					engagementId,
+					type: "template-booking",
+					brief: {},
+					sprintN: 1,
+					status: "active",
+					cut: "vertical",
+					cutSource: "derived",
+					repoUrl: "https://github.com/avel-org/app",
+					...stamp(clock),
+				});
+				return { clientId, engagementId, missionId };
+			};
+			const log = (
+				at: Date,
+				entityType: "client" | "engagement",
+				entityId: string,
+				ref: { missionId?: string; engagementId?: string } = {},
+			) =>
+				tx.insert(activityLog).values({
+					id: id(),
+					at,
+					actorKind: "system",
+					action: "engagement.updated",
+					entityType,
+					entityId,
+					requestId: "test",
+					payload: {},
+					...ref,
+				});
+			const lastFor = async (clientId: string) =>
+				one.parse(await (await call(`/api/clients/${clientId}`)).json()).data
+					.lastActivityAt;
+
+			const a = await newClient();
+			const other = await newClient();
+			expect(await lastFor(a.clientId)).toBeNull();
+
+			await log(day(1), "client", a.clientId);
+			expect(await lastFor(a.clientId)).toBe(day(1).toISOString());
+			await log(day(2), "engagement", a.engagementId, {
+				engagementId: a.engagementId,
+			});
+			expect(await lastFor(a.clientId)).toBe(day(2).toISOString());
+			// A mission row that carries no engagement id still counts.
+			await log(day(3), "engagement", a.missionId, { missionId: a.missionId });
+			expect(await lastFor(a.clientId)).toBe(day(3).toISOString());
+			// Another client's newer rows, and a row naming this client's id
+			// under another entity type, never count.
+			await log(day(9), "client", other.clientId);
+			await log(day(9), "engagement", other.missionId, {
+				missionId: other.missionId,
+			});
+			await log(day(9), "engagement", a.clientId);
+			expect(await lastFor(a.clientId)).toBe(day(3).toISOString());
+
+			const listed = list.parse(
+				await (await call(`/api/clients?q=Activity ${ns}`)).json(),
+			);
+			expect(listed.data.map((c) => [c.id, c.lastActivityAt]).sort()).toEqual(
+				[
+					[a.clientId, day(3).toISOString()],
+					[other.clientId, day(9).toISOString()],
+				].sort(),
+			);
 		});
 	});
 

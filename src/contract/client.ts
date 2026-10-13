@@ -24,6 +24,11 @@ export const clientSchema = z.object({
 	engagementCount: z.number().int().nonnegative(),
 	/** The live engagements whose status is active. */
 	activeEngagementCount: z.number().int().nonnegative(),
+	/**
+	 * The newest ActivityLog entry on the client, its engagements or their
+	 * missions, deleted ones included. Null when there is none.
+	 */
+	lastActivityAt: z.string().datetime().nullable(),
 	createdAt: z.string().datetime(),
 	updatedAt: z.string().datetime(),
 });
@@ -54,6 +59,8 @@ export const updateClientBody = z
 export const clientListQuery = pageQuery.extend({
 	/** Case-insensitive substring of the name or primary contact. meta.total respects it. */
 	q: z.string().trim().min(1).max(200).optional(),
+	/** Keeps clients with this status. meta.total respects it. */
+	status: clientStatus.optional(),
 });
 
 const byId = z.object({ id: z.string().uuid() });
