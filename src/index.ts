@@ -9,9 +9,16 @@ import { signInRecorder } from "./auth/sign-in-activity";
 import { getDb } from "./db/client";
 import * as authSchema from "./db/schema/auth";
 import { githubRepoSource } from "./gateways/repo-source";
+import {
+	fixtureTemplateSource,
+	githubTemplateSource,
+	type TemplateSource,
+	unreadableTemplates,
+} from "./gateways/template-source";
 import { systemClock } from "./lib/clock";
 import { randomIds } from "./lib/ids";
 import { createLogger } from "./lib/logger";
+import { DEV_TEMPLATE_READS, TEMPLATE_REPOS } from "./lib/templates";
 
 // Node does not read .env on its own; drizzle.config.ts and the seed do the
 // same. loadEnvFile never overrides a variable that is already set, so real
@@ -32,6 +39,29 @@ if (preview.enabled) {
 		"DEV PREVIEW is ON: GET and HEAD under /api/* need no session; every other method still does. Local only.",
 	);
 }
+// Template repositories: GitHub when a credential is configured. Without
+// one, dev reads the fixture; production reads nothing, so every row shows
+// unreadable rather than made-up data.
+const templateOwner = process.env.AVEL_TEMPLATE_OWNER;
+const templateToken = process.env.AVEL_TEMPLATE_GITHUB_TOKEN;
+let templates: TemplateSource;
+if (templateOwner && templateToken) {
+	templates = githubTemplateSource({
+		slugs: TEMPLATE_REPOS,
+		owner: templateOwner,
+		token: templateToken,
+		onError: (slug, err) =>
+			logger.warn({ slug, err }, "template repository unreadable"),
+	});
+} else if (process.env.NODE_ENV === "production") {
+	logger.warn(
+		"AVEL_TEMPLATE_OWNER or AVEL_TEMPLATE_GITHUB_TOKEN is not set: every template reads as unreadable",
+	);
+	templates = unreadableTemplates(TEMPLATE_REPOS);
+} else {
+	templates = fixtureTemplateSource(TEMPLATE_REPOS, DEV_TEMPLATE_READS);
+}
+
 const auth = createAuth({
 	config,
 	database: drizzleAdapter(getDb(), { provider: "pg", schema: authSchema }),
@@ -55,6 +85,7 @@ serve({
 		preview: preview.enabled,
 		// A Connection names an env var; the gateway reads it at read time.
 		repos: githubRepoSource({ env: (name) => process.env[name] }),
+		templates,
 	}).fetch,
 	port,
 });

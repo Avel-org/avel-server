@@ -9,6 +9,7 @@ import { type Auth, REQUEST_ID_HEADER } from "./auth";
 import { contract } from "./contract";
 import type { Executor } from "./db/tx";
 import type { RepoSource } from "./gateways/repo-source";
+import type { TemplateSource } from "./gateways/template-source";
 import type { Clock } from "./lib/clock";
 import type { IdGenerator } from "./lib/ids";
 import type { Logger } from "./lib/logger";
@@ -42,6 +43,7 @@ import { rosterRoutes } from "./routes/roster";
 import type { RequestContext } from "./routes/shared";
 import { skillSourceRoutes } from "./routes/skill-sources";
 import { skillRoutes } from "./routes/skills";
+import { templateRoutes } from "./routes/templates";
 
 export type AppDeps = {
 	clock: Clock;
@@ -56,6 +58,8 @@ export type AppDeps = {
 	preview: boolean;
 	/** Where the repo read gets repositories (src/gateways/repo-source.ts). GitHub in production, fixtures in tests. */
 	repos: RepoSource;
+	/** Where the template route reads template repositories (src/gateways/template-source.ts). GitHub in production, a fixture in dev and tests. */
+	templates: TemplateSource;
 };
 
 /**
@@ -84,6 +88,7 @@ export function createApp(deps: AppDeps) {
 		roster: rosterRoutes(routeDeps),
 		presets: presetRoutes(routeDeps),
 		playbooks: playbookRoutes(routeDeps),
+		templates: templateRoutes({ ...routeDeps, templates: deps.templates }),
 	});
 
 	const app = new Hono<{ Variables: AuthVariables }>();

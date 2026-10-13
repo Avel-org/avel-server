@@ -14,6 +14,7 @@ import { rosterContract } from "./roster";
 import { errorEnvelope, successEnvelope } from "./shared/envelope";
 import { skillContract } from "./skill";
 import { skillSourceContract } from "./skill-source";
+import { templateContract } from "./template";
 
 export * from "./activity";
 export * from "./agent-template";
@@ -37,6 +38,7 @@ export * from "./shared/skill-tiers";
 export * from "./shared/status";
 export * from "./skill";
 export * from "./skill-source";
+export * from "./template";
 
 /**
  * The contract between avel-server and every client: web, desktop, mobile.
@@ -78,6 +80,7 @@ export const contract = c.router(
 		roster: rosterContract,
 		presets: presetContract,
 		playbooks: playbookContract,
+		templates: templateContract,
 	},
 	{
 		// One entry per ERROR_STATUSES value. Written out, not mapped, so ts-rest

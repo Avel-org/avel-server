@@ -4,6 +4,7 @@ import { vi } from "vitest";
 import { createApp } from "../../src/app";
 import { createAuth } from "../../src/auth";
 import type { AuthConfig } from "../../src/auth/config";
+import { noTemplates } from "../../src/gateways/template-source";
 import { type Clock, fixedClock } from "../../src/lib/clock";
 import { type IdGenerator, sequentialIds } from "../../src/lib/ids";
 import { createLogger } from "../../src/lib/logger";
@@ -114,6 +115,7 @@ export function buildApp(
 		webOrigins: config.webOrigins,
 		preview: options.preview ?? false,
 		repos: noRepos,
+		templates: noTemplates,
 	});
 	return { app, auth, memory, logs: lines, signIns };
 }

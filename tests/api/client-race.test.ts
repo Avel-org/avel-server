@@ -14,6 +14,7 @@ import {
 import * as schema from "../../src/db/schema";
 import * as authSchema from "../../src/db/schema/auth";
 import type { Db } from "../../src/db/tx";
+import { noTemplates } from "../../src/gateways/template-source";
 import { fixedClock } from "../../src/lib/clock";
 import { type IdGenerator, sequentialIds } from "../../src/lib/ids";
 import { noRepos } from "../unit/repo-fixtures";
@@ -168,6 +169,7 @@ describe.skipIf(!url)(
 					webOrigins: [],
 					preview: false,
 					repos: noRepos,
+					templates: noTemplates,
 				}),
 				creator: createApp({
 					clock,
@@ -178,6 +180,7 @@ describe.skipIf(!url)(
 					webOrigins: [],
 					preview: false,
 					repos: noRepos,
+					templates: noTemplates,
 				}),
 			};
 			const { cookie } = await signInWithGitHub(apps.creator, OPERATOR);

@@ -2,6 +2,7 @@ import type { Brief } from "../../contract/intake";
 import { fixedClock } from "../../lib/clock";
 import type { IdGenerator } from "../../lib/ids";
 import { skillContentSha256 } from "../../lib/skill-hash";
+import { DEV_BOOKING_SHA } from "../../lib/templates";
 import type {
 	activityLog,
 	agentTemplate,
@@ -60,8 +61,8 @@ export const SEED_MARKER_ID = seedId(1);
 
 export const SEED_REQUEST_ID = "seed";
 
-/** The template-booking commit the seeded missions were built from. Made up; it only has to be 40 hex. */
-export const BOOKING_TEMPLATE_SHA = "b00c1e9b00c1e9b00c1e9b00c1e9b00c1e9b00c1";
+/** The template-booking commit the seeded missions were built from: the dev fixture's head. */
+export const BOOKING_TEMPLATE_SHA = DEV_BOOKING_SHA;
 
 type Row<T extends { $inferInsert: unknown }> = T["$inferInsert"];
 

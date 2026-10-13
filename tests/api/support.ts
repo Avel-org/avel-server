@@ -11,6 +11,10 @@ import { activityLog, user } from "../../src/db/schema";
 import * as authSchema from "../../src/db/schema/auth";
 import { type Tx, withTx } from "../../src/db/tx";
 import type { RepoSource } from "../../src/gateways/repo-source";
+import {
+	noTemplates,
+	type TemplateSource,
+} from "../../src/gateways/template-source";
 import { fixedClock } from "../../src/lib/clock";
 import { type IdGenerator, randomIds, sequentialIds } from "../../src/lib/ids";
 import { noRepos } from "../unit/repo-fixtures";
@@ -111,6 +115,8 @@ export async function withApi(
 		countStatements?: boolean;
 		/** Where read-repo gets repositories. Default: none, and a read fails loudly. */
 		repos?: RepoSource;
+		/** Where the template route reads repositories. Default: none listed. */
+		templates?: TemplateSource;
 	} = {},
 ) {
 	const db = options.countStatements ? countingDb() : getDb();
@@ -150,6 +156,7 @@ export async function withApi(
 			webOrigins: config.webOrigins,
 			preview: options.preview ?? false,
 			repos: options.repos ?? noRepos,
+			templates: options.templates ?? noTemplates,
 		});
 
 		let cookie = "";
