@@ -141,15 +141,15 @@ Hub. Brief summary · roster summary · playbook in effect · last export state 
 
 ### `/missions/:id/roster` — the loadout screen 🖥
 
-**The core interaction.** Assemble the squad, tune each agent's skills, see coherence live.
+**The core interaction.** Assemble the squad, attach the mission's skills, see coherence live.
 
 **Needs:** `missions.get` · `roster.list` · `roster.skills` · `agentTemplates.list` · `skills.list` · `resolveSkillTiers()` · `roster.add` / `update` / `remove` · `roster.applyPreset` · `roster.attachSkill` / `detachSkill` · `presets.list` (router keys as built, 2026-10-06)
 
-**Layout:** three panes — available agents · the roster with per-agent loadout · coherence panel.
+**Layout:** three panes — available agents · the roster by wave · coherence and the mission's skills.
 
 **Coherence must be instant.** `computeCoherence(mission, playbook)` is pure — no DB, no IO, no clock. **Put it in `src/contract/`, next to the error union, and let both sides import it.** One implementation, zero round trips, no drift. The server remains authoritative at gate time; the client renders the same function.
 
-**Interactions:** toggle agent active · assign waves · toggle skills (tiered: recommended / available / all) · edit `customized_md` · apply a preset (materializes RosterEntries — copy-then-edit, the preset holds no mission state) · save as preset.
+**Interactions:** toggle agent active · assign waves · attach and detach the mission's stack and domain skills (tiered: recommended / available / all; each reaches the agents whose roles it is recommended for) · edit `customized_md` · apply a preset (materializes RosterEntries — copy-then-edit, the preset holds no mission state) · save as preset.
 
 **The one hard block:** at least one active agent in the earliest wave the playbook declares. Rendered as a block, not a warning — and it is the only thing on this screen that can prevent export.
 
