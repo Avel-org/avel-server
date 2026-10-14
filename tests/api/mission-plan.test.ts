@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import {
 	type Brief,
+	type BriefCheck,
 	errorEnvelope,
 	missionPlanSchema,
 	successEnvelope,
@@ -34,6 +35,10 @@ const PLANNED: Brief = {
 	modules: [
 		{ id: "M1", name: "Booking", requirementIds: ["R1"], reads: [] },
 		{ id: "M2", name: "Schedule", requirementIds: ["R2"], reads: [] },
+	],
+	checks: [
+		{ id: "CK1", requirementId: "R1", kind: "test", command: "pnpm test R1" },
+		{ id: "CK2", requirementId: "R2", kind: "test", command: "pnpm test R2" },
 	],
 };
 
@@ -139,6 +144,8 @@ describe.skipIf(!process.env.DATABASE_URL)("mission plan", () => {
 				"The plan has no modules",
 				"R1 is in no module",
 				"R2 is in no module",
+				"R1 has no check outside the agent",
+				"R2 has no check outside the agent",
 			]);
 		});
 	});
@@ -217,6 +224,7 @@ describe.skipIf(!process.env.DATABASE_URL)("mission plan", () => {
 					modules: [
 						{ id: "M1", name: "Booking", requirementIds: ["R1"], reads: [] },
 					],
+					checks: [PLANNED.checks[0] as BriefCheck],
 				},
 				templateRef: null,
 				templateVersion: null,
@@ -227,6 +235,10 @@ describe.skipIf(!process.env.DATABASE_URL)("mission plan", () => {
 				passed: false,
 				issues: [
 					{ path: ["brief", "requirements", 1], message: "R2 is in no module" },
+					{
+						path: ["brief", "requirements", 1, "checks"],
+						message: "R2 has no check outside the agent",
+					},
 				],
 			});
 		});
@@ -250,6 +262,15 @@ describe.skipIf(!process.env.DATABASE_URL)("mission plan", () => {
 					modules: [
 						...PLANNED.modules,
 						{ id: "M3", name: "Reminders", requirementIds: ["R3"], reads: [] },
+					],
+					checks: [
+						...PLANNED.checks,
+						{
+							id: "CK3",
+							requirementId: "R3",
+							kind: "file_exists",
+							path: "src/reminders.ts",
+						},
 					],
 				},
 				templateRef: null,

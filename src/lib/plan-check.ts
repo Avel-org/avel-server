@@ -1,3 +1,4 @@
+import type { BriefRef } from "../contract/dispatch";
 import { type Brief, briefSchema } from "../contract/intake";
 import { type CheckIssue, checkBriefRules } from "./intake-check";
 
@@ -12,6 +13,8 @@ import { type CheckIssue, checkBriefRules } from "./intake-check";
  * 2. At least one module; module ids are unique.
  * 3. Every requirement a module lists exists, and a module lists it once.
  * 4. Every requirement sits in exactly one module.
+ * 5. Every requirement has a check outside the agent (step 9); check ids
+ *    are unique, and every check cites an existing requirement.
  */
 export function checkPlan(brief: unknown): CheckIssue[] {
 	// Rule 1.
@@ -78,7 +81,52 @@ export function checkPlan(brief: unknown): CheckIssue[] {
 		}
 	});
 
+	// Rule 5.
+	const { checks } = parsed.data;
+	const seenChecks = new Set<string>();
+	checks.forEach((ck, i) => {
+		if (seenChecks.has(ck.id)) {
+			issues.push({
+				path: at("checks", i, "id"),
+				message: `Check id ${ck.id} is used more than once`,
+			});
+		}
+		seenChecks.add(ck.id);
+		if (!known.has(ck.requirementId)) {
+			issues.push({
+				path: at("checks", i, "requirementId"),
+				message: `${ck.id} cites ${ck.requirementId}, which is not a requirement`,
+			});
+		}
+	});
+	const checked = new Set(checks.map((ck) => ck.requirementId));
+	requirements.forEach((r, i) => {
+		if (!checked.has(r.id)) {
+			issues.push({
+				path: at("requirements", i, "checks"),
+				message: `${r.id} has no check outside the agent`,
+			});
+		}
+	});
+
 	return issues;
+}
+
+/**
+ * The requirements, of those given, that no check in the brief cites, in
+ * the order given. A brief that does not parse has no checks, so every
+ * requirement is unchecked. Dispatch create and start refuse
+ * requirement_unchecked with these.
+ */
+export function uncheckedRequirements(
+	brief: unknown,
+	requirementIds: readonly string[],
+): string[] {
+	const parsed = briefSchema.safeParse(brief);
+	const checked = new Set(
+		parsed.success ? parsed.data.checks.map((ck) => ck.requirementId) : [],
+	);
+	return requirementIds.filter((rid) => !checked.has(rid));
 }
 
 /**
@@ -151,4 +199,25 @@ function indexesOf(items: ReadonlyArray<{ id: string }>, id: string): number[] {
 		if (item.id === id) found.push(i);
 	});
 	return found;
+}
+
+/**
+ * requirement_unchecked's issues: one per briefRef requirement no check in
+ * the plan cites, at its position in the body.
+ */
+export function uncheckedIssues(
+	brief: unknown,
+	ref: Pick<BriefRef, "requirementIds">,
+): CheckIssue[] {
+	const missing = new Set(uncheckedRequirements(brief, ref.requirementIds));
+	return ref.requirementIds.flatMap((rid, i) =>
+		missing.has(rid)
+			? [
+					{
+						path: ["briefRef", "requirementIds", i],
+						message: `${rid} has no check outside the agent`,
+					},
+				]
+			: [],
+	);
 }

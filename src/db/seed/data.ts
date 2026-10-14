@@ -684,7 +684,8 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 		summary: "Notifications.",
 		created: 24,
 		path: [],
-		// A plan half written: R3 is in no module yet, so the check fails.
+		// A plan half written: R3 is in no module yet and has no check, so the
+		// check fails twice over.
 		brief: {
 			summary: "Notifications.",
 			requirements: [
@@ -698,10 +699,33 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 				{ id: "AC3", requirementId: "R3", text: "One digest a day, at most" },
 			],
 			modules: [
-				{ id: "M1", name: "Delivery", requirementIds: ["R1"], reads: [] },
-				{ id: "M2", name: "Preferences", requirementIds: ["R2"], reads: [] },
+				{
+					id: "M1",
+					name: "Delivery",
+					requirementIds: ["R1"],
+					reads: ["src/notifications/**", "src/documents/share.ts"],
+				},
+				{
+					id: "M2",
+					name: "Preferences",
+					requirementIds: ["R2"],
+					reads: ["src/settings/**"],
+				},
 			],
-			checks: [],
+			checks: [
+				{
+					id: "CK1",
+					requirementId: "R1",
+					kind: "test",
+					command: "pnpm vitest run tests/notifications/share-email.test.ts",
+				},
+				{
+					id: "CK2",
+					requirementId: "R2",
+					kind: "test",
+					command: "pnpm vitest run tests/settings/mute.test.ts",
+				},
+			],
 		},
 	});
 	addMission({
@@ -1439,10 +1463,53 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 				},
 			],
 			modules: [
-				{ id: "M1", name: "Plans", requirementIds: ["R1", "R2"], reads: [] },
-				{ id: "M2", name: "Reminders", requirementIds: ["R3"], reads: [] },
+				{
+					id: "M1",
+					name: "Plans",
+					requirementIds: ["R1", "R2"],
+					reads: ["src/invoices/**", "prisma/schema.prisma"],
+				},
+				{
+					id: "M2",
+					name: "Reminders",
+					requirementIds: ["R3"],
+					reads: ["src/jobs/**", "src/email/templates/**"],
+				},
 			],
-			checks: [],
+			checks: [
+				{
+					id: "CK1",
+					requirementId: "R1",
+					kind: "test",
+					command: "pnpm vitest run tests/invoices/instalments.test.ts",
+					note: "Instalments sum to the invoice total",
+				},
+				{
+					id: "CK2",
+					requirementId: "R1",
+					kind: "typecheck",
+					command: "pnpm tsc --noEmit",
+				},
+				{
+					id: "CK3",
+					requirementId: "R2",
+					kind: "file_exists",
+					path: "src/invoices/instalment-due-date.ts",
+				},
+				{
+					id: "CK4",
+					requirementId: "R2",
+					kind: "test",
+					command: "pnpm vitest run tests/invoices/due-dates.test.ts",
+				},
+				{
+					id: "CK5",
+					requirementId: "R3",
+					kind: "command",
+					command: "pnpm tsx scripts/reminders-dry-run.ts --days 3",
+					note: "Lists the reminders due in three days without sending",
+				},
+			],
 		},
 	});
 	const booking3 = addMission({
@@ -1469,9 +1536,21 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 				},
 			],
 			modules: [
-				{ id: "M1", name: "Waitlist", requirementIds: ["R1"], reads: [] },
+				{
+					id: "M1",
+					name: "Waitlist",
+					requirementIds: ["R1"],
+					reads: ["src/appointments/**"],
+				},
 			],
-			checks: [],
+			checks: [
+				{
+					id: "CK1",
+					requirementId: "R1",
+					kind: "test",
+					command: "pnpm vitest run tests/appointments/waitlist.test.ts",
+				},
+			],
 		},
 	});
 

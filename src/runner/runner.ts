@@ -18,6 +18,7 @@ import { live, stamp, touch } from "../db/schema/columns";
 import { type Executor, type Tx, withTx } from "../db/tx";
 import type { Clock } from "../lib/clock";
 import type { IdGenerator } from "../lib/ids";
+import { uncheckedIssues } from "../lib/plan-check";
 import type { TokenSplit } from "../lib/prices";
 import { priceFor } from "../lib/prices";
 import { identitySupported } from "../lib/roles";
@@ -87,6 +88,8 @@ export type LockedMission = {
 	status: MissionStatus;
 	engagementId: string | null;
 	spendCeilingUsd: string | null;
+	/** The plan, read for requirement_unchecked at start. */
+	brief: unknown;
 };
 
 /**
@@ -135,6 +138,7 @@ export async function lockMission(
 			status: mission.status,
 			engagementId: mission.engagementId,
 			spendCeilingUsd: mission.spendCeilingUsd,
+			brief: mission.brief,
 		})
 		.from(mission)
 		.where(eq(mission.id, id))
@@ -177,7 +181,7 @@ function refuse(
 /**
  * Starts a queued dispatch: checks, in this order, dispatch_not_queued,
  * mission_not_active, roster_entry_inactive, agent_identity_missing,
- * model_price_unknown, spend_ceiling_reached and harness_unavailable,
+ * requirement_unchecked (a dispatch queued before step 9's rule), model_price_unknown, spend_ceiling_reached and harness_unavailable,
  * refusing with the first. Then freezes the identity version, both hashes,
  * the model and the price version, mints the token, stores only its hash,
  * and hands the token to the harness, never to a response or a log.
@@ -237,6 +241,15 @@ export async function startDispatch(
 		throw refuse("The agent has no identity to run with", {
 			details: { reason: "agent_identity_missing", ...entryAt },
 		});
+	}
+	const unchecked = d.briefRef ? uncheckedIssues(m.brief, d.briefRef) : [];
+	if (unchecked.length > 0) {
+		throw refuse(
+			"A requirement this dispatch is for has no check outside the agent",
+			{
+				details: { reason: "requirement_unchecked", ...at, issues: unchecked },
+			},
+		);
 	}
 
 	const model = deps.harness.model;

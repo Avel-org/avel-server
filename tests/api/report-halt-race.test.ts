@@ -31,7 +31,7 @@ import { worktreeRooms } from "../../src/rooms/provider";
 import { localSources } from "../../src/rooms/sources";
 import { DEFAULT_PRICE_BOOK } from "../../src/runner/budget";
 import { FakeHarness } from "../../src/runner/harness";
-import { dispatchValues, sha } from "../db/dispatch-fixtures";
+import { DISPATCH_PLAN, dispatchValues, sha } from "../db/dispatch-fixtures";
 import { makeRepo, removeDir, tempDir } from "../unit/git-fixtures";
 import { noRepos } from "../unit/repo-fixtures";
 import {
@@ -118,7 +118,7 @@ describe.skipIf(!url)(
 				engagementId,
 				origin: "client",
 				type: "template-booking",
-				brief: {},
+				brief: DISPATCH_PLAN,
 				sprintN: 1,
 				status: "active",
 				cut: "vertical",

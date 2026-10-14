@@ -20,7 +20,11 @@ import { sha256Hex } from "../../src/lib/tokens";
 import { DEFAULT_PRICE_BOOK } from "../../src/runner/budget";
 import { FakeHarness } from "../../src/runner/harness";
 import { skillsSha256 } from "../../src/runner/skills";
-import { dispatchValues, insertDispatchRow } from "../db/dispatch-fixtures";
+import {
+	DISPATCH_PLAN,
+	dispatchValues,
+	insertDispatchRow,
+} from "../db/dispatch-fixtures";
 import { bearer, seedIds } from "./agent-fixtures";
 import {
 	activeMission,
@@ -243,7 +247,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					// Every precondition broken at once; each fix exposes the next.
 					await h.tx
 						.update(mission)
-						.set({ status: "draft" })
+						// Queued before rule 5: R2 lost its check.
+						.set({
+							status: "draft",
+							brief: {
+								...DISPATCH_PLAN,
+								checks: DISPATCH_PLAN.checks.slice(0, 1),
+							},
+						})
 						.where(eq(mission.id, m.missionId));
 					await h.tx
 						.update(rosterEntry)
@@ -283,6 +294,22 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						.update(agentTemplate)
 						.set({ roles: ["domain", "api-surface"] })
 						.where(eq(agentTemplate.id, m.agent.templateId));
+					expect(
+						await refusedWith(await start(h, id), "requirement_unchecked"),
+					).toEqual({
+						reason: "requirement_unchecked",
+						...at,
+						issues: [
+							{
+								path: ["briefRef", "requirementIds", 1],
+								message: "R2 has no check outside the agent",
+							},
+						],
+					});
+					await h.tx
+						.update(mission)
+						.set({ brief: DISPATCH_PLAN })
+						.where(eq(mission.id, m.missionId));
 					expect(
 						await refusedWith(await start(h, id), "model_price_unknown"),
 					).toEqual({

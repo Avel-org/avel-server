@@ -112,7 +112,9 @@ const PLANNED: Brief = {
 		{ id: "AC1", requirementId: "R1", text: "Booking a free slot succeeds" },
 	],
 	modules: [{ id: "M1", name: "Booking", requirementIds: ["R1"], reads: [] }],
-	checks: [],
+	checks: [
+		{ id: "CK1", requirementId: "R1", kind: "test", command: "pnpm test R1" },
+	],
 };
 
 describe.skipIf(!url)(

@@ -50,7 +50,10 @@ const PLANNED: Brief = {
 	modules: [
 		{ id: "M6", name: "Accounts", requirementIds: ["R1", "R2"], reads: [] },
 	],
-	checks: [],
+	checks: [
+		{ id: "CK1", requirementId: "R1", kind: "test", command: "pnpm test R1" },
+		{ id: "CK2", requirementId: "R2", kind: "test", command: "pnpm test R2" },
+	],
 };
 
 /** Ids under the call's namespace, far above the app's own sequence. */
@@ -442,6 +445,35 @@ describe.skipIf(!process.env.DATABASE_URL)("dispatches", () => {
 					),
 				),
 			).toEqual([["tokenSoftCeiling"], ["tokenHardCeiling"]]);
+		});
+	});
+
+	it("refuses a requirement with no check outside the agent", async () => {
+		await withApi(async ({ signIn, call, tx, ns }) => {
+			await signIn();
+			const s = await seed(tx, ns);
+			// An active mission whose plan predates rule 5: R1 has no check.
+			await tx
+				.update(mission)
+				.set({ brief: { ...PLANNED, checks: PLANNED.checks.slice(1) } })
+				.where(eq(mission.id, s.missionId));
+			const res = await create(call, s.missionId, body(s.kel.entryId));
+			expect(res.status).toBe(422);
+			expect(await refusal(res)).toEqual({
+				reason: "requirement_unchecked",
+				missionId: s.missionId,
+				issues: [
+					{
+						path: ["briefRef", "requirementIds", 0],
+						message: "R1 has no check outside the agent",
+					},
+				],
+			});
+			const rows = await tx
+				.select()
+				.from(dispatch)
+				.where(eq(dispatch.missionId, s.missionId));
+			expect(rows).toEqual([]);
 		});
 	});
 

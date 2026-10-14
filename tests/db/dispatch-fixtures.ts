@@ -15,6 +15,30 @@ import { clock } from "./fixtures";
 
 export const sha = (c: string) => c.repeat(64);
 
+/**
+ * The plan dispatchValues' briefRef points into: module M6 lists R1 and R2,
+ * and each has a check outside the agent, so start's requirement_unchecked
+ * passes.
+ */
+export const DISPATCH_PLAN = {
+	summary: "Accounts",
+	requirements: [
+		{ id: "R1", text: "Sign up" },
+		{ id: "R2", text: "Sign in" },
+	],
+	acceptanceCriteria: [
+		{ id: "AC1", requirementId: "R1", text: "Signing up works" },
+		{ id: "AC2", requirementId: "R2", text: "Signing in works" },
+	],
+	modules: [
+		{ id: "M6", name: "Accounts", requirementIds: ["R1", "R2"], reads: [] },
+	],
+	checks: [
+		{ id: "CK1", requirementId: "R1", kind: "test", command: "pnpm test R1" },
+		{ id: "CK2", requirementId: "R2", kind: "test", command: "pnpm test R2" },
+	],
+};
+
 export type SeededAgent = {
 	missionId: string;
 	templateId: string;

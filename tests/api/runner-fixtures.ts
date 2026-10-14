@@ -14,7 +14,11 @@ import type { IdGenerator } from "../../src/lib/ids";
 import type { PriceBook } from "../../src/runner/budget";
 import type { FakeHarness } from "../../src/runner/harness";
 import type { RunnerDeps } from "../../src/runner/runner";
-import { dispatchValues, insertDispatchRow } from "../db/dispatch-fixtures";
+import {
+	DISPATCH_PLAN,
+	dispatchValues,
+	insertDispatchRow,
+} from "../db/dispatch-fixtures";
 import { anySource, memoryRooms } from "../unit/room-fixtures";
 import { type Seeded, seedRosteredAgent } from "./agent-fixtures";
 import type { ApiHarness } from "./support";
@@ -74,6 +78,7 @@ export async function activeMission(
 		.update(mission)
 		.set({
 			status: "active",
+			brief: DISPATCH_PLAN,
 			spendCeilingUsd,
 			// A source for its rooms: start refuses a mission without one.
 			templateRef: "template-booking",

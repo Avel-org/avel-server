@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { Brief } from "../../src/contract";
-import { approvedBriefChanges, checkPlan } from "../../src/lib/plan-check";
+import {
+	approvedBriefChanges,
+	checkPlan,
+	uncheckedIssues,
+	uncheckedRequirements,
+} from "../../src/lib/plan-check";
 
 /** A plan that passes: two requirements, each with a criterion, in two modules. */
 function plan(over: Partial<Brief> = {}): Brief {
@@ -18,7 +23,10 @@ function plan(over: Partial<Brief> = {}): Brief {
 			{ id: "M1", name: "Booking", requirementIds: ["R1"], reads: [] },
 			{ id: "M2", name: "Schedule", requirementIds: ["R2"], reads: [] },
 		],
-		checks: [],
+		checks: [
+			{ id: "CK1", requirementId: "R1", kind: "test", command: "pnpm test R1" },
+			{ id: "CK2", requirementId: "R2", kind: "test", command: "pnpm test R2" },
+		],
 		...over,
 	};
 }
@@ -175,6 +183,105 @@ describe("checkPlan", () => {
 			],
 		});
 		expect(checkPlan(bad)).toEqual(checkPlan(structuredClone(bad)));
+	});
+});
+
+describe("checkPlan rule 5: checks outside the agent", () => {
+	const test = (id: string, requirementId: string) =>
+		({ id, requirementId, kind: "test", command: "pnpm test" }) as const;
+
+	it("refuses a requirement with no check, at its own path", () => {
+		expect(checkPlan(plan({ checks: [test("CK1", "R1")] }))).toEqual([
+			{
+				path: ["brief", "requirements", 1, "checks"],
+				message: "R2 has no check outside the agent",
+			},
+		]);
+	});
+
+	it("refuses a plan with no checks at all, one issue per requirement", () => {
+		expect(messages(plan({ checks: [] }))).toEqual([
+			"R1 has no check outside the agent",
+			"R2 has no check outside the agent",
+		]);
+	});
+
+	it("passes two checks on one requirement", () => {
+		expect(
+			checkPlan(
+				plan({
+					checks: [test("CK1", "R1"), test("CK2", "R1"), test("CK3", "R2")],
+				}),
+			),
+		).toEqual([]);
+	});
+
+	it("refuses a duplicate check id", () => {
+		expect(
+			checkPlan(plan({ checks: [test("CK1", "R1"), test("CK1", "R2")] })),
+		).toEqual([
+			{
+				path: ["brief", "checks", 1, "id"],
+				message: "Check id CK1 is used more than once",
+			},
+		]);
+	});
+
+	it("refuses a check citing a requirement that does not exist", () => {
+		expect(
+			checkPlan(
+				plan({
+					checks: [test("CK1", "R1"), test("CK2", "R2"), test("CK3", "R9")],
+				}),
+			),
+		).toEqual([
+			{
+				path: ["brief", "checks", 2, "requirementId"],
+				message: "CK3 cites R9, which is not a requirement",
+			},
+		]);
+	});
+
+	it("reports rule 5 after the module rules", () => {
+		const issues = checkPlan(
+			plan({
+				modules: [
+					{ id: "M1", name: "Booking", requirementIds: ["R1"], reads: [] },
+				],
+				checks: [test("CK1", "R1")],
+			}),
+		);
+		expect(issues.map((i) => i.message)).toEqual([
+			"R2 is in no module",
+			"R2 has no check outside the agent",
+		]);
+	});
+});
+
+describe("uncheckedRequirements and uncheckedIssues", () => {
+	const brief = plan({
+		checks: [
+			{ id: "CK1", requirementId: "R2", kind: "file_exists", path: "a" },
+		],
+	});
+
+	it("lists the given requirements no check cites, in the order given", () => {
+		expect(uncheckedRequirements(brief, ["R2", "R1"])).toEqual(["R1"]);
+		expect(uncheckedRequirements(brief, ["R2"])).toEqual([]);
+	});
+
+	it("treats a brief that does not parse as having no checks", () => {
+		expect(uncheckedRequirements({}, ["R1", "R2"])).toEqual(["R1", "R2"]);
+		expect(uncheckedRequirements(null, ["R1"])).toEqual(["R1"]);
+	});
+
+	it("puts each issue at the requirement's position in the briefRef", () => {
+		expect(uncheckedIssues(brief, { requirementIds: ["R2", "R1"] })).toEqual([
+			{
+				path: ["briefRef", "requirementIds", 1],
+				message: "R1 has no check outside the agent",
+			},
+		]);
 	});
 });
 

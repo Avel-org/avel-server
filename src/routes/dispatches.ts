@@ -29,6 +29,7 @@ import {
 import { live } from "../db/schema/columns";
 import { type Executor, type Tx, withTx } from "../db/tx";
 import { requestSha256 } from "../lib/canonical";
+import { uncheckedIssues } from "../lib/plan-check";
 import { identitySupported } from "../lib/roles";
 import { ApiError } from "../middleware/errors";
 import {
@@ -230,6 +231,20 @@ async function create(
 
 		const refIssues = briefRefIssues(m.brief, body.briefRef);
 		if (refIssues.length > 0) throw invalid(refIssues);
+		const unchecked = uncheckedIssues(m.brief, body.briefRef);
+		if (unchecked.length > 0) {
+			throw new ApiError(
+				"PRECONDITION_FAILED",
+				"A requirement this dispatch is for has no check outside the agent",
+				{
+					details: {
+						reason: "requirement_unchecked",
+						missionId: m.id,
+						issues: unchecked,
+					},
+				},
+			);
+		}
 
 		const estimate = body.estimatedTokens ?? entry.estimatedTokens;
 		if (estimate === null) {
