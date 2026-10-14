@@ -40,6 +40,8 @@ export const statusFor: Record<ErrorCode, number> = {
 	DETERMINISM_VIOLATION: 422,
 	EXTERNAL_GITHUB: 502,
 	GITHUB_REJECTED: 502,
+	DISPATCH_CLOSED: 401,
+	AGENT_NOT_PERMITTED: 403,
 };
 
 /** ApiError's options. A code with required details (PRECONDITION_FAILED) requires them. */

@@ -586,7 +586,7 @@ id · roster_entry_id   FK → RosterEntry
 mission_id?            FK → Mission — required exactly when the RosterEntry is mission-scoped
 brief_ref?             the module and requirement IDs this run is for; null for a firm session
 status                 'queued' | 'running' | 'complete' | 'blocked' | 'failed' | 'halted'
-halt_reason?           'token_hard_ceiling' | 'spend_ceiling' | 'wall_clock' — when halted
+halt_reason?           'token_hard_ceiling' | 'spend_ceiling' | 'wall_clock' | 'operator' — when halted; 'operator' added 2026-10-13, migration 0025
 estimated_tokens       integer NOT NULL
 token_soft_ceiling     integer NOT NULL — default 1.5× estimate
 token_hard_ceiling     integer NOT NULL — default 3× estimate
@@ -631,7 +631,8 @@ token → token_sha256 → Dispatch
 - **"Its own" is derived from the token, never supplied by the agent.** The server sets `CompletionReport.dispatch_id`, `Finding.caught_by` and `Finding.mission_id`, and `Intake.drafted_by_dispatch_id` from the dispatch. A body that names a different dispatch or mission is refused.
 - **Agent writes log as `actor_kind = 'agent'`** with `actor_roster_entry_id` set from the dispatch, under the existing actor CHECKs.
 - **Data outside the mission answers 404, not 403,** so an agent cannot learn which other missions exist. A firm dispatch reads across missions, and is held to `read` and `propose`. It may read clients, engagements, missions, exports and activity. It never reads connections, repo policies or any credential (decided 2026-10-06; `ROLES.md`).
-- `DISPATCH_CLOSED` and `AGENT_NOT_PERMITTED` join the error union when module 6 builds this.
+- `DISPATCH_CLOSED` (401) and `AGENT_NOT_PERMITTED` (403) are in the error union `[built]` 2026-10-13. Nothing emits them until the caller middleware is built.
+- **An operator halt is its own reason.** `halt_reason = 'operator'` records a manual stop, so it is never mistaken for a ceiling. The runner still files the report, as for every halt (decided by the operator 2026-10-13).
 
 Where the token is held is a sandbox boundary: see `SANDBOX.md`.
 
@@ -643,7 +644,7 @@ id · roster_entry_id     FK -> RosterEntry
 dispatch_id              FK -> Dispatch, unique — [specced] 2026-10-06; one report closes one dispatch
 mission_id
 status                   'complete' | 'blocked' | 'failed' | 'halted'
-halt_reason?             'token_hard_ceiling' | 'spend_ceiling' | 'wall_clock' — when halted
+halt_reason?             'token_hard_ceiling' | 'spend_ceiling' | 'wall_clock' | 'operator' — when halted
 soft_ceiling_crossed     boolean — the dispatch passed its soft ceiling
 actual_tokens            integer, REQUIRED to close
 agent_version_sha256     SHA-256 of identity.md + depth.md at dispatch — the hash only

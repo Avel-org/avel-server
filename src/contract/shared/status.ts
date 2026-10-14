@@ -45,3 +45,51 @@ export const INTAKE_STATUSES = [
 export const intakeStatus = z.enum(INTAKE_STATUSES);
 
 export type IntakeStatus = z.infer<typeof intakeStatus>;
+
+/** Module 6. The pgEnum dispatch_status is built from this array. */
+export const DISPATCH_STATUSES = [
+	"queued",
+	"running",
+	"complete",
+	"blocked",
+	"failed",
+	"halted",
+] as const;
+
+export const dispatchStatus = z.enum(DISPATCH_STATUSES);
+
+export type DispatchStatus = z.infer<typeof dispatchStatus>;
+
+/** How a dispatch ended: the statuses a CompletionReport can record. */
+export const COMPLETION_STATUSES = [
+	"complete",
+	"blocked",
+	"failed",
+	"halted",
+] as const;
+
+export const completionStatus = z.enum(COMPLETION_STATUSES);
+
+export type CompletionStatus = z.infer<typeof completionStatus>;
+
+/**
+ * Why a dispatch halted. The runner sets the first three at a ceiling;
+ * operator is a manual stop (decided 2026-10-13).
+ */
+export const HALT_REASONS = [
+	"token_hard_ceiling",
+	"spend_ceiling",
+	"wall_clock",
+	"operator",
+] as const;
+
+export const haltReason = z.enum(HALT_REASONS);
+
+export type HaltReason = z.infer<typeof haltReason>;
+
+/** Whether a report's agent version was hashed at the run or rebuilt from git history. */
+export const VERSION_SOURCES = ["recorded", "reconstructed"] as const;
+
+export const versionSource = z.enum(VERSION_SOURCES);
+
+export type VersionSource = z.infer<typeof versionSource>;

@@ -23,6 +23,7 @@ export * from "./activity";
 export * from "./agent-template";
 export * from "./client";
 export * from "./connection";
+export * from "./dispatch";
 export * from "./engagement";
 export * from "./intake";
 export * from "./mission";

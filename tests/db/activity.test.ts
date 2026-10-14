@@ -96,7 +96,10 @@ describe.skipIf(!process.env.DATABASE_URL)("activity_log", () => {
 				.select()
 				.from(activityLog)
 				.where(eq(activityLog.requestId, "req-mission-export"));
-			expect(rows.map((r) => r.action)).toEqual(entries.map(([a]) => a));
+			// No order by: the rows come back in whatever order the plan reads them.
+			expect(rows.map((r) => r.action).sort()).toEqual(
+				entries.map(([a]) => a).sort(),
+			);
 		});
 	});
 

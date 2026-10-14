@@ -17,7 +17,12 @@ import {
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import type { IdentityInputs } from "../../contract/agent-template";
 import { DELIVERABLES } from "../../contract/playbook";
-import { MISSION_STATUSES } from "../../contract/shared/status";
+import {
+	COMPLETION_STATUSES,
+	HALT_REASONS,
+	MISSION_STATUSES,
+	VERSION_SOURCES,
+} from "../../contract/shared/status";
 import { client, engagement } from "./agency";
 import { user } from "./auth";
 import { id, softDelete, timestamps } from "./columns";
@@ -31,21 +36,13 @@ export const cutSource = pgEnum("cut_source", ["derived", "overridden"]);
 // Built from the contract array, so the database and avel-web cannot drift.
 export const deliverable = pgEnum("deliverable", DELIVERABLES);
 export const grain = pgEnum("grain", ["merged", "default", "split"]);
-export const completionStatus = pgEnum("completion_status", [
-	"complete",
-	"blocked",
-	"failed",
-	"halted",
-]);
-export const haltReason = pgEnum("halt_reason", [
-	"token_hard_ceiling",
-	"spend_ceiling",
-	"wall_clock",
-]);
-export const versionSource = pgEnum("version_source", [
-	"recorded",
-	"reconstructed",
-]);
+// Built from the contract arrays, so the database and avel-web cannot drift.
+export const completionStatus = pgEnum(
+	"completion_status",
+	COMPLETION_STATUSES,
+);
+export const haltReason = pgEnum("halt_reason", HALT_REASONS);
+export const versionSource = pgEnum("version_source", VERSION_SOURCES);
 export const findingSeverity = pgEnum("finding_severity", [
 	"critical",
 	"high",

@@ -21,6 +21,10 @@ export const actorKind = pgEnum("actor_kind", ["operator", "system", "agent"]);
  * Closed vocabulary. An action enters this list in the same change as the
  * mutation that writes it, so it holds only what built modules write.
  * The prefix is a domain, not the entity_type.
+ *
+ * Exception, 2026-10-13: the dispatch and completion_report values arrive
+ * with module 6's contract step, before the routes that write them, so the
+ * frontend's exhaustive maps get their copy in one pass.
  */
 export const activityAction = pgEnum("activity_action", [
 	"client.created",
@@ -63,6 +67,12 @@ export const activityAction = pgEnum("activity_action", [
 	"playbook.updated",
 	"agent_template.updated",
 	"agent_template.identity_regenerated",
+	"dispatch.created",
+	"dispatch.started",
+	"dispatch.soft_ceiling_crossed",
+	"dispatch.halted",
+	"dispatch.closed",
+	"completion_report.filed",
 ]);
 
 export const activityEntityType = pgEnum("activity_entity_type", [
@@ -79,6 +89,8 @@ export const activityEntityType = pgEnum("activity_entity_type", [
 	"roster_preset",
 	"playbook",
 	"agent_template",
+	"dispatch",
+	"completion_report",
 ]);
 
 /**

@@ -176,6 +176,13 @@
       "when": 1791924658875,
       "tag": "0024_identity_token_cap_1200",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1791938536862,
+      "tag": "0025_dispatch_vocabulary",
+      "breakpoints": true
     }
   ]
 }

@@ -91,6 +91,23 @@ describe("the error envelope is a discriminated union on code", () => {
 			"identity_role_unsupported",
 			"agent_roles_cross_sides",
 			"agent_role_not_assignable",
+			"mission_not_draft",
+			"mission_not_active",
+			"plan_check_failed",
+			"coherence_blocked",
+			"estimate_missing",
+			"spend_ceiling_missing",
+			"spend_ceiling_reached",
+			"roster_entry_not_found",
+			"roster_entry_inactive",
+			"agent_identity_missing",
+			"dispatch_not_queued",
+			"dispatch_not_running",
+			"model_price_unknown",
+			"harness_unavailable",
+			"room_unavailable",
+			"report_dispatch_mismatch",
+			"writes_outside_mount",
 		]);
 	});
 

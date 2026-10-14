@@ -109,6 +109,8 @@ describe("statusFor", () => {
 		expect(statusFor.EXTERNAL_GITHUB).toBe(502);
 		expect(statusFor.TREE_TOO_LARGE).toBe(502);
 		expect(statusFor.GITHUB_REJECTED).toBe(502);
+		expect(statusFor.DISPATCH_CLOSED).toBe(401);
+		expect(statusFor.AGENT_NOT_PERMITTED).toBe(403);
 	});
 });
 

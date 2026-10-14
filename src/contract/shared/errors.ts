@@ -41,6 +41,12 @@ export const errorCode = z.enum([
 	// Decided by the operator: GitHub refused the request. Unlike
 	// EXTERNAL_GITHUB, retrying the same request will not help.
 	"GITHUB_REJECTED",
+
+	// DATA-CONTRACTS-V2.md, Dispatch: agent access (module 6). The bearer
+	// token's dispatch is not running, or no dispatch has that token.
+	"DISPATCH_CLOSED",
+	// The agent's families do not allow this route's verb.
+	"AGENT_NOT_PERMITTED",
 ]);
 
 export type ErrorCode = z.infer<typeof errorCode>;
@@ -95,6 +101,26 @@ export const PRECONDITION_REASONS = [
 	"identity_role_unsupported",
 	"agent_roles_cross_sides",
 	"agent_role_not_assignable",
+	// Module 6: starting and halting missions.
+	"mission_not_draft",
+	"mission_not_active",
+	"plan_check_failed",
+	"coherence_blocked",
+	"estimate_missing",
+	"spend_ceiling_missing",
+	"spend_ceiling_reached",
+	// Module 6: dispatches.
+	"roster_entry_not_found",
+	"roster_entry_inactive",
+	"agent_identity_missing",
+	"dispatch_not_queued",
+	"dispatch_not_running",
+	"model_price_unknown",
+	"harness_unavailable",
+	"room_unavailable",
+	// Module 8: completion reports.
+	"report_dispatch_mismatch",
+	"writes_outside_mount",
 ] as const;
 
 export const preconditionReason = z.enum(PRECONDITION_REASONS);
@@ -111,6 +137,14 @@ export const preconditionDetails = z
 		engagementId: z.string().uuid().optional(),
 		/** The connection the precondition was about, where there is one. */
 		connectionId: z.string().uuid().optional(),
+		/** The mission the precondition was about, where there is one. */
+		missionId: z.string().uuid().optional(),
+		/** The dispatch the precondition was about, where there is one. */
+		dispatchId: z.string().uuid().optional(),
+		/** roster_entry_not_found, roster_entry_inactive, agent_identity_missing, estimate_missing: the entries at fault, in roster order. */
+		rosterEntryIds: z.array(z.string().uuid()).optional(),
+		/** model_price_unknown: the model with no price. */
+		model: z.string().optional(),
 		/** agent_roles_cross_sides: the sides the roles span, in SIDES order. */
 		sides: z.array(z.enum(SIDES)).optional(),
 		/** identity_over_token_cap: the generated file that went over. */
@@ -119,7 +153,7 @@ export const preconditionDetails = z
 		tokens: z.number().int().nonnegative().optional(),
 		/** identity_over_token_cap: the cap it went over. */
 		cap: z.number().int().positive().optional(),
-		/** What a mechanical check found (intake_check_failed, access_override_invalid, agent_role_not_assignable) or what a plan changed (plan_changes_approved_brief), in a stable order. */
+		/** What a mechanical check found (intake_check_failed, access_override_invalid, agent_role_not_assignable, plan_check_failed, coherence_blocked, writes_outside_mount) or what a plan changed (plan_changes_approved_brief), in a stable order. */
 		issues: z
 			.array(
 				z
