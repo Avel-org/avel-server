@@ -38,6 +38,7 @@ import { connectionRoutes } from "./routes/connections";
 import { engagementRoutes } from "./routes/engagements";
 import { health } from "./routes/health";
 import { intakeRoutes } from "./routes/intake";
+import { missionLifecycleRoutes } from "./routes/mission-lifecycle";
 import { missionPlanRoutes } from "./routes/mission-plan";
 import { missionRoutes } from "./routes/missions";
 import { playbookRoutes } from "./routes/playbooks";
@@ -82,6 +83,7 @@ export function createApp(deps: AppDeps) {
 		engagements: engagementRoutes(routeDeps),
 		missions: missionRoutes(routeDeps),
 		missionPlans: missionPlanRoutes(routeDeps),
+		missionLifecycle: missionLifecycleRoutes(routeDeps),
 		activity: activityRoutes(routeDeps),
 		intakes: intakeRoutes({ ...routeDeps, repos: deps.repos }),
 		connections: connectionRoutes(routeDeps),

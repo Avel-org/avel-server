@@ -145,6 +145,13 @@ export const preconditionDetails = z
 		rosterEntryIds: z.array(z.string().uuid()).optional(),
 		/** model_price_unknown: the model with no price. */
 		model: z.string().optional(),
+		/**
+		 * coherence_blocked: the earliest wave the playbook declares, which no
+		 * active agent is in; null when it declares none. Written out rather
+		 * than imported, to keep this module free of cycles; a test pins it
+		 * to WAVES.
+		 */
+		wave: z.enum(["A", "B", "C", "D", "E"]).nullable().optional(),
 		/** agent_roles_cross_sides: the sides the roles span, in SIDES order. */
 		sides: z.array(z.enum(SIDES)).optional(),
 		/** identity_over_token_cap: the generated file that went over. */

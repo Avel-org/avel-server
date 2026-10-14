@@ -10,6 +10,7 @@ import { connectionContract } from "./connection";
 import { engagementContract } from "./engagement";
 import { intakeContract } from "./intake";
 import { missionContract } from "./mission";
+import { missionLifecycleContract } from "./mission-lifecycle";
 import { missionPlanContract } from "./mission-plan";
 import { playbookContract } from "./playbook";
 import { presetContract } from "./preset";
@@ -27,6 +28,7 @@ export * from "./dispatch";
 export * from "./engagement";
 export * from "./intake";
 export * from "./mission";
+export * from "./mission-lifecycle";
 export * from "./mission-plan";
 export * from "./playbook";
 export * from "./preset";
@@ -76,6 +78,7 @@ export const contract = c.router(
 		engagements: engagementContract,
 		missions: missionContract,
 		missionPlans: missionPlanContract,
+		missionLifecycle: missionLifecycleContract,
 		activity: activityContract,
 		intakes: intakeContract,
 		connections: connectionContract,

@@ -76,6 +76,7 @@ src/contract/
 | `playbooks` | list · getForType (`GET /api/playbooks/by-type/:missionType`, the live row, else 404) · create (`POST`, 201; a live mission type is 409) · update (`PUT …/by-type/:missionType`, a full replace, `version` + 1, mission type immutable) · versions (`GET …/by-type/:missionType/versions`, newest first, from the ActivityLog snapshots; `[current]` when none are logged) (module 3). Writes check: gates from the closed vocabulary, each once; waves non-empty, unique, in `WAVES` order; a live default preset (422 `preset_not_found`) that staffs the earliest wave (422 `preset_misses_first_wave`). Update is refused while a live mission of that type is `active` or `halted` (422 `playbook_in_use`) | `q` (name) · cursor · `meta.total` |
 | `templates` | list · get (`/api/templates/:slug`; a slug outside the allowlist is 404), read-only, and the cover image at `/api/templates/:slug/cover`, outside the contract. See *Templates* | — |
 | `missionPlans` | get · update (`GET`/`PUT /api/missions/:id/plan`, module 3). The response carries the brief (null when the stored one predates the brief shape), `approvedBrief` (the approving Intake's brief, which the plan may not change; null when no Intake created the mission), `templateRef`, `templateVersion`, and `check: { passed, issues }` from `checkPlan`. Update replaces the plan on a `draft` mission (422 `mission_not_editable`), saves whether or not the check passes, refuses any change to the approved brief (422 `plan_changes_approved_brief`, with `issues`), and refuses a `templateRef` other than the mission's `type` (422 `template_type_mismatch`) | — |
+| `missionLifecycle` | readiness · start · halt (module 6, `[built]` 2026-10-13). `GET /api/missions/:id/readiness` → `{ missionId, ready, blockers[] }`. `POST /api/missions/:id/start` moves `draft` → `active` and refuses (422) with the first blocker; `POST /api/missions/:id/halt` moves `active` → `halted` (422 `mission_not_active`). Both log `mission.status_changed` `{ from, to }`. See *Mission*, *Starting a mission* | — |
 | `intakes.readRepo` | `POST /api/intakes/:id/read-repo` (module 2): pins the commit, reads the tarball, writes the derived fields and the repo columns. Never changes status | — |
 
 Every list uses keyset cursors, and a cursor from a different sort is 400. Search escapes `\ % _` through one helper, `containsPattern()` in `src/routes/shared.ts`.
@@ -521,6 +522,19 @@ deleted_at · timestamps
 **`engagement_id` follows `origin`.** Decided 2026-10-05: a client mission belongs to an engagement; an internal mission belongs to none. A CHECK requires `engagement_id` when `origin = 'client'` and requires it to be null when `origin = 'internal'`. Migration `0009` carries it. A second CHECK requires a non-blank `cut_rationale` when `cut_source = 'overridden'`.
 
 **`halted` is the state the runner puts a mission in when its attributed spend reaches `spend_ceiling_usd`** (`SANDBOX.md`, and *CompletionReport* below). The status values are exported from the contract as `MISSION_STATUSES` in `src/contract/shared/status.ts`, and the database pgEnum is built from that list. Decided 2026-10-05.
+
+**Starting a mission** `[built]` 2026-10-13. Nothing moves a mission out of `draft` except `start`, and start runs the same checks readiness lists, in this order. Start refuses with the first one; readiness returns them all. Each blocker carries the fields a refused start would put in its details, and its issue paths are contract: clients build their own sentences from the reason, the paths and the ids, never from the message.
+
+| Reason | Fires when | Carries |
+|---|---|---|
+| `mission_not_draft` | the mission is not a draft | — |
+| `engagement_closed` | a client mission's engagement is closed | `engagementId` |
+| `plan_check_failed` | `checkPlan` finds issues | `issues`, exactly `checkPlan`'s, paths from `brief` |
+| `coherence_blocked` | `computeCoherence` blocks, or no live playbook matches `type` | `wave` (wave or null) and one issue at `["coherence","block"]`; or one issue at `["playbook"]` and no `wave` |
+| `estimate_missing` | an active, live entry has no `estimated_tokens` | `rosterEntryIds` in roster order, one issue per entry at `["roster", entryId, "estimatedTokens"]` |
+| `spend_ceiling_missing` | `spend_ceiling_usd` is null | — |
+
+Start locks the mission row, as roster writes do, so the roster cannot change between the check and the status change. Halting a mission does not yet stop its dispatches; that arrives with the runner (module 6, step 6), and no dispatch can exist before then.
 
 **`origin` separates benchmark from production.** Template builds run by AVEL's own roster are `internal`: the operator wrote the spec and nothing drifts, so they will look better than client work. **Never aggregate internal and client missions.** Internal answers whether a change helped; client answers what delivery costs.
 
