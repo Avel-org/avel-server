@@ -159,6 +159,8 @@ export const missionDetail = missionListItem.extend({
 	/** Deferred: an open record until the operator approves a brief shape. */
 	brief: z.record(z.unknown()),
 	spendCeilingUsd: z.number().nullable(),
+	/** Every dispatch's spendUsd on this mission, summed. 0 before the first dispatch. */
+	spentUsd: z.number().nonnegative(),
 	cutRationale: z.string().nullable(),
 	repoUrl: z.string(),
 	/** Live roster entries, and how many of them are active. */

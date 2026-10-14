@@ -36,6 +36,7 @@ import {
 } from "./routes/agent-templates";
 import { clientRoutes } from "./routes/clients";
 import { connectionRoutes } from "./routes/connections";
+import { dispatchRoutes } from "./routes/dispatches";
 import { engagementRoutes } from "./routes/engagements";
 import { health } from "./routes/health";
 import { intakeRoutes } from "./routes/intake";
@@ -89,6 +90,7 @@ export function createApp(deps: AppDeps) {
 		missions: missionRoutes(routeDeps),
 		missionPlans: missionPlanRoutes(routeDeps),
 		missionLifecycle: missionLifecycleRoutes(routeDeps),
+		dispatches: dispatchRoutes(routeDeps),
 		activity: activityRoutes(routeDeps),
 		intakes: intakeRoutes({ ...routeDeps, repos: deps.repos }),
 		connections: connectionRoutes(routeDeps),

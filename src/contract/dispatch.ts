@@ -1,4 +1,8 @@
+import { initContract } from "@ts-rest/core";
 import { z } from "zod";
+import { successEnvelope } from "./shared/envelope";
+import { idempotencyHeaders } from "./shared/idempotency";
+import { pageEnvelope, pageQuery } from "./shared/pagination";
 import {
 	completionStatus,
 	dispatchStatus,
@@ -7,9 +11,11 @@ import {
 } from "./shared/status";
 
 /**
- * Module 6 wire shapes (DATA-CONTRACTS-V2, Dispatch and CompletionReport).
- * The routes that answer with them arrive in later steps of the unit.
+ * Module 6 wire shapes and the operator's dispatch routes
+ * (DATA-CONTRACTS-V2, Dispatch and CompletionReport).
  */
+
+const c = initContract();
 
 const iso = z.string().datetime();
 const uuid = z.string().uuid();
@@ -134,3 +140,82 @@ export const completionReport = z.object({
 });
 
 export type CompletionReport = z.infer<typeof completionReport>;
+
+/** Default wall clock per dispatch, in minutes (decided 2026-10-13, [hypothesis]). */
+export const DEFAULT_WALL_CLOCK_MINUTES = 60;
+export const MAX_WALL_CLOCK_MINUTES = 480;
+
+/**
+ * Creates a queued dispatch. Omitted estimate and ceilings come from the
+ * roster entry; omitted ceilings default to 1.5× and 3× the estimate.
+ * briefRef names a module of the mission's plan, and requirements that
+ * module lists.
+ */
+export const createDispatchBody = z
+	.object({
+		rosterEntryId: uuid,
+		briefRef,
+		estimatedTokens: z.number().int().positive().optional(),
+		tokenSoftCeiling: z.number().int().positive().optional(),
+		tokenHardCeiling: z.number().int().positive().optional(),
+		wallClockMinutes: z
+			.number()
+			.int()
+			.positive()
+			.max(MAX_WALL_CLOCK_MINUTES)
+			.optional(),
+	})
+	.strict();
+
+export type CreateDispatchBody = z.infer<typeof createDispatchBody>;
+
+export const dispatchListQuery = pageQuery.extend({
+	status: dispatchStatus.optional(),
+	rosterEntryId: uuid.optional(),
+});
+
+const byId = z.object({ id: uuid });
+
+export const dispatchContract = c.router({
+	list: {
+		method: "GET",
+		path: "/api/missions/:id/dispatches",
+		pathParams: byId,
+		query: dispatchListQuery,
+		responses: { 200: pageEnvelope(dispatch) },
+		summary: "A mission's dispatches, newest first",
+	},
+	get: {
+		method: "GET",
+		path: "/api/dispatches/:id",
+		pathParams: byId,
+		responses: { 200: successEnvelope(dispatch) },
+	},
+	create: {
+		method: "POST",
+		path: "/api/missions/:id/dispatches",
+		pathParams: byId,
+		headers: idempotencyHeaders,
+		body: createDispatchBody,
+		/** 201 created; 200 with Idempotency-Replayed: true for a replay. */
+		responses: {
+			201: successEnvelope(dispatch),
+			200: successEnvelope(dispatch),
+		},
+		summary: "Queue a dispatch of one active roster entry",
+	},
+	reports: {
+		method: "GET",
+		path: "/api/missions/:id/completion-reports",
+		pathParams: byId,
+		query: pageQuery,
+		responses: { 200: pageEnvelope(completionReport) },
+		summary: "A mission's completion reports, newest first",
+	},
+	report: {
+		method: "GET",
+		path: "/api/completion-reports/:id",
+		pathParams: byId,
+		responses: { 200: successEnvelope(completionReport) },
+	},
+});

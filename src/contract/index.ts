@@ -8,6 +8,7 @@ import {
 } from "./agent-template";
 import { clientContract } from "./client";
 import { connectionContract } from "./connection";
+import { dispatchContract } from "./dispatch";
 import { engagementContract } from "./engagement";
 import { intakeContract } from "./intake";
 import { missionContract } from "./mission";
@@ -81,6 +82,7 @@ export const contract = c.router(
 		missions: missionContract,
 		missionPlans: missionPlanContract,
 		missionLifecycle: missionLifecycleContract,
+		dispatches: dispatchContract,
 		activity: activityContract,
 		intakes: intakeContract,
 		connections: connectionContract,

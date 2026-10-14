@@ -1,7 +1,9 @@
+import { createHash } from "node:crypto";
 import type { Brief } from "../../contract/intake";
 import { fixedClock } from "../../lib/clock";
 import { generateIdentity, type IdentitySkill } from "../../lib/identity";
 import type { IdGenerator } from "../../lib/ids";
+import { PRICE_VERSION } from "../../lib/prices";
 import { skillContentSha256 } from "../../lib/skill-hash";
 import { DEV_BOOKING_SHA } from "../../lib/templates";
 import type {
@@ -9,7 +11,9 @@ import type {
 	agentIdentityVersion,
 	agentTemplate,
 	client,
+	completionReport,
 	connection,
+	dispatch,
 	engagement,
 	exportTable,
 	mission,
@@ -83,6 +87,8 @@ export interface SeedRows {
 	skillSource: Row<typeof skillSource>[];
 	skill: Row<typeof skill>[];
 	roleSkills: Row<typeof roleSkills>[];
+	dispatch: Row<typeof dispatch>[];
+	completionReport: Row<typeof completionReport>[];
 }
 
 type AgentSpec = {
@@ -327,6 +333,8 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 		skillSource: [],
 		skill: [],
 		roleSkills: [],
+		dispatch: [],
+		completionReport: [],
 	};
 
 	const log = (
@@ -336,11 +344,14 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 		entityId: string,
 		payload: Record<string, unknown>,
 		scope: { missionId?: string | null; engagementId?: string | null } = {},
+		/** An agent's own write, logged as that agent; otherwise system. */
+		agentEntryId?: string,
 	) => {
 		rows.activityLog.push({
 			id: ids.next(),
 			at: when,
-			actorKind: "system",
+			actorKind: agentEntryId === undefined ? "system" : "agent",
+			actorRosterEntryId: agentEntryId ?? null,
 			action,
 			entityType,
 			entityId,
@@ -1321,6 +1332,506 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 			version: 2,
 		});
 	}
+
+	// Added last, so every earlier seed id stays where it was. Module 6's
+	// preview: one active client mission with a dispatch in every state, and
+	// one halted by its spend ceiling. Dispatches are created by the operator
+	// in the product; the seed invents no users, so those rows are system,
+	// like every other seeded operator act. Agent-filed reports log as the
+	// agent; runner-filed ones, and every runner act, log as system.
+	const fakeSha = (label: string) =>
+		createHash("sha256").update(`seed:${label}`, "utf8").digest("hex");
+	const currentVersion = (slug: AgentSlug) => {
+		const versions = rows.agentIdentityVersion.filter(
+			(v) => v.agentTemplateId === tid(slug),
+		);
+		const latest = versions.reduce<(typeof versions)[number] | undefined>(
+			(a, v) => (a === undefined || v.number > a.number ? v : a),
+			undefined,
+		);
+		if (latest === undefined) throw new Error(`seed: no identity for ${slug}`);
+		return latest;
+	};
+	// No helper hashes a dispatch's skill set yet (step 6 freezes it at
+	// start), and these missions attach no skills, so every started dispatch
+	// carries this one fixed hex.
+	const SEED_SKILLS_SHA256 = fakeSha("skills:none");
+
+	const billing2 = addMission({
+		engagementId: billing,
+		repo: "halvorsen-pike/billing",
+		sprint: 2,
+		summary: "Payment plans.",
+		created: 28,
+		path: [["active", 29]],
+		spendCeilingUsd: "40.00",
+		brief: {
+			summary: "Payment plans.",
+			requirements: [
+				{ id: "R1", text: "A customer can split an invoice into instalments" },
+				{ id: "R2", text: "Each instalment has its own due date" },
+				{
+					id: "R3",
+					text: "A customer is reminded before an instalment is due",
+				},
+			],
+			acceptanceCriteria: [
+				{
+					id: "AC1",
+					requirementId: "R1",
+					text: "A plan's instalments sum to the invoice",
+				},
+				{
+					id: "AC2",
+					requirementId: "R2",
+					text: "Every instalment shows its due date",
+				},
+				{
+					id: "AC3",
+					requirementId: "R3",
+					text: "A reminder goes out three days before",
+				},
+			],
+			modules: [
+				{ id: "M1", name: "Plans", requirementIds: ["R1", "R2"] },
+				{ id: "M2", name: "Reminders", requirementIds: ["R3"] },
+			],
+		},
+	});
+	const booking3 = addMission({
+		engagementId: booking,
+		repo: "brightwater-clinics/booking",
+		sprint: 3,
+		summary: "Waitlist.",
+		created: 28,
+		path: [
+			["active", 29],
+			["halted", 30],
+		],
+		spendCeilingUsd: "15.00",
+		brief: {
+			summary: "Waitlist.",
+			requirements: [
+				{ id: "R1", text: "A patient can join the waitlist for a full day" },
+			],
+			acceptanceCriteria: [
+				{
+					id: "AC1",
+					requirementId: "R1",
+					text: "A freed slot is offered to the first patient waiting",
+				},
+			],
+			modules: [{ id: "M1", name: "Waitlist", requirementIds: ["R1"] }],
+		},
+	});
+
+	// Start runs readiness, which needs an estimate on every active entry it
+	// could dispatch (DATA-CONTRACTS-V2, Mission, estimate_missing). The
+	// operator's foundations entry is skipped, since a person is never
+	// dispatched; its figure here is a planning number only.
+	const entryIds = (missionId: string) =>
+		rows.rosterEntry.filter((e) => e.missionId === missionId);
+	addEntries(billing2, 28, [
+		[operator, ["A"], true, 10_000],
+		[tid("fenn"), ["A"], true, 30_000],
+		[tid("fantem"), ["A"], true, 40_000],
+		[atlas, ["B"], true, 120_000, "plans"],
+		[atlas, ["B"], true, 90_000, "reminders"],
+		[atlas, ["B"], true, 80_000, "statements"],
+		[tid("iyo"), ["C"], true, 60_000],
+		[nemi, ["C"], true, 60_000],
+		[zane, ["D"], true, 40_000],
+	]);
+	addEntries(booking3, 28, [
+		[operator, ["A"], true, 10_000],
+		[tid("fenn"), ["A"], true, 30_000],
+		[atlas, ["B"], true, 100_000, "waitlist"],
+	]);
+	const entryFor = (missionId: string, slug: AgentSlug, territory?: string) => {
+		const e = entryIds(missionId).find(
+			(r) =>
+				r.agentTemplateId === tid(slug) &&
+				(territory === undefined || r.territory === territory),
+		);
+		if (e === undefined) throw new Error(`seed: no entry ${slug} ${territory}`);
+		return e;
+	};
+
+	type Split = [number, number, number, number];
+	type ReportSpec = {
+		filedBy: "agent" | "system";
+		read?: { path: string; sha256: string }[];
+		written?: { path: string; sha256: string }[];
+		filesTouched?: number;
+		fileTypesTouched?: string[];
+		rereads?: number;
+		blockers?: Row<typeof completionReport>["blockers"];
+		edgeMismatches?: Row<typeof completionReport>["edgeMismatches"];
+	};
+	const addDispatch = (d: {
+		missionId: string;
+		engagementId: string;
+		slug: AgentSlug;
+		territory?: string;
+		briefRef: { moduleId: string; requirementIds: string[] } | null;
+		status: Row<typeof dispatch>["status"];
+		haltReason?: Row<typeof dispatch>["haltReason"];
+		/** [tokens_in, tokens_out, cache_read, cache_write]. */
+		split?: Split;
+		/**
+		 * Seed only: fake-harness prices every token at 0, so these are set
+		 * directly to plausible numbers. Real spend comes from the runner.
+		 */
+		spendUsd?: string;
+		wallClockMinutes: number;
+		day: number;
+		created: number;
+		started?: number;
+		softCrossedAt?: number;
+		ended?: number;
+		report?: ReportSpec;
+	}) => {
+		const entry = entryFor(d.missionId, d.slug, d.territory);
+		const estimate = entry.estimatedTokens ?? 0;
+		const soft = entry.tokenSoftCeiling ?? 0;
+		const hard = entry.tokenHardCeiling ?? 0;
+		const [tin, tout, cr, cw] = d.split ?? [0, 0, 0, 0];
+		const used = tin + tout + cr + cw;
+		const started = d.started !== undefined;
+		const version = started ? currentVersion(d.slug) : undefined;
+		const id = ids.next();
+		const lastAt = at(
+			d.day,
+			d.ended ?? d.softCrossedAt ?? d.started ?? d.created,
+		);
+		const row: Row<typeof dispatch> = {
+			id,
+			rosterEntryId: entry.id,
+			missionId: d.missionId,
+			briefRef: d.briefRef,
+			status: d.status,
+			haltReason: d.haltReason ?? null,
+			estimatedTokens: estimate,
+			tokenSoftCeiling: soft,
+			tokenHardCeiling: hard,
+			tokensUsed: used,
+			tokensIn: tin,
+			tokensOut: tout,
+			cacheReadTokens: cr,
+			cacheWriteTokens: cw,
+			softCeilingCrossed: d.softCrossedAt !== undefined,
+			spendUsd: d.spendUsd ?? "0",
+			wallClockMinutes: d.wallClockMinutes,
+			agentIdentityVersionId: version?.id ?? null,
+			agentVersionSha256: version?.sha256 ?? null,
+			skillsSha256: started ? SEED_SKILLS_SHA256 : null,
+			model: started ? "fake-harness" : null,
+			priceVersion: started ? PRICE_VERSION : null,
+			// Only a running dispatch has a live token. A fixed hex, never a
+			// hash of any real token.
+			tokenSha256: d.status === "running" ? fakeSha(`token:${id}`) : null,
+			idempotencyKey: `seed-${id}`,
+			requestSha256: fakeSha(`request:${id}`),
+			startedAt: started ? at(d.day, d.started) : null,
+			closedAt: d.ended === undefined ? null : at(d.day, d.ended),
+			createdAt: at(d.day, d.created),
+			updatedAt: lastAt,
+		};
+		rows.dispatch.push(row);
+
+		const scope = { missionId: d.missionId, engagementId: d.engagementId };
+		log(
+			at(d.day, d.created),
+			"dispatch.created",
+			"dispatch",
+			id,
+			{ rosterEntryId: entry.id, estimatedTokens: estimate },
+			scope,
+		);
+		if (d.started !== undefined) {
+			log(
+				at(d.day, d.started),
+				"dispatch.started",
+				"dispatch",
+				id,
+				{
+					agentVersionSha256: version?.sha256,
+					model: "fake-harness",
+					priceVersion: PRICE_VERSION,
+				},
+				scope,
+			);
+		}
+		if (d.softCrossedAt !== undefined) {
+			log(
+				at(d.day, d.softCrossedAt),
+				"dispatch.soft_ceiling_crossed",
+				"dispatch",
+				id,
+				{ tokenSoftCeiling: soft },
+				scope,
+			);
+		}
+		if (d.ended === undefined) return row;
+		const endAt = at(d.day, d.ended);
+		if (d.status === "halted") {
+			log(
+				endAt,
+				"dispatch.halted",
+				"dispatch",
+				id,
+				{ reason: d.haltReason },
+				scope,
+			);
+		}
+		const r = d.report;
+		if (r === undefined || version === undefined) {
+			throw new Error(`seed: a closed dispatch needs a report (${d.slug})`);
+		}
+		const reportId = ids.next();
+		rows.completionReport.push({
+			id: reportId,
+			rosterEntryId: entry.id,
+			missionId: d.missionId,
+			dispatchId: id,
+			status: d.status as Row<typeof completionReport>["status"],
+			haltReason: d.haltReason ?? null,
+			softCeilingCrossed: row.softCeilingCrossed,
+			actualTokens: used,
+			agentVersionSha256: version.sha256,
+			skillsSha256: SEED_SKILLS_SHA256,
+			versionSource: "recorded",
+			model: "fake-harness",
+			artifactsRead: r.read ?? [],
+			artifactsWritten: r.written ?? [],
+			filesTouched: r.filesTouched ?? 0,
+			fileTypesTouched: r.fileTypesTouched ?? [],
+			rereads: r.rereads ?? 0,
+			blockers: r.blockers ?? [],
+			edgeMismatches: r.edgeMismatches ?? [],
+			filedBy: r.filedBy,
+			deletedAt: null,
+			createdAt: endAt,
+			updatedAt: endAt,
+		});
+		const filer = r.filedBy === "agent" ? entry.id : undefined;
+		log(
+			endAt,
+			"completion_report.filed",
+			"completion_report",
+			reportId,
+			{ dispatchId: id, status: d.status, filedBy: r.filedBy },
+			scope,
+			filer,
+		);
+		log(
+			endAt,
+			"dispatch.closed",
+			"dispatch",
+			id,
+			{ status: d.status, reportId },
+			scope,
+			filer,
+		);
+		return row;
+	};
+
+	// Payment plans, about 90% of its $40 ceiling spent ($35.60). Wave A
+	// first, then B, then C; Zane's review waits in the queue.
+	const brief = fakeSha("artifact:plan/brief.json");
+	const plansFixture = fakeSha("artifact:fixtures/golden/payment-plans.json");
+	const billingScope = { missionId: billing2, engagementId: billing };
+	const fennRun = addDispatch({
+		...billingScope,
+		slug: "fenn",
+		briefRef: { moduleId: "M1", requirementIds: ["R1", "R2"] },
+		status: "complete",
+		split: [9_000, 4_400, 14_000, 1_000],
+		spendUsd: "2.10",
+		wallClockMinutes: 240,
+		day: 30,
+		created: 0,
+		started: 1,
+		ended: 3,
+		report: {
+			filedBy: "agent",
+			read: [{ path: "plan/brief.json", sha256: brief }],
+			written: [
+				{ path: "fixtures/golden/payment-plans.json", sha256: plansFixture },
+				{
+					path: "fixtures/golden/instalment-dates.json",
+					sha256: fakeSha("artifact:fixtures/golden/instalment-dates.json"),
+				},
+			],
+			filesTouched: 2,
+			fileTypesTouched: ["json"],
+			rereads: 1,
+		},
+	});
+	addDispatch({
+		...billingScope,
+		slug: "fantem",
+		briefRef: null,
+		status: "halted",
+		haltReason: "wall_clock",
+		split: [16_000, 6_300, 28_000, 2_000],
+		spendUsd: "3.40",
+		wallClockMinutes: 120,
+		day: 30,
+		created: 0,
+		started: 1,
+		ended: 3,
+		report: { filedBy: "system" },
+	});
+	addDispatch({
+		...billingScope,
+		slug: "atlas",
+		territory: "plans",
+		briefRef: { moduleId: "M1", requirementIds: ["R1", "R2"] },
+		status: "halted",
+		haltReason: "token_hard_ceiling",
+		split: [98_000, 41_200, 210_000, 12_000],
+		spendUsd: "9.80",
+		wallClockMinutes: 360,
+		day: 30,
+		created: 4,
+		started: 5,
+		softCrossedAt: 7,
+		ended: 9,
+		report: { filedBy: "system" },
+	});
+	addDispatch({
+		...billingScope,
+		slug: "atlas",
+		territory: "statements",
+		briefRef: { moduleId: "M1", requirementIds: ["R2"] },
+		status: "halted",
+		haltReason: "operator",
+		split: [10_000, 4_000, 16_000, 1_000],
+		spendUsd: "2.40",
+		wallClockMinutes: 240,
+		day: 30,
+		created: 4,
+		started: 5,
+		ended: 6,
+		report: { filedBy: "system" },
+	});
+	addDispatch({
+		...billingScope,
+		slug: "atlas",
+		territory: "reminders",
+		briefRef: { moduleId: "M2", requirementIds: ["R3"] },
+		status: "running",
+		split: [40_000, 17_500, 80_000, 4_000],
+		spendUsd: "8.20",
+		wallClockMinutes: 480,
+		day: 30,
+		created: 4,
+		started: 5,
+		softCrossedAt: 10,
+	});
+	// Iyo read the payment-plans fixture at a hash Fenn never wrote: the one
+	// edge mismatch, recorded on the consumer's report.
+	const plansAsRead = fakeSha(
+		"artifact:fixtures/golden/payment-plans.json@stale",
+	);
+	addDispatch({
+		...billingScope,
+		slug: "iyo",
+		briefRef: { moduleId: "M1", requirementIds: ["R1", "R2"] },
+		status: "blocked",
+		split: [15_000, 7_800, 24_000, 1_000],
+		spendUsd: "4.10",
+		wallClockMinutes: 240,
+		day: 31,
+		created: 0,
+		started: 1,
+		ended: 3,
+		report: {
+			filedBy: "agent",
+			read: [
+				{ path: "plan/brief.json", sha256: brief },
+				{ path: "fixtures/golden/payment-plans.json", sha256: plansAsRead },
+			],
+			written: [
+				{
+					path: "tests/backend/payment-plans.test.ts",
+					sha256: fakeSha("artifact:tests/backend/payment-plans.test.ts"),
+				},
+			],
+			filesTouched: 1,
+			fileTypesTouched: ["ts"],
+			rereads: 3,
+			blockers: [
+				{
+					description:
+						"No test database credentials were provided for the billing service.",
+					workaround: "Ran the tests against the local fixture database only.",
+					provisioning_gap: true,
+				},
+				{
+					description:
+						"The payment-plans fixture does not match the one the expected-results author wrote.",
+					workaround:
+						"Tested against the fixture as read and stopped for the operator.",
+					provisioning_gap: false,
+				},
+			],
+			edgeMismatches: [
+				{
+					path: "fixtures/golden/payment-plans.json",
+					read_sha256: plansAsRead,
+					written_sha256: plansFixture,
+					producer_dispatch_id: fennRun.id,
+				},
+			],
+		},
+	});
+	addDispatch({
+		...billingScope,
+		slug: "nemi",
+		briefRef: { moduleId: "M1", requirementIds: ["R1"] },
+		status: "failed",
+		split: [22_000, 9_000, 38_000, 2_000],
+		spendUsd: "5.60",
+		wallClockMinutes: 240,
+		day: 31,
+		created: 0,
+		started: 1,
+		ended: 2,
+		report: { filedBy: "system" },
+	});
+	addDispatch({
+		...billingScope,
+		slug: "zane",
+		briefRef: null,
+		status: "queued",
+		wallClockMinutes: 240,
+		day: 31,
+		created: 4,
+	});
+
+	// Waitlist: Atlas's run took the mission's spend to its $15 ceiling, so
+	// the runner halted the dispatch and the mission together (the mission's
+	// status_changed row above is system, at the same moment).
+	addDispatch({
+		missionId: booking3,
+		engagementId: booking,
+		slug: "atlas",
+		territory: "waitlist",
+		briefRef: { moduleId: "M1", requirementIds: ["R1"] },
+		status: "halted",
+		haltReason: "spend_ceiling",
+		split: [50_000, 22_000, 85_000, 5_000],
+		spendUsd: "15.00",
+		wallClockMinutes: 360,
+		day: 30,
+		created: 0,
+		started: 1,
+		softCrossedAt: 2,
+		ended: 3,
+		report: { filedBy: "system" },
+	});
 
 	return rows;
 }

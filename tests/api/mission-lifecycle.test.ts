@@ -281,6 +281,36 @@ describe.skipIf(!process.env.DATABASE_URL)("mission start and halt", () => {
 		});
 	});
 
+	it("asks no estimate of the operator's foundations entry, which is never dispatched", async () => {
+		await withApi(async ({ signIn, call, tx, ns }) => {
+			await signIn();
+			const s = await seed(tx, ns);
+			const operatorTemplate = s.id();
+			await tx.insert(agentTemplate).values({
+				id: operatorTemplate,
+				slug: `${ns}-operator`,
+				name: "Axis",
+				kind: "horizontal",
+				roles: ["foundations"],
+				waveDefaults: ["A"],
+				writablePaths: ["docs/**"],
+				version: 1,
+				...stamp(clock),
+			});
+			await tx.insert(rosterEntry).values({
+				id: s.id(),
+				missionId: s.missionId,
+				agentTemplateId: operatorTemplate,
+				active: true,
+				waves: ["A"],
+				grain: "default",
+				absorbedBoundaries: [],
+				...stamp(clock),
+			});
+			expect((await readiness(call, s.missionId)).ready).toBe(true);
+		});
+	});
+
 	it("blocks at the playbook when none matches the mission type", async () => {
 		await withApi(async ({ signIn, call, tx, ns }) => {
 			await signIn();

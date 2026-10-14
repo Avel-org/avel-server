@@ -20,6 +20,7 @@ import {
 	missionContract,
 	ok,
 } from "../contract";
+import { missionSpentUsd } from "../db/dispatch";
 import {
 	activityLog,
 	client,
@@ -461,7 +462,7 @@ export function missionRoutes(deps: RouteDeps) {
 				.groupBy(rosterEntry.missionId)
 				.as("roster");
 
-			// Query 1 of 2: the mission with every join.
+			// Query 1 of 3: the mission with every join.
 			const [row] = await db
 				.select({
 					...itemFields(b),
@@ -499,7 +500,7 @@ export function missionRoutes(deps: RouteDeps) {
 				);
 			if (!row) throw notFound("mission", params.id);
 
-			// Query 2 of 2: the ten newest activity rows, with operator logins.
+			// Query 2 of 3: the ten newest activity rows, with operator logins.
 			const activity = await db
 				.select({
 					action: activityLog.action,
@@ -515,12 +516,16 @@ export function missionRoutes(deps: RouteDeps) {
 				.orderBy(desc(activityLog.at), desc(activityLog.id))
 				.limit(10);
 
+			// Query 3 of 3: what the mission's dispatches have spent.
+			const spentUsd = await missionSpentUsd(db, params.id);
+
 			const item = toItem(row as ListRow);
 			const detail: MissionDetail = {
 				...item,
 				brief: (row.brief ?? {}) as Record<string, unknown>,
 				spendCeilingUsd:
 					row.spendCeilingUsd === null ? null : Number(row.spendCeilingUsd),
+				spentUsd,
 				cutRationale: row.cutRationale,
 				repoUrl: row.repoUrl,
 				roster: {

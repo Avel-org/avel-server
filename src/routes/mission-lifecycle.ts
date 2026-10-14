@@ -21,6 +21,7 @@ import {
 import { live, touch } from "../db/schema/columns";
 import { type Executor, type Tx, withTx } from "../db/tx";
 import { checkPlan } from "../lib/plan-check";
+import { identitySupported } from "../lib/roles";
 import { ApiError } from "../middleware/errors";
 import {
 	notFound,
@@ -162,8 +163,11 @@ async function blockersFor(
 		}
 	}
 
+	// Only entries that can be dispatched need an estimate: an agent whose
+	// every role is a model role. The operator's foundations entry is a
+	// person and is never dispatched.
 	const unestimated = entries.filter(
-		(e) => e.active && e.estimatedTokens === null,
+		(e) => e.active && e.estimatedTokens === null && identitySupported(e.roles),
 	);
 	if (unestimated.length > 0) {
 		blockers.push({

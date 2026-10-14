@@ -1,6 +1,16 @@
 import postgres from "postgres";
 import { afterAll, describe, expect, it } from "vitest";
+import {
+	completionReport as completionReportWire,
+	dispatch as dispatchWireSchema,
+} from "../../src/contract/dispatch";
 import { MISSION_STATUSES } from "../../src/contract/shared/status";
+import {
+	dispatchWire,
+	missionSpentUsd,
+	reportWire,
+} from "../../src/db/dispatch";
+import * as schema from "../../src/db/schema";
 import { assertDevDatabase, runSeed } from "../../src/db/seed";
 
 // The seed runs against throwaway databases whose names end in _dev, because
@@ -36,6 +46,8 @@ async function dump(dbUrl: string) {
 			"activity_log",
 			"skill_source",
 			"skill",
+			"dispatch",
+			"completion_report",
 		]) {
 			out[table] = await conn.unsafe(`select * from "${table}" order by id`);
 		}
@@ -78,7 +90,15 @@ describe.skipIf(!url)("pnpm db:seed", () => {
 
 			const run1 = await runSeed(dbUrl);
 			expect(run1.status).toBe("seeded");
-			expect(run1.counts.mission).toBeGreaterThanOrEqual(12);
+			// Module 6's preview added two missions, twelve roster entries, nine
+			// dispatches, seven reports and 43 activity rows.
+			expect(run1.counts).toMatchObject({
+				mission: 16,
+				roster_entry: 28,
+				dispatch: 9,
+				completion_report: 7,
+				activity_log: 116,
+			});
 			const before = await dump(dbUrl);
 
 			const run2 = await runSeed(dbUrl);
@@ -149,6 +169,41 @@ describe.skipIf(!url)("pnpm db:seed", () => {
 				for (const s of ["previewed", "pr-open", "done", "failed", "closed"]) {
 					expect(statuses).toContain(s);
 				}
+			} finally {
+				await conn.end();
+			}
+		},
+		BUDGET_MS,
+	);
+
+	it(
+		"renders every seeded dispatch and report exactly as the contract says",
+		async () => {
+			const { drizzle } = await import("drizzle-orm/postgres-js");
+			const conn = postgres(withDatabase(url ?? "", first), {
+				max: 1,
+				onnotice: () => {},
+			});
+			try {
+				const db = drizzle(conn, { schema });
+				const dispatches = await conn<{ id: string; mission_id: string }[]>`
+					select id, mission_id from dispatch order by id`;
+				expect(dispatches).toHaveLength(9);
+				for (const d of dispatches) {
+					const wire = await dispatchWire(db, d.id);
+					expect(dispatchWireSchema.strict().parse(wire)).toEqual(wire);
+				}
+				const reports = await conn<{ id: string }[]>`
+					select id from completion_report order by id`;
+				expect(reports).toHaveLength(7);
+				for (const r of reports) {
+					const wire = await reportWire(db, r.id);
+					expect(completionReportWire.strict().parse(wire)).toEqual(wire);
+				}
+				const [active] = await conn<{ id: string }[]>`
+					select id from mission
+					where repo_url = 'https://github.com/halvorsen-pike/billing' and sprint_n = 2`;
+				expect(await missionSpentUsd(db, active?.id ?? "")).toBe(35.6);
 			} finally {
 				await conn.end();
 			}
