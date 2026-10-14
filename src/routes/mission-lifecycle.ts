@@ -91,6 +91,7 @@ async function oneMission(
 async function blockersFor(
 	db: Executor | Tx,
 	m: MissionRow,
+	lock: boolean,
 ): Promise<ReadinessBlocker[]> {
 	const blockers: ReadinessBlocker[] = [];
 
@@ -126,13 +127,18 @@ async function blockersFor(
 		.where(and(eq(rosterEntry.missionId, m.id), live(rosterEntry)))
 		.orderBy(asc(rosterEntry.createdAt), asc(rosterEntry.id));
 
-	const [book] = await db
+	// Start locks the playbook FOR SHARE: a playbook update takes it FOR
+	// UPDATE before its playbook_in_use check, so one of the two waits for
+	// the other to commit. An update first means start reads the new
+	// playbook; a start first means the update sees the active mission.
+	const bookQuery = db
 		.select({
 			wavesApplicable: playbook.wavesApplicable,
 			gates: playbook.gates,
 		})
 		.from(playbook)
 		.where(and(eq(playbook.missionType, m.type), live(playbook)));
+	const [book] = await (lock ? bookQuery.for("share") : bookQuery);
 	if (!book) {
 		blockers.push({
 			reason: "coherence_blocked",
@@ -241,7 +247,7 @@ export function missionLifecycleRoutes(deps: RouteDeps & RunnerDeps) {
 			readiness: async ({ params }) => {
 				const db = deps.db();
 				const m = await oneMission(db, params.id, false);
-				const blockers = await blockersFor(db, m);
+				const blockers = await blockersFor(db, m, false);
 				return {
 					status: 200,
 					body: ok({ missionId: m.id, ready: blockers.length === 0, blockers }),
@@ -251,7 +257,7 @@ export function missionLifecycleRoutes(deps: RouteDeps & RunnerDeps) {
 			start: async ({ params }, ctx) =>
 				withTx(deps.db(), async (tx) => {
 					const m = await oneMission(tx, params.id, true);
-					const [first] = await blockersFor(tx, m);
+					const [first] = await blockersFor(tx, m, true);
 					if (first) {
 						throw new ApiError("PRECONDITION_FAILED", MESSAGES[first.reason], {
 							details: { ...first, missionId: m.id },
