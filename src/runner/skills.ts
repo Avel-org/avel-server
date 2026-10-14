@@ -39,10 +39,10 @@ export type AttachedSkill = HashedSkill & {
  * in, so skillsForAgent keeps no role-layer skill, even one attached to
  * the mission.
  */
-export function dispatchSkillSet(
+export function dispatchSkillSet<S extends AttachedSkill>(
 	roles: readonly Role[],
-	attached: readonly AttachedSkill[],
-): AttachedSkill[] {
+	attached: readonly S[],
+): S[] {
 	return skillsForAgent({
 		roles,
 		skills: attached.map((s) => ({
@@ -54,16 +54,24 @@ export function dispatchSkillSet(
 	});
 }
 
+/** A dispatch's skill with what the brief's Method section lists. */
+export type DispatchSkill = AttachedSkill & {
+	name: string;
+	description: string;
+};
+
 /** dispatchSkillSet over the mission's live attached skills. */
 export async function dispatchSkills(
 	db: Executor,
 	missionId: string,
 	roles: readonly Role[],
-): Promise<AttachedSkill[]> {
+): Promise<DispatchSkill[]> {
 	const attached = await db
 		.select({
 			id: skill.id,
 			slug: skill.slug,
+			name: skill.name,
+			description: skill.description,
 			layer: skill.layer,
 			status: skill.status,
 			recommendedFor: skill.recommendedFor,

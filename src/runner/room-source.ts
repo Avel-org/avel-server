@@ -65,3 +65,26 @@ export async function missionRoomSource(
 		source: { kind: "repo", repoUrl: read.repoUrl, commit: read.commit },
 	};
 }
+
+/**
+ * The client source a mission's brief carries (step 9): its one approved
+ * intake's sourceMd. Null when it has none, or more than one, as with
+ * missionRoomSource.
+ */
+export async function missionSourceMd(
+	db: Executor,
+	missionId: string,
+): Promise<string | null> {
+	const approved = await db
+		.select({ sourceMd: intake.sourceMd })
+		.from(intake)
+		.where(
+			and(
+				eq(intake.missionId, missionId),
+				eq(intake.status, "approved"),
+				live(intake),
+			),
+		)
+		.limit(2);
+	return approved.length === 1 ? (approved[0]?.sourceMd ?? null) : null;
+}

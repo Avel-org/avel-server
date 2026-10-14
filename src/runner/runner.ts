@@ -4,6 +4,7 @@ import {
 	type MissionStatus,
 	resolveWritablePaths,
 } from "../contract";
+import { briefSchema } from "../contract/intake";
 import { type ActivityEntry, logActivity } from "../db/activity";
 import { type DispatchRow, missionSpentUsd } from "../db/dispatch";
 import { currentIdentity } from "../db/identity";
@@ -29,7 +30,9 @@ import {
 	type RoomProvider,
 	RoomUnavailable,
 } from "../rooms/provider";
+import { readSet } from "../rooms/read-set";
 import type { RoomSourceResolver } from "../rooms/sources";
+import { briefSha256, renderBrief } from "./brief";
 import {
 	addUsage,
 	type PriceBook,
@@ -38,7 +41,7 @@ import {
 	wallClockSpent,
 } from "./budget";
 import type { Harness } from "./harness";
-import { missionRoomSource } from "./room-source";
+import { missionRoomSource, missionSourceMd } from "./room-source";
 import { dispatchSkills, skillsSha256 } from "./skills";
 
 /**
@@ -183,8 +186,9 @@ function refuse(
  * mission_not_active, roster_entry_inactive, agent_identity_missing,
  * requirement_unchecked (a dispatch queued before step 9's rule), model_price_unknown, spend_ceiling_reached and harness_unavailable,
  * refusing with the first. Then freezes the identity version, both hashes,
- * the model and the price version, mints the token, stores only its hash,
- * and hands the token to the harness, never to a response or a log.
+ * the brief and its hash, the model and the price version, mints the
+ * token, stores only its hash, and hands the token to the harness, never
+ * to a response or a log. A dispatch with no briefRef freezes no brief.
  *
  * The caller has locked `m`. The harness is started last, inside the
  * transaction, so a harness that refuses rolls the start back.
@@ -270,7 +274,12 @@ export async function startDispatch(
 		templatePaths: entry.templatePaths,
 	});
 
-	const skills = skillsSha256(await dispatchSkills(tx, m.id, entry.roles));
+	const skillSet = await dispatchSkills(tx, m.id, entry.roles);
+	const skills = skillsSha256(skillSet);
+	const briefMd = d.briefRef
+		? await dispatchBrief(tx, m, d.briefRef, room, skillSet)
+		: null;
+	const briefHash = briefMd === null ? null : briefSha256(briefMd);
 	const token = mintToken(DISPATCH_TOKEN_PREFIX, deps.ids);
 	const now = deps.clock.now();
 	await tx
@@ -281,6 +290,8 @@ export async function startDispatch(
 			agentIdentityVersionId: version.id,
 			agentVersionSha256: version.sha256,
 			skillsSha256: skills,
+			briefMd,
+			briefSha256: briefHash,
 			model,
 			priceVersion: deps.prices.current,
 			tokenSha256: sha256Hex(token),
@@ -298,6 +309,7 @@ export async function startDispatch(
 		payload: {
 			agentVersionSha256: version.sha256,
 			skillsSha256: skills,
+			briefSha256: briefHash,
 			model,
 			priceVersion: deps.prices.current,
 		},
@@ -310,6 +322,33 @@ export async function startDispatch(
 	}
 	// A commit that fails after this must not leave a session running.
 	step.onRollback.push(() => deps.harness.stop(d.id));
+}
+
+/**
+ * The brief a dispatch starts with (step 9): the plan's module and
+ * requirements, the module's reads at the room's commit, the client
+ * source, the skills and the checks. The plan parsed at create, and only a
+ * draft mission's plan can change, so a plan that no longer parses is a
+ * broken invariant, not a refusal.
+ */
+async function dispatchBrief(
+	tx: Tx,
+	m: LockedMission,
+	ref: NonNullable<DispatchRow["briefRef"]>,
+	room: Room,
+	skills: ReadonlyArray<{ slug: string; name: string; description: string }>,
+): Promise<string> {
+	const plan = briefSchema.parse(m.brief);
+	const module = plan.modules.find((x) => x.id === ref.moduleId);
+	const reads = await readSet(room.repoPath, room.commit, module?.reads ?? []);
+	return renderBrief({
+		plan,
+		ref,
+		commit: room.commit,
+		reads,
+		sourceMd: await missionSourceMd(tx, m.id),
+		skills,
+	});
 }
 
 /**

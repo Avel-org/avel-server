@@ -375,6 +375,20 @@ export function dispatchRoutes(deps: RouteDeps & RunnerDeps) {
 			return { status: 200, body: ok(wire) };
 		},
 
+		brief: async ({ params }) => {
+			const db = deps.db();
+			await visibleDispatch(db, params.id);
+			const [row] = await db
+				.select({
+					briefSha256: dispatch.briefSha256,
+					briefMd: dispatch.briefMd,
+				})
+				.from(dispatch)
+				.where(eq(dispatch.id, params.id));
+			if (!row) throw notFound("dispatch", params.id);
+			return { status: 200, body: ok({ dispatchId: params.id, ...row }) };
+		},
+
 		create: async ({ params, headers, body }, ctx) => {
 			const result = await create(
 				deps,

@@ -91,6 +91,20 @@ export const dispatch = z.object({
 
 export type Dispatch = z.infer<typeof dispatch>;
 
+/**
+ * The brief a dispatch started with (step 9), as frozen at start. Both are
+ * null while queued, on a dispatch with no briefRef, and on one started
+ * before step 9; when one is set, so is the other, and briefSha256 is the
+ * hex SHA-256 of briefMd's UTF-8 bytes.
+ */
+export const dispatchBrief = z.object({
+	dispatchId: uuid,
+	briefSha256: sha256.nullable(),
+	briefMd: z.string().nullable(),
+});
+
+export type DispatchBrief = z.infer<typeof dispatchBrief>;
+
 export const artifactRef = z.object({ path: z.string().min(1), sha256 });
 
 export type ArtifactRef = z.infer<typeof artifactRef>;
@@ -263,6 +277,14 @@ export const dispatchContract = c.router({
 		path: "/api/dispatches/:id",
 		pathParams: byId,
 		responses: { 200: successEnvelope(dispatch) },
+	},
+	brief: {
+		method: "GET",
+		path: "/api/dispatches/:id/brief",
+		pathParams: byId,
+		responses: { 200: successEnvelope(dispatchBrief) },
+		summary:
+			"The brief the dispatch started with: scope, read, method, done when",
 	},
 	create: {
 		method: "POST",

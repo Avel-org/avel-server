@@ -113,6 +113,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						priceVersion: PRICE_VERSION,
 						tokenSha256: sha256Hex(token ?? ""),
 					});
+					// The brief froze with its hash, and the wire carries the hash.
+					expect(d.briefMd).toContain("# M6: Accounts");
+					expect(d.briefSha256).toBe(sha256Hex(d.briefMd ?? ""));
+					expect(wire.briefSha256).toBe(d.briefSha256);
 					expect(text).not.toContain((token ?? "").slice(8));
 
 					const logs = await h.logRows(id);
@@ -128,6 +132,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					expect(logs[0]?.payload).toEqual({
 						agentVersionSha256: m.agent.versionSha,
 						skillsSha256: skillsSha256([]),
+						briefSha256: d.briefSha256,
 						model: "fake-harness",
 						priceVersion: PRICE_VERSION,
 					});
@@ -226,6 +231,13 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						{ slug: `${h.ns}-booking`, contentSha256: "2".repeat(64) },
 					]),
 				);
+				// The brief's Method lists the same two, by slug, and no other.
+				const { briefMd } = (await row(h.tx, id)) as { briefMd: string };
+				const method = briefMd.split("## Method")[1]?.split("## Done when")[0];
+				expect(method?.match(/^- .*$/gm)).toEqual([
+					`- \`${h.ns}-booking\`, booking: When to use it.`,
+					`- \`${h.ns}-drizzle\`, drizzle: When to use it.`,
+				]);
 			});
 		});
 
