@@ -50,6 +50,10 @@ describe("route declarations", () => {
 				"/api/agent/findings",
 				{ resource: "finding", verb: "act", own: "mission" },
 			],
+			[
+				"/api/agent/report",
+				{ resource: "completion_report", verb: "act", own: "dispatch" },
+			],
 		]);
 	});
 

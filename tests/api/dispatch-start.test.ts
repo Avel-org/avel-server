@@ -24,6 +24,7 @@ import { dispatchValues, insertDispatchRow } from "../db/dispatch-fixtures";
 import { bearer, seedIds } from "./agent-fixtures";
 import {
 	activeMission,
+	expectReportsMatchDispatches,
 	expectSystemReport,
 	lifeOf,
 	type Mission,
@@ -477,6 +478,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						401,
 					);
 					expect(dead.code).toBe("DISPATCH_CLOSED");
+					await expectReportsMatchDispatches(h.tx, [m.missionId]);
 				},
 				{ harness },
 			);
@@ -576,6 +578,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						.from(mission)
 						.where(eq(mission.id, m.missionId));
 					expect(mrow?.status).toBe("halted");
+					await expectReportsMatchDispatches(h.tx, [
+						m.missionId,
+						other.missionId,
+					]);
 				},
 				{ harness },
 			);

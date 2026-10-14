@@ -10,6 +10,7 @@ import { dispatchValues, insertDispatchRow } from "../db/dispatch-fixtures";
 import { bearer, seedIds } from "./agent-fixtures";
 import {
 	activeMission,
+	expectReportsMatchDispatches,
 	expectSystemReport,
 	lifeOf,
 	pricedBook,
@@ -179,6 +180,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the runner", () => {
 				});
 				expect(r).toMatchObject({ actualTokens: 3000 });
 				expect(harness.stopped).toEqual([run.id]);
+				await expectReportsMatchDispatches(h.tx, [m.missionId]);
 				expect(await missionStatus(h.tx, m.missionId)).toBe("active");
 				const life = await lifeOf(h.tx, run.id);
 				expect(life.map((a) => [a.action, a.actorKind])).toEqual([
@@ -258,6 +260,10 @@ describe.skipIf(!process.env.DATABASE_URL)("the runner", () => {
 				expect((await row(h.tx, waiting)).status).toBe("queued");
 				expect((await row(h.tx, elsewhere.id)).status).toBe("running");
 				expect(await missionStatus(h.tx, other.missionId)).toBe("active");
+				await expectReportsMatchDispatches(h.tx, [
+					m.missionId,
+					other.missionId,
+				]);
 			},
 			{ harness, prices },
 		);
@@ -338,6 +344,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the runner", () => {
 					{ status: "failed", reportId: r.id },
 				]);
 				expect(harness.stopped).toEqual([run.id]);
+				await expectReportsMatchDispatches(h.tx, [m.missionId]);
 				expect(
 					(
 						await h.call("/api/agent/dispatch", {
@@ -408,6 +415,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the runner", () => {
 				expect((await row(h.tx, long.id)).haltReason).toBe("wall_clock");
 				await expectSystemReport(h.tx, long.id);
 				expect(harness.stopped).toEqual([short.id, long.id]);
+				await expectReportsMatchDispatches(h.tx, [m.missionId]);
 			},
 			{ harness },
 		);
@@ -440,6 +448,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the runner", () => {
 					"halted",
 					"wall_clock",
 				]);
+				await expectReportsMatchDispatches(h.tx, [m.missionId]);
 			},
 			{ harness },
 		);

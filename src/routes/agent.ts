@@ -7,13 +7,15 @@ import {
 	type ReportFindingBody,
 } from "../contract";
 import { logActivity } from "../db/activity";
-import { dispatchWire } from "../db/dispatch";
+import { dispatchWire, reportWire } from "../db/dispatch";
 import { agentTemplate, engagement, finding, mission } from "../db/schema";
 import { stamp } from "../db/schema/columns";
 import { type Tx, withTx } from "../db/tx";
 import { requestSha256 } from "../lib/canonical";
 import type { AgentCaller } from "../middleware/caller";
 import { ApiError } from "../middleware/errors";
+import { fileAgentReport } from "../runner/report";
+import type { RunnerDeps } from "../runner/runner";
 import {
 	actorOf,
 	agentOf,
@@ -182,7 +184,7 @@ async function reportFinding(
  * middleware has already checked the token and the agent's families;
  * agentOf refuses any other caller.
  */
-export function agentRoutes(deps: RouteDeps) {
+export function agentRoutes(deps: RouteDeps & RunnerDeps) {
 	return tsr.platformContext<RequestContext>().router(contract.agent, {
 		dispatch: async (_req, ctx) => {
 			const agent = agentOf(ctx);
@@ -208,6 +210,14 @@ export function agentRoutes(deps: RouteDeps) {
 				return { status: 200, body: ok(toFindingWire(result.row)) };
 			}
 			return { status: 201, body: ok(toFindingWire(result.row)) };
+		},
+
+		report: async ({ body }, ctx) => {
+			const agent = agentOf(ctx);
+			const id = await fileAgentReport(deps, agent, body, ctx.requestId);
+			const wire = await reportWire(deps.db(), id);
+			if (!wire) throw new Error(`report ${id} vanished`);
+			return { status: 201, body: ok(wire) };
 		},
 	});
 }

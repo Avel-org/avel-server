@@ -121,7 +121,7 @@ export function createApp(deps: AppDeps) {
 		presets: presetRoutes(routeDeps),
 		playbooks: playbookRoutes(routeDeps),
 		templates: templateRoutes({ ...routeDeps, templates: deps.templates }),
-		agent: agentRoutes(routeDeps),
+		agent: agentRoutes(runnerDeps),
 	});
 
 	const app = new Hono<{ Variables: CallerVariables }>();

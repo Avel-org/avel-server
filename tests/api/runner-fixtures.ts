@@ -209,3 +209,35 @@ export async function expectSystemReport(tx: Tx, id: string) {
 	expect(d.closedAt).not.toBeNull();
 	return { d, r };
 }
+
+/**
+ * Every live report on these missions has its dispatch's status and halt
+ * reason, and its dispatch is closed: the report and the close are written
+ * together by construction (closeBySystem, fileAgentReport), checked here.
+ */
+export async function expectReportsMatchDispatches(
+	tx: Tx,
+	missionIds: readonly string[],
+) {
+	for (const missionId of missionIds) {
+		const rows = await tx
+			.select({
+				reportStatus: completionReport.status,
+				reportHalt: completionReport.haltReason,
+				dispatchStatus: dispatch.status,
+				dispatchHalt: dispatch.haltReason,
+				closedAt: dispatch.closedAt,
+				id: dispatch.id,
+			})
+			.from(completionReport)
+			.innerJoin(dispatch, eq(dispatch.id, completionReport.dispatchId))
+			.where(eq(completionReport.missionId, missionId));
+		for (const r of rows) {
+			expect([r.reportStatus, r.reportHalt], r.id).toEqual([
+				r.dispatchStatus,
+				r.dispatchHalt,
+			]);
+			expect(r.closedAt, r.id).not.toBeNull();
+		}
+	}
+}

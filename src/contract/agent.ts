@@ -1,6 +1,6 @@
 import { initContract } from "@ts-rest/core";
 import { z } from "zod";
-import { dispatch } from "./dispatch";
+import { artifactRef, blocker, completionReport, dispatch } from "./dispatch";
 import { successEnvelope } from "./shared/envelope";
 import { idempotencyHeaders } from "./shared/idempotency";
 
@@ -106,6 +106,41 @@ export const reportFindingBody = z
 
 export type ReportFindingBody = z.infer<typeof reportFindingBody>;
 
+/**
+ * The agent's own CompletionReport (module 8): what it says it did. The
+ * server computes everything else from the dispatch and the room: tokens,
+ * hashes, model, artifactsWritten, filesTouched, fileTypesTouched and
+ * edgeMismatches. Blocked needs at least one blocker; complete takes none.
+ * artifactsRead paths are room paths (the file tools' rules), unique once
+ * normalized; the server checks that, and answers 400 with the path.
+ */
+export const agentReportBody = z
+	.object({
+		status: z.enum(["complete", "blocked"]),
+		artifactsRead: z.array(artifactRef),
+		blockers: z.array(blocker),
+		rereads: z.number().int().nonnegative(),
+	})
+	.strict()
+	.superRefine((body, ctx) => {
+		if (body.status === "blocked" && body.blockers.length === 0) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ["blockers"],
+				message: "A blocked report names at least one blocker",
+			});
+		}
+		if (body.status === "complete" && body.blockers.length > 0) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ["blockers"],
+				message: "A complete report has no blockers",
+			});
+		}
+	});
+
+export type AgentReportBody = z.infer<typeof agentReportBody>;
+
 // Keyed per dispatch here. Defined in shared/ so dispatch.ts can use it
 // without a cycle through this file; still exported from here.
 export { idempotencyHeaders };
@@ -134,5 +169,16 @@ export const agentContract = c.router({
 		} satisfies RouteAccess,
 		summary:
 			"Records an open Finding on the calling agent's mission. Review families only. 200 replays the same key and body; 409 IDEMPOTENCY_REPLAY for a different body; 422 report_dispatch_mismatch when the body names another mission or dispatch",
+	},
+	report: {
+		method: "POST",
+		path: "/api/agent/report",
+		body: agentReportBody,
+		responses: { 201: successEnvelope(completionReport) },
+		metadata: {
+			agent: { resource: "completion_report", verb: "act", own: "dispatch" },
+		} satisfies RouteAccess,
+		summary:
+			"Files the calling agent's CompletionReport and closes its dispatch as complete or blocked. No key: the dispatch_id is unique, and a retry after the close gets 401 DISPATCH_CLOSED. 422 writes_outside_mount (the dispatch stays running), room_unavailable, dispatch_not_running",
 	},
 });

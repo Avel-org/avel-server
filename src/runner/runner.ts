@@ -689,6 +689,9 @@ export async function tick(deps: RunnerDeps): Promise<SweepResult> {
 				await closeRunning(deps, id, { status: "failed" });
 				break;
 			} else {
+				// complete or blocked: the agent's own report (POST
+				// /api/agent/report) is the only close path for those, so
+				// the runner closes nothing here.
 				break;
 			}
 		}
