@@ -698,9 +698,10 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 				{ id: "AC3", requirementId: "R3", text: "One digest a day, at most" },
 			],
 			modules: [
-				{ id: "M1", name: "Delivery", requirementIds: ["R1"] },
-				{ id: "M2", name: "Preferences", requirementIds: ["R2"] },
+				{ id: "M1", name: "Delivery", requirementIds: ["R1"], reads: [] },
+				{ id: "M2", name: "Preferences", requirementIds: ["R2"], reads: [] },
 			],
+			checks: [],
 		},
 	});
 	addMission({
@@ -1438,9 +1439,10 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 				},
 			],
 			modules: [
-				{ id: "M1", name: "Plans", requirementIds: ["R1", "R2"] },
-				{ id: "M2", name: "Reminders", requirementIds: ["R3"] },
+				{ id: "M1", name: "Plans", requirementIds: ["R1", "R2"], reads: [] },
+				{ id: "M2", name: "Reminders", requirementIds: ["R3"], reads: [] },
 			],
+			checks: [],
 		},
 	});
 	const booking3 = addMission({
@@ -1466,7 +1468,10 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 					text: "A freed slot is offered to the first patient waiting",
 				},
 			],
-			modules: [{ id: "M1", name: "Waitlist", requirementIds: ["R1"] }],
+			modules: [
+				{ id: "M1", name: "Waitlist", requirementIds: ["R1"], reads: [] },
+			],
+			checks: [],
 		},
 	});
 

@@ -26,13 +26,14 @@ const APPROVED: Brief = {
 		{ id: "AC2", requirementId: "R2", text: "The day view lists bookings" },
 	],
 	modules: [],
+	checks: [],
 };
 
 const PLANNED: Brief = {
 	...APPROVED,
 	modules: [
-		{ id: "M1", name: "Booking", requirementIds: ["R1"] },
-		{ id: "M2", name: "Schedule", requirementIds: ["R2"] },
+		{ id: "M1", name: "Booking", requirementIds: ["R1"], reads: [] },
+		{ id: "M2", name: "Schedule", requirementIds: ["R2"], reads: [] },
 	],
 };
 
@@ -213,7 +214,9 @@ describe.skipIf(!process.env.DATABASE_URL)("mission plan", () => {
 			const res = await put(call, s.draft, {
 				brief: {
 					...APPROVED,
-					modules: [{ id: "M1", name: "Booking", requirementIds: ["R1"] }],
+					modules: [
+						{ id: "M1", name: "Booking", requirementIds: ["R1"], reads: [] },
+					],
 				},
 				templateRef: null,
 				templateVersion: null,
@@ -246,7 +249,7 @@ describe.skipIf(!process.env.DATABASE_URL)("mission plan", () => {
 					],
 					modules: [
 						...PLANNED.modules,
-						{ id: "M3", name: "Reminders", requirementIds: ["R3"] },
+						{ id: "M3", name: "Reminders", requirementIds: ["R3"], reads: [] },
 					],
 				},
 				templateRef: null,

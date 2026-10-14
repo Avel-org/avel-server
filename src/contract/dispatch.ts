@@ -72,7 +72,15 @@ export const dispatch = z.object({
 	/** The display id of that version, such as kel@v2; null while queued. */
 	agentVersionRef: z.string().nullable(),
 	skillsSha256: sha256.nullable(),
+	/**
+	 * The rendered brief's hash (step 9): scope, read, method and done-when,
+	 * frozen at start. Null while queued, and on a dispatch started before
+	 * step 9. The brief's text is read from its own route.
+	 */
+	briefSha256: sha256.nullable(),
 	model: z.string().nullable(),
+	/** The harness and its version that ran the dispatch, such as claude-agent-sdk@1.2.3; null while queued. */
+	harnessVersion: z.string().nullable(),
 	/** The report that closed the dispatch; null until it closes. */
 	reportId: uuid.nullable(),
 	startedAt: iso.nullable(),

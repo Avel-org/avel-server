@@ -151,7 +151,7 @@ describe.skipIf(!url)("/api/intakes", () => {
 				engagementId,
 				status: "draft",
 				sourceMd: "Call notes",
-				proposedBrief: { ...BRIEF, modules: [] },
+				proposedBrief: { ...BRIEF, modules: [], checks: [] },
 				openQuestions: ["Deposits?"],
 				derivedCut: null,
 				derivedCutEvidence: null,

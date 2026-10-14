@@ -240,8 +240,11 @@ deleted_at · timestamps
 summary              text
 requirements         [{ id: 'R1', text }]                         — at least one; ids unique and permanent
 acceptanceCriteria   [{ id: 'AC1', requirementId: 'R1', text }]   — ids unique; each cites an existing requirement
-modules              [{ id: 'M1', name, requirementIds: ['R1'] }]  — [built] 2026-10-10, module 3; defaults to [] so a brief stored before it parses
+modules              [{ id: 'M1', name, requirementIds: ['R1'], reads: ['src/booking/**'] }]  — [built] 2026-10-10, module 3; defaults to [] so a brief stored before it parses. reads [built] 2026-10-14 (step 9): repo-relative paths or globs, at most 100, never absolute, no `..` segment; defaults to []
+checks               [{ id: 'CK1', requirementId: 'R1', kind, path | command, note? }]  — [built] 2026-10-14 (step 9); kind is file_exists (with path) or test, typecheck, command (with command); defaults to []
 ```
+
+**Done when** (decided by the operator 2026-10-14, `STEP-9-PLAN.md`): every requirement names a check outside the agent, and the plan adds them as it adds modules. The gate (module 9) runs them; the agent never does. Contract shape `[built]` 2026-10-14; the checkPlan rule and the `requirement_unchecked` refusal are `[specced]` for step 9b.
 
 Module 3's planner extends this same list. It never starts a second one. *Decided by the operator 2026-10-10:* the modules live in the brief, not a table. The operator writes the plan on a draft Mission and code checks it, the Intake pattern; no model is in the path. An Intake's brief carries no modules (the intake check's rule 6). Module ids may change while the mission is a draft, because the plan is still being written. `[attestation]` until the dispatch unit builds the move out of `draft`: from then on, nothing changes the brief.
 
@@ -616,6 +619,8 @@ wall_clock_minutes     integer NOT NULL, > 0 — default 60, settable before sta
 agent_identity_version_id?  FK → AgentIdentityVersion — the exact version frozen at start; resolves agentVersionRef
 agent_version_sha256?  frozen when the dispatch starts
 skills_sha256?         frozen when the dispatch starts
+brief_md? · brief_sha256?   the rendered four-part brief and its hash, frozen together at start (CHECK: both or neither); [built] 2026-10-14, migration 0027; nothing writes them until step 9c
+harness_version?       the harness and its version that ran the dispatch; [built] 2026-10-14, migration 0027
 model?                 set when it starts
 price_version?         the price table version spend is computed with; set when it starts
 token_sha256?          SHA-256 of the dispatch's access token; never the token itself. Unique: it is the lookup key on every request

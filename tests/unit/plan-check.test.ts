@@ -15,9 +15,10 @@ function plan(over: Partial<Brief> = {}): Brief {
 			{ id: "AC2", requirementId: "R2", text: "The day view lists bookings" },
 		],
 		modules: [
-			{ id: "M1", name: "Booking", requirementIds: ["R1"] },
-			{ id: "M2", name: "Schedule", requirementIds: ["R2"] },
+			{ id: "M1", name: "Booking", requirementIds: ["R1"], reads: [] },
+			{ id: "M2", name: "Schedule", requirementIds: ["R2"], reads: [] },
 		],
+		checks: [],
 		...over,
 	};
 }
@@ -62,7 +63,9 @@ describe("checkPlan", () => {
 				acceptanceCriteria: [
 					{ id: "AC1", requirementId: "R1", text: "Booking succeeds" },
 				],
-				modules: [{ id: "M1", name: "Booking", requirementIds: ["R1"] }],
+				modules: [
+					{ id: "M1", name: "Booking", requirementIds: ["R1"], reads: [] },
+				],
 			}),
 		);
 		expect(issues.map((i) => i.path)).toEqual([
@@ -84,8 +87,8 @@ describe("checkPlan", () => {
 		const issues = checkPlan(
 			plan({
 				modules: [
-					{ id: "M1", name: "Booking", requirementIds: ["R1"] },
-					{ id: "M1", name: "Schedule", requirementIds: ["R2"] },
+					{ id: "M1", name: "Booking", requirementIds: ["R1"], reads: [] },
+					{ id: "M1", name: "Schedule", requirementIds: ["R2"], reads: [] },
 				],
 			}),
 		);
@@ -102,8 +105,13 @@ describe("checkPlan", () => {
 			messages(
 				plan({
 					modules: [
-						{ id: "M1", name: "Booking", requirementIds: ["R1", "R9"] },
-						{ id: "M2", name: "Schedule", requirementIds: ["R2"] },
+						{
+							id: "M1",
+							name: "Booking",
+							requirementIds: ["R1", "R9"],
+							reads: [],
+						},
+						{ id: "M2", name: "Schedule", requirementIds: ["R2"], reads: [] },
 					],
 				}),
 			),
@@ -115,8 +123,13 @@ describe("checkPlan", () => {
 			messages(
 				plan({
 					modules: [
-						{ id: "M1", name: "Booking", requirementIds: ["R1", "R1"] },
-						{ id: "M2", name: "Schedule", requirementIds: ["R2"] },
+						{
+							id: "M1",
+							name: "Booking",
+							requirementIds: ["R1", "R1"],
+							reads: [],
+						},
+						{ id: "M2", name: "Schedule", requirementIds: ["R2"], reads: [] },
 					],
 				}),
 			),
@@ -126,7 +139,9 @@ describe("checkPlan", () => {
 	it("refuses a requirement in no module", () => {
 		const issues = checkPlan(
 			plan({
-				modules: [{ id: "M1", name: "Booking", requirementIds: ["R1"] }],
+				modules: [
+					{ id: "M1", name: "Booking", requirementIds: ["R1"], reads: [] },
+				],
 			}),
 		);
 		expect(issues).toEqual([
@@ -139,8 +154,13 @@ describe("checkPlan", () => {
 			messages(
 				plan({
 					modules: [
-						{ id: "M1", name: "Booking", requirementIds: ["R1", "R2"] },
-						{ id: "M2", name: "Schedule", requirementIds: ["R2"] },
+						{
+							id: "M1",
+							name: "Booking",
+							requirementIds: ["R1", "R2"],
+							reads: [],
+						},
+						{ id: "M2", name: "Schedule", requirementIds: ["R2"], reads: [] },
 					],
 				}),
 			),
@@ -150,8 +170,8 @@ describe("checkPlan", () => {
 	it("gives the same issues in the same order every run", () => {
 		const bad = plan({
 			modules: [
-				{ id: "M1", name: "A", requirementIds: ["R9", "R1", "R1"] },
-				{ id: "M1", name: "B", requirementIds: ["R1"] },
+				{ id: "M1", name: "A", requirementIds: ["R9", "R1", "R1"], reads: [] },
+				{ id: "M1", name: "B", requirementIds: ["R1"], reads: [] },
 			],
 		});
 		expect(checkPlan(bad)).toEqual(checkPlan(structuredClone(bad)));

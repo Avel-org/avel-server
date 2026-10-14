@@ -111,7 +111,8 @@ const PLANNED: Brief = {
 	acceptanceCriteria: [
 		{ id: "AC1", requirementId: "R1", text: "Booking a free slot succeeds" },
 	],
-	modules: [{ id: "M1", name: "Booking", requirementIds: ["R1"] }],
+	modules: [{ id: "M1", name: "Booking", requirementIds: ["R1"], reads: [] }],
+	checks: [],
 };
 
 describe.skipIf(!url)(

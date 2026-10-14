@@ -225,6 +225,23 @@ describe.skipIf(!process.env.DATABASE_URL)("dispatch table", () => {
 						],
 					),
 				),
+				...[sha("A"), "a".repeat(63), "a".repeat(65)].map(
+					(bad): [string, NewDispatch, string] => [
+						`briefSha256 = ${bad}`,
+						v("running", { briefMd: "# Brief", briefSha256: bad }),
+						"dispatch_brief_sha256_hex",
+					],
+				),
+				[
+					"a brief with no hash",
+					v("running", { briefMd: "# Brief", briefSha256: null }),
+					"dispatch_brief_md_iff_sha256",
+				],
+				[
+					"a brief hash with no brief",
+					v("running", { briefMd: null, briefSha256: sha("c") }),
+					"dispatch_brief_md_iff_sha256",
+				],
 			];
 			for (const [name, values, constraint] of cases) {
 				expect(await refusedBy(tx, ids, values), name).toBe(constraint);
@@ -264,9 +281,12 @@ describe.skipIf(!process.env.DATABASE_URL)("dispatch table", () => {
 				[
 					"agent_identity_version_id",
 					"agent_version_sha256",
+					"brief_md",
 					"brief_ref",
+					"brief_sha256",
 					"closed_at",
 					"halt_reason",
+					"harness_version",
 					"model",
 					"price_version",
 					"skills_sha256",

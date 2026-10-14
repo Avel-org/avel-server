@@ -109,6 +109,7 @@ describe("the error envelope is a discriminated union on code", () => {
 			"room_unavailable",
 			"report_dispatch_mismatch",
 			"writes_outside_mount",
+			"requirement_unchecked",
 		]);
 	});
 

@@ -334,6 +334,10 @@ export const dispatch = pgTable(
 		),
 		agentVersionSha256: text("agent_version_sha256"),
 		skillsSha256: text("skills_sha256"),
+		// Step 9: the rendered brief and its hash, frozen at start together.
+		briefMd: text("brief_md"),
+		briefSha256: text("brief_sha256"),
+		harnessVersion: text("harness_version"),
 		model: text("model"),
 		priceVersion: text("price_version"),
 		tokenSha256: text("token_sha256"),
@@ -413,6 +417,14 @@ export const dispatch = pgTable(
 		check(
 			"dispatch_skills_sha256_hex",
 			sql`${t.skillsSha256} is null or ${t.skillsSha256} ~ ${SHA256_HEX}`,
+		),
+		check(
+			"dispatch_brief_sha256_hex",
+			sql`${t.briefSha256} is null or ${t.briefSha256} ~ ${SHA256_HEX}`,
+		),
+		check(
+			"dispatch_brief_md_iff_sha256",
+			sql`(${t.briefMd} is null) = (${t.briefSha256} is null)`,
 		),
 		check(
 			"dispatch_token_sha256_hex",

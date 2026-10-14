@@ -43,7 +43,9 @@ const queued = {
 	agentVersionSha256: null,
 	agentVersionRef: null,
 	skillsSha256: null,
+	briefSha256: null,
 	model: null,
+	harnessVersion: null,
 	reportId: null,
 	startedAt: null,
 	closedAt: null,
@@ -137,6 +139,18 @@ describe("dispatch wire", () => {
 		expect(
 			dispatch.safeParse({ ...queued, agentVersionSha256: sha("A") }).success,
 		).toBe(false);
+		expect(
+			dispatch.safeParse({ ...queued, briefSha256: sha("A") }).success,
+		).toBe(false);
+	});
+
+	it("takes a started dispatch with its brief hash and harness", () => {
+		const started = {
+			...queued,
+			briefSha256: sha("c"),
+			harnessVersion: "claude-agent-sdk@1.0.0",
+		};
+		expect(dispatch.parse(started)).toEqual(started);
 	});
 });
 

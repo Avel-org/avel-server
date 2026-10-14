@@ -47,7 +47,10 @@ const PLANNED: Brief = {
 		{ id: "AC1", requirementId: "R1", text: "Signing up works" },
 		{ id: "AC2", requirementId: "R2", text: "Signing in works" },
 	],
-	modules: [{ id: "M6", name: "Accounts", requirementIds: ["R1", "R2"] }],
+	modules: [
+		{ id: "M6", name: "Accounts", requirementIds: ["R1", "R2"], reads: [] },
+	],
+	checks: [],
 };
 
 /** Ids under the call's namespace, far above the app's own sequence. */

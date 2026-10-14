@@ -21,6 +21,84 @@ export const criterionId = z
 export const moduleId = z
 	.string()
 	.regex(/^M[1-9][0-9]*$/, "A module id is M and a number: M1, M2, ...");
+export const checkId = z
+	.string()
+	.regex(/^CK[1-9][0-9]*$/, "A check id is CK and a number: CK1, CK2, ...");
+
+/**
+ * How a requirement is shown done without taking the agent's word (step 9,
+ * docs/STEP-9-PLAN.md). file_exists names a path; the other kinds name a
+ * command. The gate (module 9) runs them, never the agent.
+ */
+export const CHECK_KINDS = [
+	"file_exists",
+	"test",
+	"typecheck",
+	"command",
+] as const;
+
+export type CheckKind = (typeof CHECK_KINDS)[number];
+
+/**
+ * A path or glob relative to the repository root, written with /. Never
+ * absolute, never with a `..` segment. Whether it matches anything is a
+ * question for the room at dispatch time, not for the plan.
+ */
+export const repoPath = z
+	.string()
+	.trim()
+	.min(1)
+	.max(500)
+	.refine((p) => !/^([/\\]|[A-Za-z]:)/.test(p), {
+		message: "A repository path is relative to the repository root",
+	})
+	.refine((p) => !p.split(/[/\\]/).includes(".."), {
+		message: "A repository path may not contain a .. segment",
+	});
+
+const checkNote = z.string().trim().min(1).max(500).optional();
+const checkCommand = z.string().trim().min(1).max(1_000);
+
+export const briefCheck = z.discriminatedUnion("kind", [
+	z
+		.object({
+			id: checkId,
+			requirementId,
+			kind: z.literal("file_exists"),
+			path: repoPath,
+			note: checkNote,
+		})
+		.strict(),
+	z
+		.object({
+			id: checkId,
+			requirementId,
+			kind: z.literal("test"),
+			command: checkCommand,
+			note: checkNote,
+		})
+		.strict(),
+	z
+		.object({
+			id: checkId,
+			requirementId,
+			kind: z.literal("typecheck"),
+			command: checkCommand,
+			note: checkNote,
+		})
+		.strict(),
+	z
+		.object({
+			id: checkId,
+			requirementId,
+			kind: z.literal("command"),
+			command: checkCommand,
+			note: checkNote,
+		})
+		.strict(),
+]);
+
+export type BriefCheck = z.infer<typeof briefCheck>;
 
 /**
  * The brief Canon drafts and the operator approves. Held here and nowhere
@@ -67,11 +145,23 @@ export const briefSchema = z
 						id: moduleId,
 						name: z.string().trim().min(1).max(200),
 						requirementIds: z.array(requirementId).max(500),
+						/**
+						 * The brief's Read section (step 9): the repository paths or
+						 * globs the module's agent reads, at the room's commit. A
+						 * module written before step 9 parses with none.
+						 */
+						reads: z.array(repoPath).max(100).default([]),
 					})
 					.strict(),
 			)
 			.max(200)
 			.default([]),
+		/**
+		 * The brief's Done-when section (step 9): each requirement's checks
+		 * outside the agent. The plan adds them, like modules; a brief stored
+		 * before step 9 parses with none.
+		 */
+		checks: z.array(briefCheck).max(2_000).default([]),
 	})
 	.strict();
 
