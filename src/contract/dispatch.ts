@@ -1,12 +1,15 @@
 import { initContract } from "@ts-rest/core";
 import { z } from "zod";
+import { missionOrigin } from "./mission";
 import { successEnvelope } from "./shared/envelope";
 import { idempotencyHeaders } from "./shared/idempotency";
-import { pageEnvelope, pageQuery } from "./shared/pagination";
+import { pageEnvelope, pageMeta, pageQuery } from "./shared/pagination";
 import {
 	completionStatus,
+	DISPATCH_STATUSES,
 	dispatchStatus,
 	haltReason,
+	missionStatus,
 	versionSource,
 } from "./shared/status";
 
@@ -168,6 +171,68 @@ export const createDispatchBody = z
 	.strict();
 
 export type CreateDispatchBody = z.infer<typeof createDispatchBody>;
+
+/**
+ * One dispatch of an agent template (GET /api/agent-templates/:id/dispatches):
+ * the Dispatch wire, the mission it ran on, and a summary of the report
+ * that closed it.
+ */
+export const templateDispatch = dispatch.extend({
+	mission: z.object({
+		id: uuid,
+		type: z.string(),
+		sprintN: z.number().int(),
+		status: missionStatus,
+		origin: missionOrigin,
+		/** The mission's client; null for an internal mission. */
+		client: z.object({ id: uuid, name: z.string() }).nullable(),
+	}),
+	/** The report that closed it; null until it closes. */
+	report: z
+		.object({
+			id: uuid,
+			status: completionStatus,
+			filedBy: reportFiledBy,
+			actualTokens: tokens,
+			/** How many blockers it lists. */
+			blockers: z.number().int().nonnegative(),
+			/** How many edge mismatches it records. */
+			edgeMismatches: z.number().int().nonnegative(),
+		})
+		.nullable(),
+});
+
+export type TemplateDispatch = z.infer<typeof templateDispatch>;
+
+export const templateDispatchListQuery = pageQuery.extend({
+	status: dispatchStatus.optional(),
+	missionId: uuid.optional(),
+});
+
+const statusCount = z.number().int().nonnegative();
+
+/** Every dispatch status, zero when none. */
+export const dispatchStatusCounts = z.object(
+	Object.fromEntries(DISPATCH_STATUSES.map((s) => [s, statusCount])) as {
+		[K in (typeof DISPATCH_STATUSES)[number]]: typeof statusCount;
+	},
+);
+
+/** What the filters keep, whatever the cursor: the same on every page. */
+export const templateDispatchTotals = z.object({
+	total: statusCount,
+	byStatus: dispatchStatusCounts,
+	/** spend_usd summed as numeric in Postgres. */
+	spendUsd: usd,
+	tokensUsed: tokens,
+	estimatedTokens: tokens,
+});
+
+export const templateDispatchListEnvelope = z.object({
+	success: z.literal(true),
+	data: z.array(templateDispatch),
+	meta: pageMeta.extend({ totals: templateDispatchTotals }),
+});
 
 export const dispatchListQuery = pageQuery.extend({
 	status: dispatchStatus.optional(),

@@ -722,7 +722,9 @@ describe.skipIf(!url)("/api/missions", () => {
 				expect(data.recentActivity[1]?.actor).toEqual({
 					kind: "system",
 					userId: null,
-					display: null,
+					rosterEntryId: null,
+					display: "AVEL runner",
+					agent: null,
 				});
 			});
 		});

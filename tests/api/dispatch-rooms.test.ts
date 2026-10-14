@@ -102,8 +102,12 @@ async function expectNoRun(h: ApiHarness, id: string, root: string) {
 	expect(existsSync(path.join(root, `${id}.json`))).toBe(false);
 }
 
+// Each case spawns several git processes. Alone the slowest takes about
+// half a second, but under the full suite's parallel load on Windows it
+// passed 5 seconds, so these tests get 30.
 describe.skipIf(!process.env.DATABASE_URL)(
 	"start opens the dispatch's room",
+	{ timeout: 30_000 },
 	() => {
 		afterAll(closeDb);
 

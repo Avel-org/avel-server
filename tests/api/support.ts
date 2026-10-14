@@ -156,7 +156,8 @@ export async function withApi(
 	const authNs = namespace();
 	const operator = {
 		...OPERATOR,
-		id: Number.parseInt(authNs, 16),
+		// Never 0: the dev seed's fictional operator holds GitHub id 0.
+		id: Number.parseInt(authNs, 16) || 1,
 		email: `operator-${authNs}@example.com`,
 	};
 	await withTx(db, async (tx) => {

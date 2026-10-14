@@ -1,5 +1,6 @@
 import { initContract } from "@ts-rest/core";
 import { z } from "zod";
+import { activityActor } from "./activity";
 import { successEnvelope } from "./shared/envelope";
 import { pageMeta, pageQuery } from "./shared/pagination";
 import {
@@ -147,12 +148,12 @@ export const missionActivity = z.object({
 	action: z.string(),
 	entityType: z.string(),
 	at: iso,
-	actor: z.object({
-		kind: z.enum(["operator", "system", "agent"]),
-		userId: z.string().uuid().nullable(),
-		/** The operator's GitHub login where resolvable, else null. */
-		display: z.string().nullable(),
-	}),
+	/**
+	 * The activity feed's actor. display is the feed's label: the operator's
+	 * GitHub login, "AVEL runner" for the system, "Name · territory" for an
+	 * agent. Nullable on the wire, as before; the server never sends null.
+	 */
+	actor: activityActor.extend({ display: z.string().nullable() }),
 });
 
 export const missionDetail = missionListItem.extend({

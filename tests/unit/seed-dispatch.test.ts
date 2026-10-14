@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DISPATCH_STATUSES, HALT_REASONS } from "../../src/contract";
-import { buildSeed, seedIds } from "../../src/db/seed/data";
+import { buildSeed, SEED_OPERATOR_ID, seedIds } from "../../src/db/seed/data";
 import { checkPlan } from "../../src/lib/plan-check";
 import { PRICE_VERSION } from "../../src/lib/prices";
 import { skillsSha256 } from "../../src/runner/skills";
@@ -237,7 +237,16 @@ describe("seed dispatches", () => {
 				(a) => a.entityId === entityId && a.action === action,
 			);
 		for (const d of rows.dispatch) {
-			const system = { actorKind: "system", actorRosterEntryId: null };
+			const system = {
+				actorKind: "system",
+				actorUserId: null,
+				actorRosterEntryId: null,
+			};
+			const operator = {
+				actorKind: "operator",
+				actorUserId: SEED_OPERATOR_ID,
+				actorRosterEntryId: null,
+			};
 			const once = (action: string, when: Date | null | undefined) => {
 				const found = rowsFor(d.id, action);
 				if (when === null || when === undefined) {
@@ -249,9 +258,9 @@ describe("seed dispatches", () => {
 				expect(found[0]?.missionId).toBe(d.missionId);
 				return found[0];
 			};
-			expect(once("dispatch.created", d.createdAt)).toMatchObject(system);
+			expect(once("dispatch.created", d.createdAt)).toMatchObject(operator);
 			const started = once("dispatch.started", d.startedAt);
-			if (started) expect(started).toMatchObject(system);
+			if (started) expect(started).toMatchObject(operator);
 			const crossed = rowsFor(d.id, "dispatch.soft_ceiling_crossed");
 			expect(crossed.length, d.id).toBe(d.softCeilingCrossed ? 1 : 0);
 			for (const c of crossed) expect(c).toMatchObject(system);
@@ -260,7 +269,10 @@ describe("seed dispatches", () => {
 				d.status === "halted" ? d.closedAt : null,
 			);
 			if (halted) {
-				expect(halted).toMatchObject(system);
+				// The operator's own halt is the operator's; the rest the runner's.
+				expect(halted).toMatchObject(
+					d.haltReason === "operator" ? operator : system,
+				);
 				expect(halted.payload).toMatchObject({ reason: d.haltReason });
 			}
 			const report = reportOf(d.id)[0];
@@ -280,6 +292,62 @@ describe("seed dispatches", () => {
 				});
 			}
 		}
+	});
+
+	it("names the seed operator for operator acts, the runner for its own, and agents for theirs", () => {
+		const split = { operator: 0, system: 0, agent: 0 };
+		for (const a of rows.activityLog) split[a.actorKind] += 1;
+		expect(split).toEqual({ operator: 88, system: 24, agent: 4 });
+		expect(rows.activityLog).toHaveLength(116);
+		for (const a of rows.activityLog) {
+			expect(a.actorUserId, a.action).toBe(
+				a.actorKind === "operator" ? SEED_OPERATOR_ID : null,
+			);
+		}
+		// The system rows are exactly the runner's acts and export status moves.
+		const runnerActions = rows.activityLog
+			.filter((a) => a.actorKind === "system")
+			.map((a) => a.action);
+		expect(new Set(runnerActions)).toEqual(
+			new Set([
+				"export.status_changed",
+				"dispatch.soft_ceiling_crossed",
+				"dispatch.halted",
+				"completion_report.filed",
+				"dispatch.closed",
+				"mission.status_changed",
+			]),
+		);
+		expect(
+			rows.activityLog.filter(
+				(a) =>
+					a.actorKind === "system" && a.action === "mission.status_changed",
+			),
+		).toHaveLength(1);
+		expect(
+			rows.activityLog.filter((a) => a.action === "export.status_changed"),
+		).toHaveLength(7);
+		expect(
+			rows.activityLog
+				.filter((a) => a.action === "export.status_changed")
+				.every((a) => a.actorKind === "system"),
+		).toBe(true);
+	});
+
+	it("seeds one operator user that can never sign in or match the allowlist", () => {
+		expect(rows.user).toEqual([
+			{
+				id: SEED_OPERATOR_ID,
+				name: "Seed operator",
+				email: "seed-operator@example.com",
+				emailVerified: false,
+				image: null,
+				githubId: "0",
+				githubLogin: "seed-operator",
+				createdAt: expect.any(Date),
+				updatedAt: expect.any(Date),
+			},
+		]);
 	});
 
 	it("halts the capped mission at the moment its dispatch hit the ceiling, as the system", () => {

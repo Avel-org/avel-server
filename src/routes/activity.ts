@@ -1,32 +1,50 @@
 import { tsr } from "@ts-rest/serverless/fetch";
 import { and, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
-import { type ActivityEntry, activityContract } from "../contract";
+import {
+	type ActivityActor,
+	type ActivityEntry,
+	activityContract,
+} from "../contract";
 import { touchesClient } from "../db/activity";
 import { activityLog, agentTemplate, rosterEntry, user } from "../db/schema";
 import { after, type RequestContext, type RouteDeps, toPage } from "./shared";
 
-type Row = typeof activityLog.$inferSelect & {
-	login: string | null;
-	agentName: string | null;
-	territory: string | null;
-};
-
 /**
- * The columns actorDisplay reads. Select them with activity_log left-joined
- * to user on actor_user_id, roster_entry on actor_roster_entry_id, and
- * agent_template on the entry's template, with no live(): a removed entry
- * or template still names who acted.
+ * The columns every actor wire reads (activity, a mission's recent
+ * activity, a preset's applications). Select them with activity_log
+ * left-joined to user on actor_user_id, roster_entry on
+ * actor_roster_entry_id, and agent_template on the entry's template, with
+ * no live(): a removed entry or template still names who acted.
  */
 export const actorColumns = {
+	id: activityLog.id,
+	actorKind: activityLog.actorKind,
+	actorUserId: activityLog.actorUserId,
+	actorRosterEntryId: activityLog.actorRosterEntryId,
 	login: user.githubLogin,
+	agentTemplateId: agentTemplate.id,
+	agentSlug: agentTemplate.slug,
 	agentName: agentTemplate.name,
 	territory: rosterEntry.territory,
 };
 
-type ActorRow = Pick<
-	Row,
-	"id" | "actorKind" | "login" | "agentName" | "territory"
->;
+/** One row of actorColumns. */
+export type ActorRow = {
+	id: string;
+	actorKind: ActivityActor["kind"];
+	actorUserId: string | null;
+	actorRosterEntryId: string | null;
+	login: string | null;
+	agentTemplateId: string | null;
+	agentSlug: string | null;
+	agentName: string | null;
+	territory: string | null;
+};
+
+type Row = typeof activityLog.$inferSelect & ActorRow;
+
+/** What the runner is called wherever an actor is shown. */
+export const RUNNER_DISPLAY = "AVEL runner";
 
 /**
  * The actor's label. The CHECKs on activity_log tie each kind to its foreign
@@ -36,7 +54,7 @@ type ActorRow = Pick<
 export function actorDisplay(row: ActorRow): string {
 	switch (row.actorKind) {
 		case "system":
-			return "System";
+			return RUNNER_DISPLAY;
 		case "operator":
 			if (row.login === null)
 				throw new Error(`activity ${row.id}: operator has no user row`);
@@ -48,6 +66,33 @@ export function actorDisplay(row: ActorRow): string {
 				? `${row.agentName} · ${row.territory}`
 				: row.agentName;
 	}
+}
+
+/**
+ * The actor, as all three actor wires show it: its kind, the operator's
+ * user id, the agent's roster entry, the label, and for an agent its
+ * template and territory. One function, so the wires cannot drift.
+ */
+export function activityActor(row: ActorRow): ActivityActor {
+	const base = {
+		kind: row.actorKind,
+		userId: row.actorUserId,
+		rosterEntryId: row.actorRosterEntryId,
+		display: actorDisplay(row),
+	};
+	if (row.actorKind !== "agent") return { ...base, agent: null };
+	if (row.agentTemplateId === null || row.agentSlug === null) {
+		throw new Error(`activity ${row.id}: agent has no template row`);
+	}
+	return {
+		...base,
+		agent: {
+			templateId: row.agentTemplateId,
+			slug: row.agentSlug,
+			name: row.agentName as string,
+			territory: row.territory,
+		},
+	};
 }
 
 /** The keyset position shared.ts pages on: (at desc, id desc) here. */
@@ -68,7 +113,7 @@ function toWire(row: Row): ActivityEntry {
 		engagementId: row.engagementId,
 		requestId: row.requestId,
 		payload: row.payload as Record<string, unknown>,
-		actor: { kind: row.actorKind, display: actorDisplay(row) },
+		actor: activityActor(row),
 	};
 }
 

@@ -69,7 +69,7 @@ describe("seed skill catalog", () => {
 				(FIRM_ROLES as readonly Role[]).includes(r),
 			);
 			expect(firm, k.slug).toEqual([]);
-			// The seed invents no users.
+			// The seed operator reviews nothing.
 			expect([k.reviewedBy, k.reviewedAt], k.slug).toEqual([null, null]);
 		}
 	});

@@ -31,7 +31,7 @@ import {
 import { live, stamp, touch } from "../db/schema/columns";
 import type { PresetAgent as StoredAgent } from "../db/schema/work";
 import { withTx } from "../db/tx";
-import { actorColumns, actorDisplay } from "./activity";
+import { type ActorRow, activityActor, actorColumns } from "./activity";
 import { requirePresetAgents } from "./roster";
 import {
 	after,
@@ -102,16 +102,10 @@ function appliedFilter(presetId: string): SQL | undefined {
 /** The keyset position shared.ts pages on: (at desc, id desc), as /api/activity. */
 const appliedPosition = { createdAt: activityLog.at, id: activityLog.id };
 
-type ApplicationRow = {
-	id: string;
+type ApplicationRow = ActorRow & {
 	at: Date;
-	actorKind: PresetApplication["actor"]["kind"];
-	actorUserId: string | null;
 	missionId: string;
 	payload: unknown;
-	login: string | null;
-	agentName: string | null;
-	territory: string | null;
 	missionStatus: NonNullable<PresetApplication["mission"]>["status"] | null;
 	missionType: string | null;
 };
@@ -132,11 +126,7 @@ function toApplication(row: ApplicationRow): PresetApplication {
 				: null,
 		presetVersion: payload.data.presetVersion,
 		appliedAt: row.at.toISOString(),
-		actor: {
-			kind: row.actorKind,
-			userId: row.actorUserId,
-			display: actorDisplay(row),
-		},
+		actor: activityActor(row),
 		added: payload.data.added.length,
 		removed: payload.data.removed.length,
 	};
@@ -195,10 +185,7 @@ export function presetRoutes(deps: RouteDeps) {
 			const [rows, [counted]] = await Promise.all([
 				db
 					.select({
-						id: activityLog.id,
 						at: activityLog.at,
-						actorKind: activityLog.actorKind,
-						actorUserId: activityLog.actorUserId,
 						missionId: activityLog.entityId,
 						payload: activityLog.payload,
 						...actorColumns,

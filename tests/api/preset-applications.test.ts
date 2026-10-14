@@ -133,7 +133,9 @@ describe.skipIf(!process.env.DATABASE_URL)("preset applications", () => {
 			const actor = {
 				kind: "operator",
 				userId: await operatorId(),
+				rosterEntryId: null,
 				display: operator.login,
+				agent: null,
 			};
 			const at = clock.now().toISOString();
 			expect(data).toEqual([

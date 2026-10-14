@@ -1,6 +1,6 @@
 import { initContract } from "@ts-rest/core";
 import { z } from "zod";
-import { activityActorKind } from "./activity";
+import { activityActor } from "./activity";
 import { wave } from "./agent-template";
 import { missionCut } from "./mission";
 import { addRosterEntryBody } from "./roster";
@@ -112,13 +112,8 @@ export const presetApplicationSchema = z.object({
 	/** The preset's version when it was applied. */
 	presetVersion: z.number().int().positive(),
 	appliedAt: iso,
-	/** Who applied it. display resolves as on GET /api/activity. */
-	actor: z.object({
-		kind: activityActorKind,
-		/** Set exactly when kind is operator. */
-		userId: z.string().uuid().nullable(),
-		display: z.string(),
-	}),
+	/** Who applied it, as on GET /api/activity. */
+	actor: activityActor,
 	/** Roster entries the application added, and removed (replace: true). */
 	added: z.number().int().nonnegative(),
 	removed: z.number().int().nonnegative(),

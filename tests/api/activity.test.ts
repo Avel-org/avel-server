@@ -40,6 +40,7 @@ type Seeded = {
 	m2: string;
 	exportId: string;
 	rosterEntryId: string;
+	template: string;
 	operatorId: string;
 	/** The signed-in operator's GitHub login, which labels their rows. */
 	operatorLogin: string;
@@ -202,6 +203,7 @@ async function seed(
 		m2,
 		exportId,
 		rosterEntryId,
+		template,
 		operatorId,
 		operatorLogin,
 		prefix,
@@ -289,7 +291,13 @@ describe.skipIf(!url)("/api/activity", () => {
 					engagementId: s.e1,
 					requestId: "req-f",
 					payload: { name: "f" },
-					actor: { kind: "operator", display: s.operatorLogin },
+					actor: {
+						kind: "operator",
+						userId: s.operatorId,
+						rosterEntryId: null,
+						display: s.operatorLogin,
+						agent: null,
+					},
 				},
 				{
 					id: s.row.d,
@@ -304,7 +312,18 @@ describe.skipIf(!url)("/api/activity", () => {
 					engagementId: s.e1,
 					requestId: "req-d",
 					payload: { name: "d" },
-					actor: { kind: "agent", display: "Backend · booking" },
+					actor: {
+						kind: "agent",
+						userId: null,
+						rosterEntryId: s.rosterEntryId,
+						display: "Backend · booking",
+						agent: {
+							templateId: s.template,
+							slug: "backend",
+							name: "Backend",
+							territory: "booking",
+						},
+					},
 				},
 				{
 					id: s.row.c,
@@ -319,7 +338,13 @@ describe.skipIf(!url)("/api/activity", () => {
 					engagementId: s.e1,
 					requestId: "req-c",
 					payload: { name: "c" },
-					actor: { kind: "system", display: "System" },
+					actor: {
+						kind: "system",
+						userId: null,
+						rosterEntryId: null,
+						display: "AVEL runner",
+						agent: null,
+					},
 				},
 			]);
 		});
@@ -334,7 +359,15 @@ describe.skipIf(!url)("/api/activity", () => {
 			const { data } = await listOf(call, "actorKind=agent");
 			expect(data.find((r) => r.id === s.row.d)?.actor).toEqual({
 				kind: "agent",
+				userId: null,
+				rosterEntryId: s.rosterEntryId,
 				display: "Backend",
+				agent: {
+					templateId: s.template,
+					slug: "backend",
+					name: "Backend",
+					territory: null,
+				},
 			});
 		});
 	});

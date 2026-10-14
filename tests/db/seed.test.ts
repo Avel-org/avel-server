@@ -12,7 +12,12 @@ import {
 } from "../../src/db/dispatch";
 import * as schema from "../../src/db/schema";
 import { assertDevDatabase, runSeed } from "../../src/db/seed";
+import {
+	SEED_OPERATOR_GITHUB_ID,
+	SEED_OPERATOR_ID,
+} from "../../src/db/seed/data";
 import { fixedClock } from "../../src/lib/clock";
+import { OPERATOR, testAuthConfig } from "../unit/support";
 
 /** Fixed, so two seeded databases match: running dispatches are timed from it. */
 const seedClock = fixedClock("2026-10-13T12:00:00.000Z");
@@ -150,6 +155,38 @@ describe.skipIf(!url)("pnpm db:seed", () => {
 			} finally {
 				await conn.end();
 			}
+		},
+		BUDGET_MS,
+	);
+
+	it(
+		"seeds one operator user with no account or session, so nothing can sign in as it",
+		async () => {
+			const conn = postgres(withDatabase(url ?? "", first), {
+				max: 1,
+				onnotice: () => {},
+			});
+			try {
+				const users = await conn<{ id: string; github_id: string }[]>`
+					select id, github_id from "user"`;
+				expect(users).toEqual([{ id: SEED_OPERATOR_ID, github_id: "0" }]);
+				const accounts = await conn`
+					select id from account where user_id = ${SEED_OPERATOR_ID}`;
+				const sessions = await conn`
+					select id from session where user_id = ${SEED_OPERATOR_ID}`;
+				expect([accounts.length, sessions.length]).toEqual([0, 0]);
+				const named = await conn<{ n: number }[]>`
+					select count(*)::int as n from activity_log
+					where actor_kind = 'operator' and actor_user_id = ${SEED_OPERATOR_ID}`;
+				expect(named[0]?.n).toBe(88);
+			} finally {
+				await conn.end();
+			}
+			// GitHub ids start at 1: no allowlist the tests build holds 0.
+			expect(String(OPERATOR.id)).not.toBe("0");
+			expect(
+				testAuthConfig([String(OPERATOR.id)]).operatorGithubIds,
+			).not.toContain(SEED_OPERATOR_GITHUB_ID);
 		},
 		BUDGET_MS,
 	);

@@ -37,6 +37,10 @@ import {
 } from "../db/identity";
 import { agentTemplate, mission, rosterEntry } from "../db/schema";
 import { live, touch } from "../db/schema/columns";
+import {
+	templateDispatches,
+	templateDispatchTotals,
+} from "../db/template-dispatches";
 import { type Executor, withTx } from "../db/tx";
 import type { IdentityRefusal } from "../lib/identity";
 import { mergeAllowed } from "../lib/roles";
@@ -249,6 +253,24 @@ export function agentTemplateRoutes(deps: RouteDeps) {
 				await liveTemplate(db, params.id),
 			]);
 			return { status: 200, body: ok(wire as AgentTemplate) };
+		},
+
+		dispatches: async ({ params, query }) => {
+			const db = deps.db();
+			const template = await liveTemplate(db, params.id);
+			const filters = { status: query.status, missionId: query.missionId };
+			const [{ items, nextCursor }, totals] = await Promise.all([
+				templateDispatches(db, template.id, { ...filters, ...query }),
+				templateDispatchTotals(db, template.id, filters),
+			]);
+			return {
+				status: 200,
+				body: {
+					success: true as const,
+					data: items,
+					meta: { nextCursor, total: totals.total, totals },
+				},
+			};
 		},
 
 		identityVersions: async ({ params }) => {

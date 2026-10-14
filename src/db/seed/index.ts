@@ -72,6 +72,7 @@ export async function runSeed(
 		if (existing.length === 0) {
 			const rows = buildSeed(seedIds(), clock.now());
 			await withTx(db, async (tx) => {
+				await tx.insert(schema.user).values(rows.user);
 				await tx.insert(schema.client).values(rows.client);
 				await tx.insert(schema.engagement).values(rows.engagement);
 				await tx.insert(schema.connection).values(rows.connection);

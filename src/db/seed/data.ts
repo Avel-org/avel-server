@@ -24,6 +24,7 @@ import type {
 	rosterPreset,
 	skill,
 	skillSource,
+	user,
 } from "../schema";
 
 /**
@@ -52,6 +53,17 @@ export function seedId(n: number): string {
 	return `${head}-5eed-4000-8000-${String(n).padStart(12, "0")}`;
 }
 
+/**
+ * The seed operator: one user every seeded operator act names, so seeded
+ * activity reads as the operator's, as the product writes it. It has no
+ * account and no session, so nothing can sign in as it, and GitHub id 0,
+ * which no GitHub account has, so it can never match the allowlist. On
+ * avel_dev, J's real sign-in creates its own user row beside it. Its id is
+ * fixed rather than drawn, so every seed id drawn below stays where it was.
+ */
+export const SEED_OPERATOR_ID = seedId(900_000);
+export const SEED_OPERATOR_GITHUB_ID = "0";
+
 /** The ids the seed hands out: seedId(1) onwards. */
 export function seedIds(): IdGenerator {
 	let n = 0;
@@ -74,6 +86,8 @@ export const BOOKING_TEMPLATE_SHA = DEV_BOOKING_SHA;
 type Row<T extends { $inferInsert: unknown }> = T["$inferInsert"];
 
 export interface SeedRows {
+	/** One row: the seed operator. */
+	user: Row<typeof user>[];
 	client: Row<typeof client>[];
 	engagement: Row<typeof engagement>[];
 	connection: Row<typeof connection>[];
@@ -325,6 +339,19 @@ type ExportStatus = Row<typeof exportTable>["status"];
  */
 export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 	const rows: SeedRows = {
+		user: [
+			{
+				id: SEED_OPERATOR_ID,
+				name: "Seed operator",
+				email: "seed-operator@example.com",
+				emailVerified: false,
+				image: null,
+				githubId: SEED_OPERATOR_GITHUB_ID,
+				githubLogin: "seed-operator",
+				createdAt: at(0),
+				updatedAt: at(0),
+			},
+		],
 		client: [],
 		engagement: [],
 		connection: [],
@@ -350,14 +377,24 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 		entityId: string,
 		payload: Record<string, unknown>,
 		scope: { missionId?: string | null; engagementId?: string | null } = {},
-		/** An agent's own write, logged as that agent; otherwise system. */
-		agentEntryId?: string,
+		/**
+		 * Who wrote it: the seed operator by default, as the product's
+		 * operator routes would; the runner for its own acts; or an agent's
+		 * own write, by its roster entry.
+		 */
+		actor: "operator" | "runner" | { agent: string } = "operator",
 	) => {
 		rows.activityLog.push({
 			id: ids.next(),
 			at: when,
-			actorKind: agentEntryId === undefined ? "system" : "agent",
-			actorRosterEntryId: agentEntryId ?? null,
+			actorKind:
+				actor === "operator"
+					? "operator"
+					: actor === "runner"
+						? "system"
+						: "agent",
+			actorUserId: actor === "operator" ? SEED_OPERATOR_ID : null,
+			actorRosterEntryId: typeof actor === "object" ? actor.agent : null,
 			action,
 			entityType,
 			entityId,
@@ -564,8 +601,8 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 		sprint: number;
 		summary: string;
 		created: number;
-		/** Status changes after draft, as [status, day]. */
-		path: [MissionStatus, number][];
+		/** Status changes after draft, as [status, day], and "runner" when the runner made it. */
+		path: [MissionStatus, number, "runner"?][];
 		deletedDay?: number;
 		spendCeilingUsd?: string;
 		/** A shaped brief. Without one the mission stores only its summary. */
@@ -607,7 +644,7 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 			scope,
 		);
 		let from: MissionStatus = "draft";
-		for (const [to, day] of m.path) {
+		for (const [to, day, by] of m.path) {
 			log(
 				at(day, 3),
 				"mission.status_changed",
@@ -615,6 +652,7 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 				id,
 				{ from, to },
 				scope,
+				by ?? "operator",
 			);
 			from = to;
 		}
@@ -869,6 +907,8 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 			{ target: x.target },
 			scope,
 		);
+		// The export engine moves an export's status, not a person, so these
+		// rows are the system's ("AVEL runner" until an export engine exists).
 		log(
 			at(x.endDay, 5),
 			"export.status_changed",
@@ -876,6 +916,7 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 			id,
 			{ to: x.status },
 			scope,
+			"runner",
 		);
 		return id;
 	};
@@ -983,8 +1024,8 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 
 	// Added last, so every earlier seed id stays where it was. The skill
 	// catalog: one source of each kind, and skills across the three layers,
-	// both types and every status. The seed invents no users, so no skill
-	// names a reviewer, approved ones included. No role_skills or
+	// both types and every status. No skill names a reviewer, approved ones
+	// included: the seed operator reviews nothing. No role_skills or
 	// mission_skills rows.
 	const addSource = (
 		name: string,
@@ -1328,8 +1369,7 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 	}
 
 	// The edits themselves, as the PATCH logs them: sorted changed keys and
-	// the version they produced. A system row like every seeded one, since
-	// the seed invents no users and an operator row needs one.
+	// the version they produced, as the seed operator, who made them.
 	for (const slug of Object.keys(AGENTS) as AgentSlug[]) {
 		const edit = TEMPLATE_EDITS[slug];
 		if (!edit) continue;
@@ -1341,10 +1381,10 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 
 	// Added last, so every earlier seed id stays where it was. Module 6's
 	// preview: one active client mission with a dispatch in every state, and
-	// one halted by its spend ceiling. Dispatches are created by the operator
-	// in the product; the seed invents no users, so those rows are system,
-	// like every other seeded operator act. Agent-filed reports log as the
-	// agent; runner-filed ones, and every runner act, log as system.
+	// one halted by its spend ceiling. Dispatches are created and started by
+	// the operator, so those rows are the seed operator's. Agent-filed
+	// reports log as the agent; runner-filed ones, and every runner act,
+	// log as system.
 	const fakeSha = (label: string) =>
 		createHash("sha256").update(`seed:${label}`, "utf8").digest("hex");
 	const currentVersion = (slug: AgentSlug) => {
@@ -1411,7 +1451,7 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 		created: 28,
 		path: [
 			["active", 29],
-			["halted", 30],
+			["halted", 30, "runner"],
 		],
 		spendCeilingUsd: "15.00",
 		brief: {
@@ -1595,6 +1635,7 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 				id,
 				{ tokenSoftCeiling: soft },
 				scope,
+				"runner",
 			);
 		}
 		if (d.ended === undefined) return row;
@@ -1607,6 +1648,8 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 				id,
 				{ reason: d.haltReason },
 				scope,
+				// An operator halt is the operator's; every other halt the runner's.
+				d.haltReason === "operator" ? "operator" : "runner",
 			);
 		}
 		const r = d.report;
@@ -1639,7 +1682,8 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 			createdAt: endAt,
 			updatedAt: endAt,
 		});
-		const filer = r.filedBy === "agent" ? entry.id : undefined;
+		const filer =
+			r.filedBy === "agent" ? { agent: entry.id } : ("runner" as const);
 		log(
 			endAt,
 			"completion_report.filed",

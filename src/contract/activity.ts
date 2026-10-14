@@ -84,6 +84,28 @@ export type ActivityEntityType = z.infer<typeof activityEntityType>;
 const iso = z.string().datetime();
 const uuid = z.string().uuid();
 
+/** The agent behind an agent row: its template and the entry's territory. */
+export const activityAgent = z.object({
+	templateId: uuid,
+	slug: z.string(),
+	name: z.string(),
+	territory: z.string().nullable(),
+});
+
+/** Who acted: the one actor shape every activity read returns. */
+export const activityActor = z.object({
+	kind: activityActorKind,
+	/** Set exactly when kind is operator. */
+	userId: uuid.nullable(),
+	/** Set exactly when kind is agent. */
+	rosterEntryId: uuid.nullable(),
+	display: z.string(),
+	/** Set exactly when kind is agent, even after the entry or template is removed. */
+	agent: activityAgent.nullable(),
+});
+
+export type ActivityActor = z.infer<typeof activityActor>;
+
 /** One ActivityLog row: its columns in camelCase, plus the actor's label. */
 export const activityEntry = z.object({
 	id: uuid,
@@ -103,10 +125,10 @@ export const activityEntry = z.object({
 	payload: z.record(z.string(), z.unknown()),
 	/**
 	 * Who acted, for display. An operator is their GitHub login, the system is
-	 * "System", and an agent is "Name · territory" from its RosterEntry and
-	 * AgentTemplate, or the bare name when the entry has no territory.
+	 * "AVEL runner", and an agent is "Name · territory" from its RosterEntry
+	 * and AgentTemplate, or the bare name when the entry has no territory.
 	 */
-	actor: z.object({ kind: activityActorKind, display: z.string() }),
+	actor: activityActor,
 });
 
 export type ActivityEntry = z.infer<typeof activityEntry>;

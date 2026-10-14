@@ -23,6 +23,7 @@ import {
 import { missionSpentUsd } from "../db/dispatch";
 import {
 	activityLog,
+	agentTemplate,
 	client,
 	engagement,
 	exportTable,
@@ -34,6 +35,7 @@ import {
 import { live } from "../db/schema/columns";
 import type { Executor } from "../db/tx";
 import { ApiError } from "../middleware/errors";
+import { activityActor, actorColumns } from "./activity";
 import {
 	containsPattern,
 	notFound,
@@ -500,18 +502,25 @@ export function missionRoutes(deps: RouteDeps) {
 				);
 			if (!row) throw notFound("mission", params.id);
 
-			// Query 2 of 3: the ten newest activity rows, with operator logins.
+			// Query 2 of 3: the ten newest activity rows, with their actors,
+			// joined as the activity feed joins them (no live()).
 			const activity = await db
 				.select({
 					action: activityLog.action,
 					entityType: activityLog.entityType,
 					at: activityLog.at,
-					actorKind: activityLog.actorKind,
-					actorUserId: activityLog.actorUserId,
-					login: user.githubLogin,
+					...actorColumns,
 				})
 				.from(activityLog)
 				.leftJoin(user, eq(user.id, activityLog.actorUserId))
+				.leftJoin(
+					rosterEntry,
+					eq(rosterEntry.id, activityLog.actorRosterEntryId),
+				)
+				.leftJoin(
+					agentTemplate,
+					eq(agentTemplate.id, rosterEntry.agentTemplateId),
+				)
 				.where(eq(activityLog.missionId, params.id))
 				.orderBy(desc(activityLog.at), desc(activityLog.id))
 				.limit(10);
@@ -543,11 +552,7 @@ export function missionRoutes(deps: RouteDeps) {
 					action: a.action,
 					entityType: a.entityType,
 					at: a.at.toISOString(),
-					actor: {
-						kind: a.actorKind,
-						userId: a.actorUserId,
-						display: a.login,
-					},
+					actor: activityActor(a),
 				})),
 			};
 			return { status: 200, body: ok(detail) };

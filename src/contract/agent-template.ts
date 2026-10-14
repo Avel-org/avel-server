@@ -1,5 +1,9 @@
 import { initContract } from "@ts-rest/core";
 import { z } from "zod";
+import {
+	templateDispatchListEnvelope,
+	templateDispatchListQuery,
+} from "./dispatch";
 import { agentAccess } from "./shared/access";
 import { successEnvelope } from "./shared/envelope";
 import { pageEnvelope, pageQuery } from "./shared/pagination";
@@ -317,6 +321,15 @@ export const agentTemplateContract = c.router({
 		responses: { 200: successEnvelope(agentTemplateSchema) },
 		summary:
 			"Edits title, description, roles, waveDefaults or writablePaths. Refused (422 agent_roles_cross_sides, agent_role_not_assignable). A missing or deleted template is 404",
+	},
+	dispatches: {
+		method: "GET",
+		path: "/api/agent-templates/:id/dispatches",
+		pathParams: byId,
+		query: templateDispatchListQuery,
+		responses: { 200: templateDispatchListEnvelope },
+		summary:
+			"The template's dispatches across its identity versions, newest first, on missions the mission detail route shows. meta.totals follows the filters and ignores the cursor. A missing or deleted template is 404",
 	},
 	rosterEntries: {
 		method: "GET",
