@@ -1,5 +1,9 @@
 import { and, asc, eq } from "drizzle-orm";
-import type { HaltReason, MissionStatus } from "../contract";
+import {
+	type HaltReason,
+	type MissionStatus,
+	resolveWritablePaths,
+} from "../contract";
 import { type ActivityEntry, logActivity } from "../db/activity";
 import { type DispatchRow, missionSpentUsd } from "../db/dispatch";
 import { currentIdentity } from "../db/identity";
@@ -20,6 +24,12 @@ import { identitySupported } from "../lib/roles";
 import { DISPATCH_TOKEN_PREFIX, mintToken, sha256Hex } from "../lib/tokens";
 import { ApiError, type ApiErrorOptions } from "../middleware/errors";
 import {
+	type Room,
+	type RoomProvider,
+	RoomUnavailable,
+} from "../rooms/provider";
+import type { RoomSourceResolver } from "../rooms/sources";
+import {
 	addUsage,
 	type PriceBook,
 	spendCeilingReached,
@@ -27,6 +37,7 @@ import {
 	wallClockSpent,
 } from "./budget";
 import type { Harness } from "./harness";
+import { missionRoomSource } from "./room-source";
 import { dispatchSkills, skillsSha256 } from "./skills";
 
 /**
@@ -51,6 +62,8 @@ export type RunnerDeps = {
 	ids: IdGenerator;
 	harness: Harness;
 	prices: PriceBook;
+	rooms: RoomProvider;
+	roomSources: RoomSourceResolver;
 };
 
 type Actor = Pick<
@@ -76,16 +89,37 @@ export type LockedMission = {
 	spendCeilingUsd: string | null;
 };
 
-/** One step's transaction, and the sessions to stop once it commits. */
-export type Step = { tx: Tx; stops: string[] };
+/**
+ * One step's transaction, the sessions to stop once it commits, and what
+ * to undo outside the database if it rolls back (a room opened, a session
+ * started).
+ */
+export type Step = {
+	tx: Tx;
+	stops: string[];
+	onRollback: Array<() => Promise<void>>;
+};
 
-/** Runs `fn` in one transaction, then stops the sessions it closed. */
+/**
+ * Runs `fn` in one transaction, then stops the sessions it closed. When
+ * the transaction rolls back, every onRollback undo runs, newest first,
+ * and the error is rethrown; an undo that fails does not hide it.
+ */
 export async function inStep<T>(
 	deps: Pick<RunnerDeps, "db" | "harness">,
 	fn: (step: Step) => Promise<T>,
 ): Promise<T> {
 	const stops: string[] = [];
-	const result = await withTx(deps.db(), (tx) => fn({ tx, stops }));
+	const onRollback: Step["onRollback"] = [];
+	let result: T;
+	try {
+		result = await withTx(deps.db(), (tx) => fn({ tx, stops, onRollback }));
+	} catch (err) {
+		for (const undo of onRollback.reverse()) {
+			await undo().catch(() => {});
+		}
+		throw err;
+	}
 	for (const id of stops) await deps.harness.stop(id);
 	return result;
 }
@@ -152,12 +186,13 @@ function refuse(
  * transaction, so a harness that refuses rolls the start back.
  */
 export async function startDispatch(
-	tx: Tx,
+	step: Step,
 	deps: RunnerDeps,
 	m: LockedMission,
 	dispatchId: string,
 	by: Acting,
 ): Promise<void> {
+	const { tx } = step;
 	const d = await lockDispatch(tx, dispatchId);
 	if (!d || d.missionId !== m.id) {
 		throw new Error(`dispatch ${dispatchId} is not on mission ${m.id}`);
@@ -178,8 +213,10 @@ export async function startDispatch(
 		.select({
 			id: rosterEntry.id,
 			active: rosterEntry.active,
+			writablePaths: rosterEntry.writablePaths,
 			templateId: agentTemplate.id,
 			roles: agentTemplate.roles,
+			templatePaths: agentTemplate.writablePaths,
 		})
 		.from(rosterEntry)
 		.innerJoin(agentTemplate, eq(agentTemplate.id, rosterEntry.agentTemplateId))
@@ -215,6 +252,11 @@ export async function startDispatch(
 		});
 	}
 
+	const room = await openRoom(step, deps, m, d.id, {
+		writablePaths: entry.writablePaths,
+		templatePaths: entry.templatePaths,
+	});
+
 	const skills = skillsSha256(await dispatchSkills(tx, m.id, entry.roles));
 	const token = mintToken(DISPATCH_TOKEN_PREFIX, deps.ids);
 	const now = deps.clock.now();
@@ -247,11 +289,65 @@ export async function startDispatch(
 			priceVersion: deps.prices.current,
 		},
 	});
-	if (!(await deps.harness.start({ dispatchId: d.id, token, model }))) {
+	const session = { dispatchId: d.id, token, model, roomRoot: room.root };
+	if (!(await deps.harness.start(session))) {
 		throw refuse("The harness cannot take this dispatch now", {
 			details: { reason: "harness_unavailable", ...at },
 		});
 	}
+	// A commit that fails after this must not leave a session running.
+	step.onRollback.push(() => deps.harness.stop(d.id));
+}
+
+/**
+ * The dispatch's room, from the mission's source: source_unavailable when
+ * the source cannot be resolved (retrying will not help), room_unavailable
+ * when it resolved but no room could be made. Once open, a rollback of
+ * the start releases it.
+ */
+async function openRoom(
+	step: Step,
+	deps: RunnerDeps,
+	m: LockedMission,
+	dispatchId: string,
+	paths: { writablePaths: string[] | null; templatePaths: string[] },
+): Promise<Room> {
+	const at = { dispatchId, missionId: m.id };
+	const found = await missionRoomSource(step.tx, m.id);
+	const resolved =
+		"issue" in found
+			? ({ ok: false, issue: found.issue } as const)
+			: await deps.roomSources.resolve(found.source);
+	if (!resolved.ok) {
+		throw refuse("The mission's source cannot be found", {
+			details: {
+				reason: "source_unavailable",
+				...at,
+				issues: [
+					{ path: resolved.issue.path, message: resolved.issue.message },
+				],
+			},
+		});
+	}
+	let room: Room;
+	try {
+		room = await deps.rooms.open({
+			dispatchId,
+			repoPath: resolved.repoPath,
+			commit: resolved.commit,
+			writableGlobs: resolveWritablePaths(
+				{ writablePaths: paths.writablePaths },
+				{ writablePaths: paths.templatePaths },
+			),
+		});
+	} catch (err) {
+		if (!(err instanceof RoomUnavailable)) throw err;
+		throw refuse("No room could be made for this dispatch now", {
+			details: { reason: "room_unavailable", ...at },
+		});
+	}
+	step.onRollback.push(() => deps.rooms.release(dispatchId));
+	return room;
 }
 
 export type DispatchEnd =

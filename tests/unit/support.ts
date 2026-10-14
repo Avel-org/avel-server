@@ -12,6 +12,7 @@ import { noDispatches } from "../../src/middleware/caller";
 import { DEFAULT_PRICE_BOOK } from "../../src/runner/budget";
 import { FakeHarness } from "../../src/runner/harness";
 import { noRepos } from "./repo-fixtures";
+import { anySource, memoryRooms } from "./room-fixtures";
 
 // Helpers shared by the unit tests. Not collected as a test file: vitest only
 // collects *.test.ts.
@@ -123,6 +124,8 @@ export function buildApp(
 		runnerCredentialSha256: null,
 		harness: new FakeHarness(),
 		prices: DEFAULT_PRICE_BOOK,
+		rooms: memoryRooms(),
+		roomSources: anySource,
 	});
 	return { app, auth, memory, logs: lines, signIns };
 }

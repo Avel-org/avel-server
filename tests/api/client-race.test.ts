@@ -21,6 +21,7 @@ import { noDispatches } from "../../src/middleware/caller";
 import { DEFAULT_PRICE_BOOK } from "../../src/runner/budget";
 import { FakeHarness } from "../../src/runner/harness";
 import { noRepos } from "../unit/repo-fixtures";
+import { anySource, memoryRooms } from "../unit/room-fixtures";
 import {
 	BASE_URL,
 	captureLogger,
@@ -177,6 +178,8 @@ describe.skipIf(!url)(
 					runnerCredentialSha256: null,
 					harness: new FakeHarness(),
 					prices: DEFAULT_PRICE_BOOK,
+					rooms: memoryRooms(),
+					roomSources: anySource,
 				}),
 				creator: createApp({
 					clock,
@@ -192,6 +195,8 @@ describe.skipIf(!url)(
 					runnerCredentialSha256: null,
 					harness: new FakeHarness(),
 					prices: DEFAULT_PRICE_BOOK,
+					rooms: memoryRooms(),
+					roomSources: anySource,
 				}),
 			};
 			const { cookie } = await signInWithGitHub(apps.creator, OPERATOR);

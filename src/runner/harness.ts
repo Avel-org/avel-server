@@ -26,6 +26,8 @@ export type HarnessSession = {
 	/** The dispatch's access token, in the clear. Only the harness holds it. */
 	token: string;
 	model: string;
+	/** The dispatch's room (src/rooms): where the agent's file tools work. */
+	roomRoot: string;
 };
 
 export type Harness = {
@@ -67,7 +69,7 @@ export class FakeHarness implements Harness {
 	private readonly scripts = new Map<string, FakeScript>();
 	private readonly sessions = new Map<
 		string,
-		{ token: string; events: HarnessEvent[] }
+		{ token: string; roomRoot: string; events: HarnessEvent[] }
 	>();
 	/** Every dispatch id stop() was called with, in order. */
 	readonly stopped: string[] = [];
@@ -86,6 +88,11 @@ export class FakeHarness implements Harness {
 		return this.sessions.get(dispatchId)?.token;
 	}
 
+	/** The room a session was started in. */
+	roomFor(dispatchId: string): string | undefined {
+		return this.sessions.get(dispatchId)?.roomRoot;
+	}
+
 	/** Forgets every session, as a restart would. */
 	restart(): void {
 		this.sessions.clear();
@@ -99,7 +106,11 @@ export class FakeHarness implements Harness {
 			split: { ...split },
 		}));
 		if (s.outcome !== "until_stopped") events.push({ kind: s.outcome });
-		this.sessions.set(session.dispatchId, { token: session.token, events });
+		this.sessions.set(session.dispatchId, {
+			token: session.token,
+			roomRoot: session.roomRoot,
+			events,
+		});
 		return true;
 	}
 

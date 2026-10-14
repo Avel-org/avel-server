@@ -105,6 +105,7 @@ describe("the error envelope is a discriminated union on code", () => {
 			"dispatch_not_running",
 			"model_price_unknown",
 			"harness_unavailable",
+			"source_unavailable",
 			"room_unavailable",
 			"report_dispatch_mismatch",
 			"writes_outside_mount",

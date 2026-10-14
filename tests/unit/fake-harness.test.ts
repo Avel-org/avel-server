@@ -12,6 +12,7 @@ const session = (dispatchId: string) => ({
 	dispatchId,
 	token: `avl_dsp_${dispatchId}`,
 	model: FAKE_HARNESS_MODEL,
+	roomRoot: `rooms/${dispatchId}`,
 });
 
 describe("FakeHarness", () => {
@@ -45,6 +46,7 @@ describe("FakeHarness", () => {
 		expect(await h.has("d1")).toBe(true);
 		expect(await h.next("d1")).toBeNull();
 		expect(h.tokenFor("d1")).toBe("avl_dsp_d1");
+		expect(h.roomFor("d1")).toBe("rooms/d1");
 		await h.stop("d1");
 		expect(await h.has("d1")).toBe(false);
 		expect(h.stopped).toEqual(["d1"]);

@@ -379,9 +379,9 @@ export function dispatchRoutes(deps: RouteDeps & RunnerDeps) {
 
 		start: async ({ params }, ctx) => {
 			const by = operatorActing(ctx);
-			await inStep(deps, async ({ tx }) => {
-				const m = await lockedMissionOf(tx, params.id);
-				await startDispatch(tx, deps, m, params.id, by);
+			await inStep(deps, async (step) => {
+				const m = await lockedMissionOf(step.tx, params.id);
+				await startDispatch(step, deps, m, params.id, by);
 			});
 			const wire = await dispatchWire(deps.db(), params.id);
 			if (!wire) throw new Error(`dispatch ${params.id} vanished`);

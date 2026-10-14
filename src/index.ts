@@ -1,4 +1,6 @@
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
 import { serve } from "@hono/node-server";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { createApp } from "./app";
@@ -25,6 +27,8 @@ import {
 	TEMPLATE_REPOS,
 } from "./lib/templates";
 import { runnerCredentialSha256 } from "./lib/tokens";
+import { worktreeRooms } from "./rooms/provider";
+import { localSources } from "./rooms/sources";
 import { DEFAULT_PRICE_BOOK } from "./runner/budget";
 import { FakeHarness } from "./runner/harness";
 
@@ -74,6 +78,14 @@ if (templateOwner && templateToken) {
 	);
 }
 
+// Tier 0 rooms are worktrees under %LOCALAPPDATA%\avel\rooms (J, 2026-10-13);
+// elsewhere, under the user's local share directory.
+const roomsRoot = path.join(
+	process.env.LOCALAPPDATA ?? path.join(homedir(), ".local", "share"),
+	"avel",
+	"rooms",
+);
+
 // Throws, so the server refuses to start, on a short or unprefixed credential.
 const runnerCredential = runnerCredentialSha256(
 	process.env.AVEL_RUNNER_CREDENTIAL,
@@ -109,6 +121,9 @@ serve({
 		// later step wires the runner process (src/runner/runner.ts).
 		harness: new FakeHarness(),
 		prices: DEFAULT_PRICE_BOOK,
+		rooms: worktreeRooms(roomsRoot),
+		// Local clones only; unset, every start refuses source_unavailable.
+		roomSources: localSources(process.env.AVEL_SOURCES_DIR || undefined),
 	}).fetch,
 	port,
 });

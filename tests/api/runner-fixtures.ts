@@ -15,6 +15,7 @@ import type { PriceBook } from "../../src/runner/budget";
 import type { FakeHarness } from "../../src/runner/harness";
 import type { RunnerDeps } from "../../src/runner/runner";
 import { dispatchValues, insertDispatchRow } from "../db/dispatch-fixtures";
+import { anySource, memoryRooms } from "../unit/room-fixtures";
 import { type Seeded, seedRosteredAgent } from "./agent-fixtures";
 import type { ApiHarness } from "./support";
 
@@ -59,6 +60,9 @@ export function runnerIds(ns: string): IdGenerator {
 
 export type Mission = Seeded & { ids: IdGenerator };
 
+/** The template commit activeMission's missions record. */
+export const TEMPLATE_COMMIT = "a".repeat(40);
+
 /** An active mission with a spend ceiling, and one model agent on its roster. */
 export async function activeMission(
 	tx: Tx,
@@ -68,7 +72,13 @@ export async function activeMission(
 	const seeded = await seedRosteredAgent(tx, ids, ["domain", "api-surface"]);
 	await tx
 		.update(mission)
-		.set({ status: "active", spendCeilingUsd })
+		.set({
+			status: "active",
+			spendCeilingUsd,
+			// A source for its rooms: start refuses a mission without one.
+			templateRef: "template-booking",
+			templateVersion: TEMPLATE_COMMIT,
+		})
 		.where(eq(mission.id, seeded.missionId));
 	return { ...seeded, ids };
 }
@@ -116,13 +126,17 @@ export function runnerDeps(
 	harness: FakeHarness,
 	prices: PriceBook,
 	clock: Clock,
+	rooms: Pick<RunnerDeps, "rooms" | "roomSources"> = {
+		rooms: memoryRooms(),
+		roomSources: anySource,
+	},
 ): RunnerDeps {
 	let ids = runnerIdsByNs.get(h.ns);
 	if (!ids) {
 		ids = runnerIds(h.ns);
 		runnerIdsByNs.set(h.ns, ids);
 	}
-	return { db: () => h.tx, clock, ids, harness, prices };
+	return { db: () => h.tx, clock, ids, harness, prices, ...rooms };
 }
 
 /** A token split with only input tokens. */

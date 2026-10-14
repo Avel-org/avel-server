@@ -28,6 +28,8 @@ import {
 	UNAVAILABLE_REQUEST_ID,
 } from "./middleware/errors";
 import { requestId } from "./middleware/request-id";
+import type { RoomProvider } from "./rooms/provider";
+import type { RoomSourceResolver } from "./rooms/sources";
 import { activityRoutes } from "./routes/activity";
 import { agentRoutes } from "./routes/agent";
 import {
@@ -76,6 +78,10 @@ export type AppDeps = {
 	harness: Harness;
 	/** Price tables by version, and the one a new dispatch starts under (src/runner/budget.ts). */
 	prices: PriceBook;
+	/** Where dispatches get their rooms (src/rooms/provider.ts). Worktrees under %LOCALAPPDATA%\avel\rooms in production, a temp dir in tests. */
+	rooms: RoomProvider;
+	/** Where a room's source clone is found (src/rooms/sources.ts). AVEL_SOURCES_DIR in production. */
+	roomSources: RoomSourceResolver;
 };
 
 /**
@@ -93,6 +99,8 @@ export function createApp(deps: AppDeps) {
 		...routeDeps,
 		harness: deps.harness,
 		prices: deps.prices,
+		rooms: deps.rooms,
+		roomSources: deps.roomSources,
 	};
 	const router = tsr.platformContext<RequestContext>().router(contract, {
 		health: health(deps.clock, deps.preview),

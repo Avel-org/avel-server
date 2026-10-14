@@ -831,6 +831,16 @@ Module 5 generates each agent's identity from its roles, its mount and its appro
 - **`AgentTemplate.title` is added,** written, never derived, like the description: [area] plus engineer, tester or reviewer, and "lead" for Atlas alone.
 - **The auth role writes `permissions/policy.json`; security review only reads it.** A judge never grades a file it wrote. `ROSTER-V2.md` gave the file to Zane until this ruling.
 
+## Decided 2026-10-13: Tier 0 rooms are worktrees only
+
+J decided this for module 7. `SANDBOX.md` has the as-built note.
+
+- **Tier 0 is worktree-only.** Each dispatch gets one git worktree at its source's pinned commit. The container half of Tier 0 is deferred.
+- **Agents get file tools only:** read, write, edit and list, inside the worktree. No shell, no installs, no network tool.
+- **Containers are future providers, and nothing is built for them.** Local Docker, and Tier 1 remote sandboxes such as boat.dev, are named as candidates behind the same `RoomProvider` interface. A provider that cannot make a room refuses `room_unavailable`.
+- **Rooms live under `%LOCALAPPDATA%\avel\rooms\<dispatchId>`,** with the root injected through dependencies so tests use a temp directory.
+- **A room's source is a local clone, never a fetch:** the mission's template at `template_version`, or else its one approved intake's repository at the commit read, under `AVEL_SOURCES_DIR` (`templates/<slug>`, `repos/<owner>/<repo>`). The runner never holds the GitHub credential, so it cannot clone. A source that cannot be resolved refuses `source_unavailable`, which retrying will not fix.
+
 ---
 
 ## Open questions

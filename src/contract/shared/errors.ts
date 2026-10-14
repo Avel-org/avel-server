@@ -117,6 +117,8 @@ export const PRECONDITION_REASONS = [
 	"dispatch_not_running",
 	"model_price_unknown",
 	"harness_unavailable",
+	// Module 7: the room's source cannot be resolved; retrying will not help.
+	"source_unavailable",
 	"room_unavailable",
 	// Module 8: completion reports.
 	"report_dispatch_mismatch",
@@ -160,7 +162,7 @@ export const preconditionDetails = z
 		tokens: z.number().int().nonnegative().optional(),
 		/** identity_over_token_cap: the cap it went over. */
 		cap: z.number().int().positive().optional(),
-		/** What a mechanical check found (intake_check_failed, access_override_invalid, agent_role_not_assignable, plan_check_failed, coherence_blocked, writes_outside_mount) or what a plan changed (plan_changes_approved_brief), in a stable order. */
+		/** What a mechanical check found (intake_check_failed, access_override_invalid, agent_role_not_assignable, plan_check_failed, coherence_blocked, writes_outside_mount, source_unavailable) or what a plan changed (plan_changes_approved_brief), in a stable order. */
 		issues: z
 			.array(
 				z

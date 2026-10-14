@@ -20,9 +20,12 @@ import { fixedClock } from "../../src/lib/clock";
 import { type IdGenerator, randomIds, sequentialIds } from "../../src/lib/ids";
 import { sha256Hex } from "../../src/lib/tokens";
 import type { DispatchTokenLookup } from "../../src/middleware/caller";
+import type { RoomProvider } from "../../src/rooms/provider";
+import type { RoomSourceResolver } from "../../src/rooms/sources";
 import { DEFAULT_PRICE_BOOK, type PriceBook } from "../../src/runner/budget";
 import { FakeHarness, type Harness } from "../../src/runner/harness";
 import { noRepos } from "../unit/repo-fixtures";
+import { anySource, memoryRooms } from "../unit/room-fixtures";
 import {
 	BASE_URL,
 	captureLogger,
@@ -135,6 +138,10 @@ export async function withApi(
 		harness?: Harness;
 		/** Price tables. Default: src/lib/prices.ts's, which prices the FakeHarness at zero. */
 		prices?: PriceBook;
+		/** Rooms. Default: in memory, no git. */
+		rooms?: RoomProvider;
+		/** Room sources. Default: every source resolves. */
+		roomSources?: RoomSourceResolver;
 	} = {},
 ) {
 	const db = options.countStatements ? countingDb() : getDb();
@@ -182,6 +189,8 @@ export async function withApi(
 					: sha256Hex(options.runnerCredential),
 			harness: options.harness ?? new FakeHarness(),
 			prices: options.prices ?? DEFAULT_PRICE_BOOK,
+			rooms: options.rooms ?? memoryRooms(),
+			roomSources: options.roomSources ?? anySource,
 		});
 
 		let cookie = "";

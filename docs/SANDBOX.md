@@ -152,6 +152,15 @@ The worktree half is already solved by `treehouse`, which provides a pool, lease
 
 **The worktree is the load-bearing half, not the container.** Concurrent sessions in one checkout are the failure mode this tier exists to prevent, and it was demonstrated on the first day the roster ran three sessions at once. See the section below.
 
+### As built 2026-10-13: worktree-only
+
+`[built]` module 7, step 7. Tier 0 is worktree-only (J, 2026-10-13; `DECISIONS-V2.md`). The container half of the table above is deferred: no local Docker room and no remote sandbox is built.
+
+- **One room per dispatch.** Start opens a git worktree, detached at the source's pinned commit, under `%LOCALAPPDATA%\avel\rooms\<dispatchId>` (`src/rooms/provider.ts`, behind a `RoomProvider` interface). The source is the mission's template clone or its one approved intake's repository clone, under `AVEL_SOURCES_DIR`; Tier 0 never fetches, since the GitHub credential lives only in the delivery room. Unresolvable is `source_unavailable`; resolved but unbuildable is `room_unavailable`.
+- **File tools only.** The agent gets read, write, edit and list inside the room (`src/rooms/tools.ts`), called by the runner on its behalf. No shell, no installs, no network tool. Paths are refused when absolute, when they contain `..` or `.git`, or when they resolve outside the room through a symlink or junction.
+- **The tool's write check is `[attestation]`.** Write and edit refuse paths outside the entry's writable globs, but that is the tool checking itself, not a mount: nothing at the filesystem stops a write. The mechanism is the exit checkpoint (`src/rooms/checkpoint.ts`), which lists every path changed since the pinned commit, untracked and ignored files included, and refuses any outside the globs with `writes_outside_mount`.
+- **Rooms outlive their dispatch.** A halted or failed dispatch keeps its worktree so the operator can inspect the work, until an explicit release removes it. Nothing calls release from a route yet, and no table records rooms. Each kept room stays registered in its source clone's `.git/worktrees` until it is released, so those registrations pile up in the clone. They are harmless, and `git worktree prune` runs on every release.
+
 ## Mounts stop writes. They do not stop whole-tree commands.
 
 Found on the first day of the frontend build, 2026-08-29. Three sessions ran concurrently in one working directory with declared mounts. Two incidents, one cause.
