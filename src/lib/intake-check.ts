@@ -121,7 +121,7 @@ export function checkBriefRules(brief: unknown, root: string): CheckIssue[] {
 			requirements.forEach((r, i) => {
 				if (!covered.has(r.id)) {
 					issues.push({
-						path: at("requirements", i),
+						path: at("requirements", i, "acceptanceCriteria"),
 						message: `${r.id} has no acceptance criterion`,
 					});
 				}

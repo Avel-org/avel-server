@@ -118,7 +118,9 @@ describe("checkIntake", () => {
 			},
 			openQuestions: [],
 		});
-		expect(paths(issues)).toEqual([["proposedBrief", "requirements", 1]]);
+		expect(paths(issues)).toEqual([
+			["proposedBrief", "requirements", 1, "acceptanceCriteria"],
+		]);
 		expect(issues[0]?.message).toContain("R2");
 	});
 
@@ -158,7 +160,7 @@ describe("checkIntake", () => {
 		});
 		expect(paths(issues)).toEqual([
 			["proposedBrief", "acceptanceCriteria", 0, "requirementId"],
-			["proposedBrief", "requirements", 0],
+			["proposedBrief", "requirements", 0, "acceptanceCriteria"],
 			["openQuestions", 0],
 		]);
 	});

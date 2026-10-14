@@ -360,7 +360,7 @@ describe.skipIf(!url)("/api/intakes", () => {
 				reason: "intake_check_failed",
 				issues: [
 					{
-						path: ["proposedBrief", "requirements", 1],
+						path: ["proposedBrief", "requirements", 1, "acceptanceCriteria"],
 						message: "R2 has no acceptance criterion",
 					},
 				],

@@ -56,6 +56,21 @@ describe("checkPlan", () => {
 		).toEqual(["R2 has no acceptance criterion"]);
 	});
 
+	it("tells a missing criterion from a module problem by path alone", () => {
+		const issues = checkPlan(
+			plan({
+				acceptanceCriteria: [
+					{ id: "AC1", requirementId: "R1", text: "Booking succeeds" },
+				],
+				modules: [{ id: "M1", name: "Booking", requirementIds: ["R1"] }],
+			}),
+		);
+		expect(issues.map((i) => i.path)).toEqual([
+			["brief", "requirements", 1, "acceptanceCriteria"],
+			["brief", "requirements", 1],
+		]);
+	});
+
 	it("parses a stored brief without modules as having none", () => {
 		const { modules: _, ...old } = plan();
 		expect(messages(old)).toEqual([

@@ -533,7 +533,7 @@ deleted_at · timestamps
 |---|---|---|
 | `mission_not_draft` | the mission is not a draft | — |
 | `engagement_closed` | a client mission's engagement is closed | `engagementId` |
-| `plan_check_failed` | `checkPlan` finds issues | `issues`, exactly `checkPlan`'s, paths from `brief` |
+| `plan_check_failed` | `checkPlan` finds issues | `issues`, exactly `checkPlan`'s, paths from `brief`. A requirement with no acceptance criterion is `["brief","requirements",i,"acceptanceCriteria"]`; a requirement in no module, or in several, is the bare `["brief","requirements",i]` (intake's check uses the same criterion path under `proposedBrief`) |
 | `coherence_blocked` | `computeCoherence` blocks, or no live playbook matches `type` | `wave` (wave or null) and one issue at `["coherence","block"]`; or one issue at `["playbook"]` and no `wave` |
 | `estimate_missing` | an active, live entry that can be dispatched (every role a model role, so never the operator's `foundations` entry) has no `estimated_tokens` | `rosterEntryIds` in roster order, one issue per entry at `["roster", entryId, "estimatedTokens"]` |
 | `spend_ceiling_missing` | `spend_ceiling_usd` is null | — |
