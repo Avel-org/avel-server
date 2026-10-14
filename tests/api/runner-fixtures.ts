@@ -1,0 +1,197 @@
+import { and, asc, eq } from "drizzle-orm";
+import { expect } from "vitest";
+import { dispatch as dispatchWire, successEnvelope } from "../../src/contract";
+import type { NewDispatch } from "../../src/db/dispatch";
+import {
+	activityLog,
+	completionReport,
+	dispatch,
+	mission,
+} from "../../src/db/schema";
+import type { Tx } from "../../src/db/tx";
+import type { Clock } from "../../src/lib/clock";
+import type { IdGenerator } from "../../src/lib/ids";
+import type { PriceBook } from "../../src/runner/budget";
+import type { FakeHarness } from "../../src/runner/harness";
+import type { RunnerDeps } from "../../src/runner/runner";
+import { dispatchValues, insertDispatchRow } from "../db/dispatch-fixtures";
+import { type Seeded, seedRosteredAgent } from "./agent-fixtures";
+import type { ApiHarness } from "./support";
+
+// Missions, dispatches and a priced book for the runner's API tests.
+// Not collected as a test file.
+
+export const read = successEnvelope(dispatchWire);
+
+/** A test price version: the FakeHarness at $1 per thousand tokens of each kind. */
+export const TEST_PRICE_VERSION = "test-prices";
+
+/** A book the tests can change mid-test. */
+export function pricedBook(): PriceBook & {
+	tables: Record<string, PriceBook["tables"][string]>;
+} {
+	const perK = 1000;
+	return {
+		current: TEST_PRICE_VERSION,
+		tables: {
+			[TEST_PRICE_VERSION]: {
+				"fake-harness": {
+					inputPerMTok: perK,
+					outputPerMTok: perK,
+					cacheReadPerMTok: perK,
+					cacheWritePerMTok: perK,
+				},
+			},
+		},
+	};
+}
+
+/** Runner ids under the call's namespace, in a block neither the app nor seedIds uses. */
+export function runnerIds(ns: string): IdGenerator {
+	let n = 0;
+	return {
+		next: () => {
+			n += 1;
+			return `${ns}-0000-4000-a000-${n.toString(16).padStart(12, "0")}`;
+		},
+	};
+}
+
+export type Mission = Seeded & { ids: IdGenerator };
+
+/** An active mission with a spend ceiling, and one model agent on its roster. */
+export async function activeMission(
+	tx: Tx,
+	ids: IdGenerator,
+	spendCeilingUsd = "100.00",
+): Promise<Mission> {
+	const seeded = await seedRosteredAgent(tx, ids, ["domain", "api-surface"]);
+	await tx
+		.update(mission)
+		.set({ status: "active", spendCeilingUsd })
+		.where(eq(mission.id, seeded.missionId));
+	return { ...seeded, ids };
+}
+
+/** A queued dispatch of the mission's agent. */
+export async function queued(
+	tx: Tx,
+	m: Mission,
+	over: Partial<NewDispatch> = {},
+): Promise<string> {
+	return insertDispatchRow(
+		tx,
+		m.ids,
+		dispatchValues(m.agent, m.ids, "queued", over),
+	);
+}
+
+/** Signs in once per harness, then starts the dispatch through the route. */
+export async function start(h: ApiHarness, id: string): Promise<Response> {
+	return h.call(`/api/dispatches/${id}/start`, { method: "POST" });
+}
+
+/** A fresh queued dispatch, scripted and started through the route. */
+export async function started(
+	h: ApiHarness,
+	harness: FakeHarness,
+	m: Mission,
+	script?: Parameters<FakeHarness["script"]>[1],
+	over: Partial<NewDispatch> = {},
+): Promise<{ id: string; token: string }> {
+	const id = await queued(h.tx, m, over);
+	if (script) harness.script(id, script);
+	const res = await start(h, id);
+	expect(res.status).toBe(200);
+	const token = harness.tokenFor(id);
+	if (!token) throw new Error(`no session for ${id}`);
+	return { id, token };
+}
+
+/** One runner id generator per call namespace, so later steps never reuse an id. */
+const runnerIdsByNs = new Map<string, IdGenerator>();
+
+export function runnerDeps(
+	h: Pick<ApiHarness, "tx" | "ns">,
+	harness: FakeHarness,
+	prices: PriceBook,
+	clock: Clock,
+): RunnerDeps {
+	let ids = runnerIdsByNs.get(h.ns);
+	if (!ids) {
+		ids = runnerIds(h.ns);
+		runnerIdsByNs.set(h.ns, ids);
+	}
+	return { db: () => h.tx, clock, ids, harness, prices };
+}
+
+/** A token split with only input tokens. */
+export const tokensIn = (n: number) => ({
+	tokensIn: n,
+	tokensOut: 0,
+	cacheReadTokens: 0,
+	cacheWriteTokens: 0,
+});
+
+export async function row(tx: Tx, id: string) {
+	const [d] = await tx.select().from(dispatch).where(eq(dispatch.id, id));
+	if (!d) throw new Error(`no dispatch ${id}`);
+	return d;
+}
+
+export async function reportsOf(tx: Tx, id: string) {
+	return tx
+		.select()
+		.from(completionReport)
+		.where(eq(completionReport.dispatchId, id));
+}
+
+/** The activity rows about this dispatch or its report, in the order written. */
+export async function lifeOf(tx: Tx, id: string) {
+	const [report] = await reportsOf(tx, id);
+	const rows = await tx
+		.select()
+		.from(activityLog)
+		.where(eq(activityLog.entityId, id))
+		.orderBy(asc(activityLog.id));
+	const filed = report
+		? await tx
+				.select()
+				.from(activityLog)
+				.where(
+					and(
+						eq(activityLog.entityId, report.id),
+						eq(activityLog.action, "completion_report.filed"),
+					),
+				)
+		: [];
+	return [...rows, ...filed].sort((a, b) => (a.id < b.id ? -1 : 1));
+}
+
+/**
+ * The one report the dispatch closed with, consistent with the dispatch:
+ * its status, halt reason, tokens, hashes and model, filed by the system.
+ */
+export async function expectSystemReport(tx: Tx, id: string) {
+	const d = await row(tx, id);
+	const reports = await reportsOf(tx, id);
+	expect(reports).toHaveLength(1);
+	const [r] = reports as [(typeof reports)[number]];
+	expect(r).toMatchObject({
+		dispatchId: d.id,
+		missionId: d.missionId,
+		rosterEntryId: d.rosterEntryId,
+		status: d.status,
+		haltReason: d.haltReason,
+		softCeilingCrossed: d.softCeilingCrossed,
+		actualTokens: d.tokensUsed,
+		agentVersionSha256: d.agentVersionSha256,
+		skillsSha256: d.skillsSha256,
+		model: d.model,
+		versionSource: "recorded",
+		filedBy: "system",
+		createdAt: d.closedAt,
+	});
+	expect(d.closedAt).not.toBeNull();
+	return { d, r };
+}

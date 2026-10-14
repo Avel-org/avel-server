@@ -23,6 +23,8 @@ import { noTemplates } from "../../src/gateways/template-source";
 import { fixedClock } from "../../src/lib/clock";
 import { type IdGenerator, sequentialIds } from "../../src/lib/ids";
 import { noDispatches } from "../../src/middleware/caller";
+import { DEFAULT_PRICE_BOOK } from "../../src/runner/budget";
+import { FakeHarness } from "../../src/runner/harness";
 import { noRepos } from "../unit/repo-fixtures";
 import {
 	BASE_URL,
@@ -230,6 +232,8 @@ describe.skipIf(!url)(
 					templates: noTemplates,
 					dispatchByToken: noDispatches,
 					runnerCredentialSha256: null,
+					harness: new FakeHarness(),
+					prices: DEFAULT_PRICE_BOOK,
 				});
 			const apps = {
 				first: app(prefixedIds("11111111"), first),

@@ -30,6 +30,7 @@ import {
 	wave as waveEnum,
 } from "../../src/db/schema";
 import { buildSeed, seedIds } from "../../src/db/seed/data";
+import { SEED_RUN_AT } from "./seed-run-at";
 
 // The module 4 catalog shapes, published before their handlers. Each
 // schema must accept a row as the table holds it and refuse a bad one.
@@ -208,7 +209,7 @@ describe("catalog vocabularies", () => {
 });
 
 describe("agentTemplateSchema", () => {
-	const seeded = buildSeed(seedIds()).agentTemplate;
+	const seeded = buildSeed(seedIds(), SEED_RUN_AT).agentTemplate;
 
 	it("parses every seeded template", () => {
 		expect(seeded).toHaveLength(16);

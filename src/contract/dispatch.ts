@@ -204,6 +204,24 @@ export const dispatchContract = c.router({
 		},
 		summary: "Queue a dispatch of one active roster entry",
 	},
+	start: {
+		method: "POST",
+		path: "/api/dispatches/:id/start",
+		pathParams: byId,
+		body: c.noBody(),
+		responses: { 200: successEnvelope(dispatch) },
+		summary:
+			"queued → running: freezes the identity, skills, model and price version, and hands the token to the harness",
+	},
+	halt: {
+		method: "POST",
+		path: "/api/dispatches/:id/halt",
+		pathParams: byId,
+		body: c.noBody(),
+		responses: { 200: successEnvelope(dispatch) },
+		summary:
+			"running → halted (operator); the runner files the report and the token dies",
+	},
 	reports: {
 		method: "GET",
 		path: "/api/missions/:id/completion-reports",

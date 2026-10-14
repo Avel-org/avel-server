@@ -20,6 +20,8 @@ import { fixedClock } from "../../src/lib/clock";
 import { type IdGenerator, randomIds, sequentialIds } from "../../src/lib/ids";
 import { sha256Hex } from "../../src/lib/tokens";
 import type { DispatchTokenLookup } from "../../src/middleware/caller";
+import { DEFAULT_PRICE_BOOK, type PriceBook } from "../../src/runner/budget";
+import { FakeHarness, type Harness } from "../../src/runner/harness";
 import { noRepos } from "../unit/repo-fixtures";
 import {
 	BASE_URL,
@@ -129,6 +131,10 @@ export async function withApi(
 		dispatchByToken?: DispatchTokenLookup;
 		/** The runner's credential, in the clear; the app gets its hash. Default: no runner. */
 		runnerCredential?: string;
+		/** What runs agents. Default: a FakeHarness whose sessions run until stopped. */
+		harness?: Harness;
+		/** Price tables. Default: src/lib/prices.ts's, which prices the FakeHarness at zero. */
+		prices?: PriceBook;
 	} = {},
 ) {
 	const db = options.countStatements ? countingDb() : getDb();
@@ -174,6 +180,8 @@ export async function withApi(
 				options.runnerCredential === undefined
 					? null
 					: sha256Hex(options.runnerCredential),
+			harness: options.harness ?? new FakeHarness(),
+			prices: options.prices ?? DEFAULT_PRICE_BOOK,
 		});
 
 		let cookie = "";

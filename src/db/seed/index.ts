@@ -1,6 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
+import { type Clock, systemClock } from "../../lib/clock";
 import * as schema from "../schema";
 import { withTx } from "../tx";
 import { buildSeed, SEED_MARKER_ID, seedIds } from "./data";
@@ -54,7 +55,10 @@ const COUNTED = [
  * activity_log is append-only and refuses UPDATE. To start over, drop and
  * re-create the database, then `pnpm db:migrate` and `pnpm db:seed`.
  */
-export async function runSeed(url: string): Promise<SeedResult> {
+export async function runSeed(
+	url: string,
+	clock: Clock = systemClock,
+): Promise<SeedResult> {
 	assertDevDatabase(url);
 	const conn = postgres(url, { max: 1, onnotice: () => {} });
 	const db = drizzle(conn, { schema });
@@ -66,7 +70,7 @@ export async function runSeed(url: string): Promise<SeedResult> {
 
 		let status: SeedResult["status"] = "already-seeded";
 		if (existing.length === 0) {
-			const rows = buildSeed(seedIds());
+			const rows = buildSeed(seedIds(), clock.now());
 			await withTx(db, async (tx) => {
 				await tx.insert(schema.client).values(rows.client);
 				await tx.insert(schema.engagement).values(rows.engagement);

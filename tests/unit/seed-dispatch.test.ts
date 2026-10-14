@@ -3,11 +3,13 @@ import { DISPATCH_STATUSES, HALT_REASONS } from "../../src/contract";
 import { buildSeed, seedIds } from "../../src/db/seed/data";
 import { checkPlan } from "../../src/lib/plan-check";
 import { PRICE_VERSION } from "../../src/lib/prices";
+import { skillsSha256 } from "../../src/runner/skills";
+import { SEED_RUN_AT } from "./seed-run-at";
 
 // Module 6's preview (BE lead, 2026-10-13): one active client mission with a
 // dispatch in every state, and one halted at its spend ceiling.
 describe("seed dispatches", () => {
-	const rows = buildSeed(seedIds());
+	const rows = buildSeed(seedIds(), SEED_RUN_AT);
 	const missionOf = (repo: string, sprint: number) => {
 		const m = rows.mission.find(
 			(x) => x.repoUrl === `https://github.com/${repo}` && x.sprintN === sprint,
@@ -96,7 +98,7 @@ describe("seed dispatches", () => {
 				d.tokensIn + d.tokensOut + d.cacheReadTokens + d.cacheWriteTokens,
 			);
 			expect(d.softCeilingCrossed, d.id).toBe(
-				d.tokensUsed > d.tokenSoftCeiling,
+				d.tokensUsed >= d.tokenSoftCeiling,
 			);
 			if (d.haltReason === "token_hard_ceiling") {
 				expect(d.tokensUsed).toBeGreaterThanOrEqual(d.tokenHardCeiling);
@@ -124,10 +126,45 @@ describe("seed dispatches", () => {
 			const current = versions.reduce((a, v) => (v.number > a.number ? v : a));
 			expect(d.agentIdentityVersionId).toBe(current.id);
 			expect(d.agentVersionSha256).toBe(current.sha256);
-			expect(d.skillsSha256).toMatch(/^[0-9a-f]{64}$/);
+			// No mission here attaches a skill: the empty set's hash, as start freezes it.
+			expect(d.skillsSha256).toBe(skillsSha256([]));
 			expect(d.model).toBe("fake-harness");
 			expect(d.priceVersion).toBe(PRICE_VERSION);
 		}
+	});
+
+	it("times only the running dispatch from the run, inside its wall clock", () => {
+		const running = rows.dispatch.filter((d) => d.status === "running");
+		expect(running).toHaveLength(1);
+		const [d] = running as [(typeof running)[number]];
+		const minutesBefore = (t: Date | null | undefined) =>
+			t == null ? null : (SEED_RUN_AT.getTime() - t.getTime()) / 60_000;
+		expect(minutesBefore(d.createdAt)).toBe(30);
+		expect(minutesBefore(d.startedAt)).toBe(25);
+		expect(minutesBefore(d.updatedAt)).toBe(10);
+		expect(minutesBefore(d.startedAt)).toBeLessThan(d.wallClockMinutes);
+		// Every other row stays on the fixed clock, whenever the seed runs.
+		const later = buildSeed(
+			seedIds(),
+			new Date(SEED_RUN_AT.getTime() + 86_400_000),
+		);
+		const fixed = (r: typeof rows) => ({
+			...r,
+			dispatch: r.dispatch.filter((x) => x.status !== "running"),
+			activityLog: r.activityLog.filter((a) => a.entityId !== d.id),
+		});
+		expect(fixed(later)).toEqual(fixed(rows));
+		const moved = later.activityLog.filter((a) => a.entityId === d.id);
+		expect(moved.map((a) => a.action)).toEqual([
+			"dispatch.created",
+			"dispatch.started",
+			"dispatch.soft_ceiling_crossed",
+		]);
+		expect(moved.map((a) => minutesBefore(a.at))).toEqual([
+			30 - 1440,
+			25 - 1440,
+			10 - 1440,
+		]);
 	});
 
 	it("gives only the running dispatch a token hash", () => {

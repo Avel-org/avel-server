@@ -25,6 +25,8 @@ import {
 	TEMPLATE_REPOS,
 } from "./lib/templates";
 import { runnerCredentialSha256 } from "./lib/tokens";
+import { DEFAULT_PRICE_BOOK } from "./runner/budget";
+import { FakeHarness } from "./runner/harness";
 
 // Node does not read .env on its own; drizzle.config.ts and the seed do the
 // same. loadEnvFile never overrides a variable that is already set, so real
@@ -103,6 +105,10 @@ serve({
 		templates,
 		dispatchByToken: dispatchByTokenSha256,
 		runnerCredentialSha256: runnerCredential,
+		// No real model yet. Nothing ticks the runner in this process: a
+		// later step wires the runner process (src/runner/runner.ts).
+		harness: new FakeHarness(),
+		prices: DEFAULT_PRICE_BOOK,
 	}).fetch,
 	port,
 });

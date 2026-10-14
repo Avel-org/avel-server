@@ -12,6 +12,10 @@ import {
 } from "../../src/db/dispatch";
 import * as schema from "../../src/db/schema";
 import { assertDevDatabase, runSeed } from "../../src/db/seed";
+import { fixedClock } from "../../src/lib/clock";
+
+/** Fixed, so two seeded databases match: running dispatches are timed from it. */
+const seedClock = fixedClock("2026-10-13T12:00:00.000Z");
 
 // The seed runs against throwaway databases whose names end in _dev, because
 // it refuses every other name. Creating, migrating and seeding a database is
@@ -88,7 +92,7 @@ describe.skipIf(!url)("pnpm db:seed", () => {
 		async () => {
 			const dbUrl = await freshDevDatabase(first);
 
-			const run1 = await runSeed(dbUrl);
+			const run1 = await runSeed(dbUrl, seedClock);
 			expect(run1.status).toBe("seeded");
 			// Module 6's preview added two missions, twelve roster entries, nine
 			// dispatches, seven reports and 43 activity rows.
@@ -101,7 +105,7 @@ describe.skipIf(!url)("pnpm db:seed", () => {
 			});
 			const before = await dump(dbUrl);
 
-			const run2 = await runSeed(dbUrl);
+			const run2 = await runSeed(dbUrl, seedClock);
 			expect(run2.status).toBe("already-seeded");
 			expect(run2.counts).toEqual(run1.counts);
 			expect(await dump(dbUrl)).toEqual(before);
@@ -113,7 +117,7 @@ describe.skipIf(!url)("pnpm db:seed", () => {
 		"is deterministic: two fresh databases get identical rows",
 		async () => {
 			const dbUrl = await freshDevDatabase(second);
-			await runSeed(dbUrl);
+			await runSeed(dbUrl, seedClock);
 			expect(await dump(dbUrl)).toEqual(
 				await dump(withDatabase(url ?? "", first)),
 			);

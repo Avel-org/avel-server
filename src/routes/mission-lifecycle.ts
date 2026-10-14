@@ -24,6 +24,12 @@ import { checkPlan } from "../lib/plan-check";
 import { identitySupported } from "../lib/roles";
 import { ApiError } from "../middleware/errors";
 import {
+	haltRunningDispatches,
+	inStep,
+	lockMission,
+	type RunnerDeps,
+} from "../runner/runner";
+import {
 	notFound,
 	operatorOf,
 	type RequestContext,
@@ -196,7 +202,7 @@ const MESSAGES: Record<ReadinessBlocker["reason"], string> = {
 	spend_ceiling_missing: "The mission has no spend ceiling",
 };
 
-export function missionLifecycleRoutes(deps: RouteDeps) {
+export function missionLifecycleRoutes(deps: RouteDeps & RunnerDeps) {
 	/** One status change and its mission.status_changed row, in one transaction. */
 	const change = async (
 		tx: Tx,
@@ -254,8 +260,11 @@ export function missionLifecycleRoutes(deps: RouteDeps) {
 					return { status: 200, body: ok(await change(tx, ctx, m, "active")) };
 				}),
 
+			// Halts the mission's running dispatches too, as the operator, in
+			// the same transaction; their sessions stop once it commits.
 			halt: async ({ params }, ctx) =>
-				withTx(deps.db(), async (tx) => {
+				inStep(deps, async (step) => {
+					const { tx } = step;
 					const m = await oneMission(tx, params.id, true);
 					if (m.status !== "active") {
 						throw new ApiError(
@@ -264,7 +273,17 @@ export function missionLifecycleRoutes(deps: RouteDeps) {
 							{ details: { reason: "mission_not_active", missionId: m.id } },
 						);
 					}
-					return { status: 200, body: ok(await change(tx, ctx, m, "halted")) };
+					const body = await change(tx, ctx, m, "halted");
+					const locked = await lockMission(tx, m.id);
+					if (!locked) throw new Error(`mission ${m.id} vanished`);
+					await haltRunningDispatches(step, deps, locked, "operator", {
+						actor: {
+							actorKind: "operator",
+							actorUserId: operatorOf(ctx).id,
+						},
+						requestId: ctx.requestId,
+					});
+					return { status: 200, body: ok(body) };
 				}),
 		});
 }

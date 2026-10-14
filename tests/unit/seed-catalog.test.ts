@@ -9,11 +9,12 @@ import {
 } from "../../src/contract";
 import { buildSeed, seedIds } from "../../src/db/seed/data";
 import { skillContentSha256 } from "../../src/lib/skill-hash";
+import { SEED_RUN_AT } from "./seed-run-at";
 
 // The seeded skill catalog must be rows the API could have written, so the
 // catalog pages show what a real operator would see.
 describe("seed skill catalog", () => {
-	const rows = buildSeed(seedIds());
+	const rows = buildSeed(seedIds(), SEED_RUN_AT);
 
 	it("has one source of each kind, each one a valid create body", () => {
 		expect(rows.skillSource.map((s) => s.kind).sort()).toEqual([

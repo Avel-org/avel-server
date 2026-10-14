@@ -7,12 +7,13 @@ import {
 	identityInputs,
 	staleInputs,
 } from "../../src/lib/identity";
+import { SEED_RUN_AT } from "./seed-run-at";
 
 // The seeded roster follows ROSTER-V2's name register and J's rulings
 // (2026-10-13): fifteen builder agents plus the operator, one cut per
 // preset, and identities as the regenerate route would have written them.
 describe("seed roster", () => {
-	const rows = buildSeed(seedIds());
+	const rows = buildSeed(seedIds(), SEED_RUN_AT);
 	const bySlug = new Map(rows.agentTemplate.map((t) => [t.slug, t]));
 	const slugOf = (id: string) =>
 		rows.agentTemplate.find((t) => t.id === id)?.slug;

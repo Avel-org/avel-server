@@ -32,6 +32,17 @@ import { requestSha256 } from "../lib/canonical";
 import { identitySupported } from "../lib/roles";
 import { ApiError } from "../middleware/errors";
 import {
+	type Acting,
+	closeBySystem,
+	inStep,
+	type LockedMission,
+	lockDispatch,
+	lockMission,
+	missionOf,
+	type RunnerDeps,
+	startDispatch,
+} from "../runner/runner";
+import {
 	notFound,
 	operatorOf,
 	type RequestContext,
@@ -306,6 +317,27 @@ async function create(
 	});
 }
 
+/**
+ * The dispatch's mission, locked FOR UPDATE, before the dispatch is: 404
+ * for the dispatch when it, or its mission, is not visible.
+ */
+async function lockedMissionOf(tx: Tx, id: string): Promise<LockedMission> {
+	const missionId = await missionOf(tx, id);
+	if (!missionId) throw notFound("dispatch", id);
+	await visibleMission(tx, missionId, true).catch(hiddenAs("dispatch", id));
+	const m = await lockMission(tx, missionId);
+	if (!m) throw notFound("dispatch", id);
+	return m;
+}
+
+/** The operator as the actor of a start or halt. */
+function operatorActing(ctx: RequestContext): Acting {
+	return {
+		actor: { actorKind: "operator", actorUserId: operatorOf(ctx).id },
+		requestId: ctx.requestId,
+	};
+}
+
 /** The dispatch, or 404 when it, or the mission it belongs to, is not visible. */
 async function visibleDispatch(db: Executor, id: string) {
 	const wire = await dispatchWire(db, id);
@@ -314,7 +346,7 @@ async function visibleDispatch(db: Executor, id: string) {
 	return wire;
 }
 
-export function dispatchRoutes(deps: RouteDeps) {
+export function dispatchRoutes(deps: RouteDeps & RunnerDeps) {
 	return tsr.platformContext<RequestContext>().router(dispatchContract, {
 		list: async ({ params, query }) => {
 			const db = deps.db();
@@ -343,6 +375,50 @@ export function dispatchRoutes(deps: RouteDeps) {
 				return { status: 200, body: ok(wire) };
 			}
 			return { status: 201, body: ok(wire) };
+		},
+
+		start: async ({ params }, ctx) => {
+			const by = operatorActing(ctx);
+			await inStep(deps, async ({ tx }) => {
+				const m = await lockedMissionOf(tx, params.id);
+				await startDispatch(tx, deps, m, params.id, by);
+			});
+			const wire = await dispatchWire(deps.db(), params.id);
+			if (!wire) throw new Error(`dispatch ${params.id} vanished`);
+			return { status: 200, body: ok(wire) };
+		},
+
+		halt: async ({ params }, ctx) => {
+			const by = operatorActing(ctx);
+			await inStep(deps, async (step) => {
+				const m = await lockedMissionOf(step.tx, params.id);
+				const d = await lockDispatch(step.tx, params.id);
+				if (!d) throw notFound("dispatch", params.id);
+				if (d.status !== "running") {
+					throw new ApiError(
+						"PRECONDITION_FAILED",
+						`A ${d.status} dispatch cannot be halted`,
+						{
+							details: {
+								reason: "dispatch_not_running",
+								dispatchId: d.id,
+								missionId: m.id,
+							},
+						},
+					);
+				}
+				await closeBySystem(
+					step,
+					deps,
+					m,
+					d,
+					{ status: "halted", haltReason: "operator" },
+					by,
+				);
+			});
+			const wire = await dispatchWire(deps.db(), params.id);
+			if (!wire) throw new Error(`dispatch ${params.id} vanished`);
+			return { status: 200, body: ok(wire) };
 		},
 
 		reports: async ({ params, query }) => {

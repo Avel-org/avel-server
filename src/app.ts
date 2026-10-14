@@ -50,6 +50,8 @@ import type { RequestContext } from "./routes/shared";
 import { skillSourceRoutes } from "./routes/skill-sources";
 import { skillRoutes } from "./routes/skills";
 import { templateCover, templateRoutes } from "./routes/templates";
+import type { PriceBook } from "./runner/budget";
+import type { Harness } from "./runner/harness";
 
 export type AppDeps = {
 	clock: Clock;
@@ -70,6 +72,10 @@ export type AppDeps = {
 	dispatchByToken: DispatchTokenLookup;
 	/** The runner credential's hex SHA-256; null when no runner is configured, so no request is the runner. */
 	runnerCredentialSha256: string | null;
+	/** What runs an agent's model (src/runner/harness.ts). The FakeHarness until a real one is wired. */
+	harness: Harness;
+	/** Price tables by version, and the one a new dispatch starts under (src/runner/budget.ts). */
+	prices: PriceBook;
 };
 
 /**
@@ -83,14 +89,19 @@ export type AppDeps = {
 export function createApp(deps: AppDeps) {
 	const report = loggerReporter(deps.logger);
 	const routeDeps = { db: deps.db, clock: deps.clock, ids: deps.ids };
+	const runnerDeps = {
+		...routeDeps,
+		harness: deps.harness,
+		prices: deps.prices,
+	};
 	const router = tsr.platformContext<RequestContext>().router(contract, {
 		health: health(deps.clock, deps.preview),
 		clients: clientRoutes(routeDeps),
 		engagements: engagementRoutes(routeDeps),
 		missions: missionRoutes(routeDeps),
 		missionPlans: missionPlanRoutes(routeDeps),
-		missionLifecycle: missionLifecycleRoutes(routeDeps),
-		dispatches: dispatchRoutes(routeDeps),
+		missionLifecycle: missionLifecycleRoutes(runnerDeps),
+		dispatches: dispatchRoutes(runnerDeps),
 		activity: activityRoutes(routeDeps),
 		intakes: intakeRoutes({ ...routeDeps, repos: deps.repos }),
 		connections: connectionRoutes(routeDeps),

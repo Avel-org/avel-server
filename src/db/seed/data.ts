@@ -6,6 +6,7 @@ import type { IdGenerator } from "../../lib/ids";
 import { PRICE_VERSION } from "../../lib/prices";
 import { skillContentSha256 } from "../../lib/skill-hash";
 import { DEV_BOOKING_SHA } from "../../lib/templates";
+import { skillsSha256 } from "../../runner/skills";
 import type {
 	activityLog,
 	agentIdentityVersion,
@@ -317,7 +318,12 @@ function featurePaths(territory: string): string[] {
 type MissionStatus = Row<typeof mission>["status"];
 type ExportStatus = Row<typeof exportTable>["status"];
 
-export function buildSeed(ids: IdGenerator): SeedRows {
+/**
+ * `runAt` is when the seed runs. Only running dispatches are timed from
+ * it, so a run's wall clock reads as minutes in, not days; every other
+ * time is a fixed offset from SEED_EPOCH.
+ */
+export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 	const rows: SeedRows = {
 		client: [],
 		engagement: [],
@@ -1352,10 +1358,9 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 		if (latest === undefined) throw new Error(`seed: no identity for ${slug}`);
 		return latest;
 	};
-	// No helper hashes a dispatch's skill set yet (step 6 freezes it at
-	// start), and these missions attach no skills, so every started dispatch
-	// carries this one fixed hex.
-	const SEED_SKILLS_SHA256 = fakeSha("skills:none");
+	// These missions attach no skills, so every started dispatch carries
+	// the hash start freezes for an empty set (src/runner/skills.ts).
+	const SEED_SKILLS_SHA256 = skillsSha256([]);
 
 	const billing2 = addMission({
 		engagementId: billing,
@@ -1489,8 +1494,21 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 		started?: number;
 		softCrossedAt?: number;
 		ended?: number;
+		/**
+		 * Running only: minutes before runAt, in place of day and hours, so
+		 * the run reads as in progress whenever the seed runs.
+		 */
+		minutesAgo?: { created: number; started: number; softCrossedAt?: number };
 		report?: ReportSpec;
 	}) => {
+		const ago = d.minutesAgo;
+		if ((ago !== undefined) !== (d.status === "running")) {
+			throw new Error(`seed: minutesAgo is for running dispatches (${d.slug})`);
+		}
+		const time = (h: number, minutes: number | undefined) =>
+			ago === undefined || minutes === undefined
+				? at(d.day, h)
+				: new Date(runAt.getTime() - minutes * 60_000);
 		const entry = entryFor(d.missionId, d.slug, d.territory);
 		const estimate = entry.estimatedTokens ?? 0;
 		const soft = entry.tokenSoftCeiling ?? 0;
@@ -1500,10 +1518,17 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 		const started = d.started !== undefined;
 		const version = started ? currentVersion(d.slug) : undefined;
 		const id = ids.next();
-		const lastAt = at(
-			d.day,
-			d.ended ?? d.softCrossedAt ?? d.started ?? d.created,
-		);
+		const createdAt = time(d.created, ago?.created);
+		const startedAt =
+			d.started === undefined ? null : time(d.started, ago?.started);
+		const softAt =
+			d.softCrossedAt === undefined
+				? null
+				: time(d.softCrossedAt, ago?.softCrossedAt);
+		const lastAt =
+			d.ended !== undefined
+				? at(d.day, d.ended)
+				: (softAt ?? startedAt ?? createdAt);
 		const row: Row<typeof dispatch> = {
 			id,
 			rosterEntryId: entry.id,
@@ -1532,25 +1557,25 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 			tokenSha256: d.status === "running" ? fakeSha(`token:${id}`) : null,
 			idempotencyKey: `seed-${id}`,
 			requestSha256: fakeSha(`request:${id}`),
-			startedAt: started ? at(d.day, d.started) : null,
+			startedAt,
 			closedAt: d.ended === undefined ? null : at(d.day, d.ended),
-			createdAt: at(d.day, d.created),
+			createdAt,
 			updatedAt: lastAt,
 		};
 		rows.dispatch.push(row);
 
 		const scope = { missionId: d.missionId, engagementId: d.engagementId };
 		log(
-			at(d.day, d.created),
+			createdAt,
 			"dispatch.created",
 			"dispatch",
 			id,
 			{ rosterEntryId: entry.id, estimatedTokens: estimate },
 			scope,
 		);
-		if (d.started !== undefined) {
+		if (startedAt !== null) {
 			log(
-				at(d.day, d.started),
+				startedAt,
 				"dispatch.started",
 				"dispatch",
 				id,
@@ -1562,9 +1587,9 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 				scope,
 			);
 		}
-		if (d.softCrossedAt !== undefined) {
+		if (softAt !== null) {
 			log(
-				at(d.day, d.softCrossedAt),
+				softAt,
 				"dispatch.soft_ceiling_crossed",
 				"dispatch",
 				id,
@@ -1729,6 +1754,8 @@ export function buildSeed(ids: IdGenerator): SeedRows {
 		created: 4,
 		started: 5,
 		softCrossedAt: 10,
+		// The run that is still going: started 25 minutes before the seed ran.
+		minutesAgo: { created: 30, started: 25, softCrossedAt: 10 },
 	});
 	// Iyo read the payment-plans fixture at a hash Fenn never wrote: the one
 	// edge mismatch, recorded on the consumer's report.
