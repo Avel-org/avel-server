@@ -4,7 +4,9 @@ import {
 	activityAction,
 	activityEntityType,
 	COMPLETION_STATUSES,
+	DISPATCH_STATUSES,
 	HALT_REASONS,
+	reportFiledBy,
 	VERSION_SOURCES,
 } from "../../src/contract";
 import { closeDb } from "../../src/db/client";
@@ -26,6 +28,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			["halt_reason", HALT_REASONS],
 			["completion_status", COMPLETION_STATUSES],
 			["version_source", VERSION_SOURCES],
+			["dispatch_status", DISPATCH_STATUSES],
+			["report_filed_by", reportFiledBy.options],
 		];
 
 		for (const [type, values] of cases) {

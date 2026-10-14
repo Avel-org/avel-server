@@ -73,6 +73,7 @@ export const activityAction = pgEnum("activity_action", [
 	"dispatch.halted",
 	"dispatch.closed",
 	"completion_report.filed",
+	"finding.opened",
 ]);
 
 export const activityEntityType = pgEnum("activity_entity_type", [
@@ -91,6 +92,7 @@ export const activityEntityType = pgEnum("activity_entity_type", [
 	"agent_template",
 	"dispatch",
 	"completion_report",
+	"finding",
 ]);
 
 /**

@@ -3,6 +3,7 @@ import {
 	type AnyPgColumn,
 	boolean,
 	check,
+	foreignKey,
 	index,
 	integer,
 	jsonb,
@@ -16,9 +17,11 @@ import {
 } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import type { IdentityInputs } from "../../contract/agent-template";
+import { type BriefRef, reportFiledBy } from "../../contract/dispatch";
 import { DELIVERABLES } from "../../contract/playbook";
 import {
 	COMPLETION_STATUSES,
+	DISPATCH_STATUSES,
 	HALT_REASONS,
 	MISSION_STATUSES,
 	VERSION_SOURCES,
@@ -43,6 +46,11 @@ export const completionStatus = pgEnum(
 );
 export const haltReason = pgEnum("halt_reason", HALT_REASONS);
 export const versionSource = pgEnum("version_source", VERSION_SOURCES);
+export const dispatchStatus = pgEnum("dispatch_status", DISPATCH_STATUSES);
+export const reportFiledByEnum = pgEnum(
+	"report_filed_by",
+	reportFiledBy.options,
+);
 export const findingSeverity = pgEnum("finding_severity", [
 	"critical",
 	"high",
@@ -279,6 +287,141 @@ export const rosterEntry = pgTable(
 	(t) => [
 		index("roster_entry_mission_id_idx").on(t.missionId),
 		index("roster_entry_agent_template_id_idx").on(t.agentTemplateId),
+		// The target of dispatch's composite foreign key: a dispatch names an
+		// entry together with that entry's own mission.
+		uniqueIndex("roster_entry_id_mission_id_uq").on(t.id, t.missionId),
+	],
+);
+
+const SHA256_HEX = sql.raw(`'^[0-9a-f]{64}$'`);
+
+/**
+ * One run of one agent on one piece of work (module 6). Evidence, so no soft
+ * delete. Mission-scoped only for now (D8); firm sessions arrive later. The
+ * composite foreign key to roster_entry(id, mission_id) means a dispatch can
+ * never name another mission's entry. token_sha256 and idempotency_key are
+ * never sent on the wire.
+ */
+export const dispatch = pgTable(
+	"dispatch",
+	{
+		...id,
+		rosterEntryId: uuid("roster_entry_id")
+			.notNull()
+			.references(() => rosterEntry.id),
+		missionId: uuid("mission_id")
+			.notNull()
+			.references(() => mission.id),
+		briefRef: jsonb("brief_ref").$type<BriefRef>(),
+		status: dispatchStatus("status").notNull(),
+		haltReason: haltReason("halt_reason"),
+		estimatedTokens: integer("estimated_tokens").notNull(),
+		tokenSoftCeiling: integer("token_soft_ceiling").notNull(),
+		tokenHardCeiling: integer("token_hard_ceiling").notNull(),
+		// The runner's running count; always the sum of the four splits.
+		tokensUsed: integer("tokens_used").notNull(),
+		tokensIn: integer("tokens_in").notNull(),
+		tokensOut: integer("tokens_out").notNull(),
+		cacheReadTokens: integer("cache_read_tokens").notNull(),
+		cacheWriteTokens: integer("cache_write_tokens").notNull(),
+		softCeilingCrossed: boolean("soft_ceiling_crossed").notNull(),
+		spendUsd: numeric("spend_usd", { precision: 14, scale: 6 }).notNull(),
+		wallClockMinutes: integer("wall_clock_minutes").notNull(),
+		// Frozen at start. The version id resolves agentVersionRef: the sha
+		// alone can match several versions, one per template.
+		agentIdentityVersionId: uuid("agent_identity_version_id").references(
+			() => agentIdentityVersion.id,
+		),
+		agentVersionSha256: text("agent_version_sha256"),
+		skillsSha256: text("skills_sha256"),
+		model: text("model"),
+		priceVersion: text("price_version"),
+		tokenSha256: text("token_sha256"),
+		idempotencyKey: text("idempotency_key").notNull(),
+		// SHA-256 of the create request's body: the same key with the same
+		// hash replays, with another hash it is refused.
+		requestSha256: text("request_sha256").notNull(),
+		startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }),
+		closedAt: timestamp("closed_at", { withTimezone: true, mode: "date" }),
+		...timestamps,
+	},
+	(t) => [
+		index("dispatch_mission_id_idx").on(t.missionId),
+		index("dispatch_roster_entry_id_idx").on(t.rosterEntryId),
+		index("dispatch_mission_id_status_idx").on(t.missionId, t.status),
+		uniqueIndex("dispatch_token_sha256_uq").on(t.tokenSha256),
+		uniqueIndex("dispatch_mission_id_idempotency_key_uq").on(
+			t.missionId,
+			t.idempotencyKey,
+		),
+		// The target of finding's composite foreign key.
+		uniqueIndex("dispatch_id_mission_id_uq").on(t.id, t.missionId),
+		// The target of completion_report's composite foreign key.
+		uniqueIndex("dispatch_id_mission_id_roster_entry_id_uq").on(
+			t.id,
+			t.missionId,
+			t.rosterEntryId,
+		),
+		foreignKey({
+			name: "dispatch_roster_entry_mission_fk",
+			columns: [t.rosterEntryId, t.missionId],
+			foreignColumns: [rosterEntry.id, rosterEntry.missionId],
+		}),
+		check(
+			"dispatch_halt_reason_iff_halted",
+			sql`(${t.status} = 'halted') = (${t.haltReason} is not null)`,
+		),
+		check("dispatch_estimate_positive", sql`${t.estimatedTokens} > 0`),
+		check(
+			"dispatch_soft_ceiling_at_least_estimate",
+			sql`${t.tokenSoftCeiling} >= ${t.estimatedTokens}`,
+		),
+		check(
+			"dispatch_hard_ceiling_at_least_soft",
+			sql`${t.tokenHardCeiling} >= ${t.tokenSoftCeiling}`,
+		),
+		check(
+			"dispatch_token_split_nonnegative",
+			sql`${t.tokensIn} >= 0 and ${t.tokensOut} >= 0 and ${t.cacheReadTokens} >= 0 and ${t.cacheWriteTokens} >= 0`,
+		),
+		check(
+			"dispatch_tokens_used_is_split_sum",
+			sql`${t.tokensUsed} = ${t.tokensIn} + ${t.tokensOut} + ${t.cacheReadTokens} + ${t.cacheWriteTokens}`,
+		),
+		check("dispatch_spend_nonnegative", sql`${t.spendUsd} >= 0`),
+		check("dispatch_wall_clock_positive", sql`${t.wallClockMinutes} > 0`),
+		check(
+			"dispatch_started_iff_not_queued",
+			sql`(${t.status} <> 'queued') = (${t.startedAt} is not null)`,
+		),
+		check(
+			"dispatch_closed_iff_ended",
+			sql`(${t.status} in ('complete', 'blocked', 'failed', 'halted')) = (${t.closedAt} is not null)`,
+		),
+		check(
+			"dispatch_closed_after_started",
+			sql`${t.closedAt} is null or ${t.closedAt} >= ${t.startedAt}`,
+		),
+		check(
+			"dispatch_frozen_once_started",
+			sql`${t.status} = 'queued' or (${t.agentIdentityVersionId} is not null and ${t.agentVersionSha256} is not null and ${t.skillsSha256} is not null and ${t.model} is not null and ${t.priceVersion} is not null)`,
+		),
+		check(
+			"dispatch_agent_version_sha256_hex",
+			sql`${t.agentVersionSha256} is null or ${t.agentVersionSha256} ~ ${SHA256_HEX}`,
+		),
+		check(
+			"dispatch_skills_sha256_hex",
+			sql`${t.skillsSha256} is null or ${t.skillsSha256} ~ ${SHA256_HEX}`,
+		),
+		check(
+			"dispatch_token_sha256_hex",
+			sql`${t.tokenSha256} is null or ${t.tokenSha256} ~ ${SHA256_HEX}`,
+		),
+		check(
+			"dispatch_request_sha256_hex",
+			sql`${t.requestSha256} ~ ${SHA256_HEX}`,
+		),
 	],
 );
 
@@ -293,6 +436,14 @@ export interface Blocker {
 	provisioning_gap: boolean;
 }
 
+/** An EdgeMismatch as stored: snake_case, like Blocker. */
+export interface StoredEdgeMismatch {
+	path: string;
+	read_sha256: string;
+	written_sha256: string;
+	producer_dispatch_id: string;
+}
+
 /** What an agent produced and the evidence it consumed. Required to close a dispatch. */
 export const completionReport = pgTable(
 	"completion_report",
@@ -304,6 +455,9 @@ export const completionReport = pgTable(
 		missionId: uuid("mission_id")
 			.notNull()
 			.references(() => mission.id),
+		// One report closes one dispatch: unique, and tied to that dispatch's
+		// own mission and entry by the composite foreign key.
+		dispatchId: uuid("dispatch_id").notNull(),
 		status: completionStatus("status").notNull(),
 		haltReason: haltReason("halt_reason"),
 		softCeilingCrossed: boolean("soft_ceiling_crossed").notNull(),
@@ -320,12 +474,22 @@ export const completionReport = pgTable(
 		fileTypesTouched: text("file_types_touched").array().notNull(),
 		rereads: integer("rereads").notNull(),
 		blockers: jsonb("blockers").$type<Blocker[]>().notNull(),
+		edgeMismatches: jsonb("edge_mismatches")
+			.$type<StoredEdgeMismatch[]>()
+			.notNull(),
+		filedBy: reportFiledByEnum("filed_by").notNull(),
 		...softDelete,
 		...timestamps,
 	},
 	(t) => [
 		index("completion_report_roster_entry_id_idx").on(t.rosterEntryId),
 		index("completion_report_mission_id_idx").on(t.missionId),
+		uniqueIndex("completion_report_dispatch_id_uq").on(t.dispatchId),
+		foreignKey({
+			name: "completion_report_dispatch_fk",
+			columns: [t.dispatchId, t.missionId, t.rosterEntryId],
+			foreignColumns: [dispatch.id, dispatch.missionId, dispatch.rosterEntryId],
+		}),
 		check(
 			"completion_report_halt_reason_iff_halted",
 			sql`(${t.status} = 'halted') = (${t.haltReason} is not null)`,
@@ -349,11 +513,42 @@ export const finding = pgTable(
 		status: findingStatus("status").notNull(),
 		dismissedReason: text("dismissed_reason"),
 		caughtBy: text("caught_by").notNull(),
+		// Set from the token when a judge writes the finding; null when code
+		// or the operator records it. The key makes a judge's retry idempotent.
+		reportedByDispatchId: uuid("reported_by_dispatch_id").references(
+			() => dispatch.id,
+		),
+		idempotencyKey: text("idempotency_key"),
+		// SHA-256 of the request body, stored beside the key (Idempotency).
+		requestSha256: text("request_sha256"),
 		...timestamps,
 	},
 	(t) => [
 		index("finding_mission_id_idx").on(t.missionId),
 		index("finding_client_id_idx").on(t.clientId),
+		// A judge's finding lands on its own dispatch's mission, never another.
+		foreignKey({
+			name: "finding_dispatch_mission_fk",
+			columns: [t.reportedByDispatchId, t.missionId],
+			foreignColumns: [dispatch.id, dispatch.missionId],
+		}),
+		uniqueIndex("finding_dispatch_idempotency_key_uq")
+			.on(t.reportedByDispatchId, t.idempotencyKey)
+			.where(
+				sql`${t.reportedByDispatchId} is not null and ${t.idempotencyKey} is not null`,
+			),
+		check(
+			"finding_idempotency_key_iff_dispatch",
+			sql`(${t.idempotencyKey} is not null) = (${t.reportedByDispatchId} is not null)`,
+		),
+		check(
+			"finding_request_sha256_iff_key",
+			sql`(${t.requestSha256} is not null) = (${t.idempotencyKey} is not null)`,
+		),
+		check(
+			"finding_request_sha256_hex",
+			sql`${t.requestSha256} is null or ${t.requestSha256} ~ ${SHA256_HEX}`,
+		),
 		check(
 			"finding_dismissed_has_reason",
 			sql`${t.status} <> 'dismissed' or (${t.dismissedReason} is not null and btrim(${t.dismissedReason}) <> '')`,
@@ -397,6 +592,8 @@ export const missionInsert = createInsertSchema(mission);
 export const missionSelect = createSelectSchema(mission);
 export const rosterEntryInsert = createInsertSchema(rosterEntry);
 export const rosterEntrySelect = createSelectSchema(rosterEntry);
+export const dispatchInsert = createInsertSchema(dispatch);
+export const dispatchSelect = createSelectSchema(dispatch);
 export const completionReportInsert = createInsertSchema(completionReport);
 export const completionReportSelect = createSelectSchema(completionReport);
 export const findingInsert = createInsertSchema(finding);

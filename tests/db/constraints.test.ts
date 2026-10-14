@@ -6,9 +6,14 @@ import {
 	completionReport,
 	intake,
 	mission,
-	rosterEntry,
 } from "../../src/db/schema";
 import { stamp } from "../../src/db/schema/columns";
+import {
+	dispatchValues,
+	insertDispatchRow,
+	reportValues,
+	seedAgent,
+} from "./dispatch-fixtures";
 import { clock, inRollback, refusal, seedMission } from "./fixtures";
 
 // The CHECKs that turn "required when" sentences in DATA-CONTRACTS-V2 into rules.
@@ -41,46 +46,17 @@ describe.skipIf(!process.env.DATABASE_URL)("required-when constraints", () => {
 	it("requires halt_reason exactly when a completion report is halted", async () => {
 		await inRollback(async (tx, ids) => {
 			const { missionId } = await seedMission(tx, ids);
-			const templateId = ids.next();
-			const entryId = ids.next();
-			await tx.insert(agentTemplate).values({
-				id: templateId,
-				slug: "kel",
-				name: "Kel",
-				kind: "horizontal",
-				roles: ["domain"],
-				waveDefaults: ["B"],
-				writablePaths: ["src/**"],
-				version: 1,
-				...stamp(clock),
-			});
-			await tx.insert(rosterEntry).values({
-				id: entryId,
+			const agent = await seedAgent(tx, ids, missionId);
+			const dispatchId = await insertDispatchRow(
+				tx,
+				ids,
+				dispatchValues(agent, ids, "halted"),
+			);
+			const { id: _, ...report } = reportValues(ids, {
+				id: dispatchId,
 				missionId,
-				agentTemplateId: templateId,
-				active: true,
-				waves: ["B"],
-				grain: "default",
-				absorbedBoundaries: [],
-				...stamp(clock),
+				rosterEntryId: agent.entryId,
 			});
-			const report = {
-				rosterEntryId: entryId,
-				missionId,
-				softCeilingCrossed: false,
-				actualTokens: 1000,
-				agentVersionSha256: "a".repeat(64),
-				skillsSha256: "b".repeat(64),
-				versionSource: "recorded" as const,
-				model: "claude-opus-5-5",
-				artifactsRead: [],
-				artifactsWritten: [],
-				filesTouched: 0,
-				fileTypesTouched: [],
-				rereads: 0,
-				blockers: [],
-				...stamp(clock),
-			};
 			for (const bad of [
 				{ status: "halted" as const, haltReason: null },
 				{ status: "complete" as const, haltReason: "wall_clock" as const },

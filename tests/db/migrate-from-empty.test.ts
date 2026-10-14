@@ -28,6 +28,7 @@ const EXPECTED_TABLES = [
 	"client",
 	"completion_report",
 	"connection",
+	"dispatch",
 	"engagement",
 	"export",
 	"finding",

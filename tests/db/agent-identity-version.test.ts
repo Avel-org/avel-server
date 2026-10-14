@@ -232,8 +232,10 @@ describe.skipIf(!process.env.DATABASE_URL)("agent_identity_version", () => {
 
 	it("refuses TRUNCATE", async () => {
 		await inRollback(async (tx) => {
+			// CASCADE: dispatch references this table (drizzle/0026), and a
+			// plain TRUNCATE is refused for that before the trigger can run.
 			const err = await refusal(tx, (t) =>
-				t.execute(sql`truncate agent_identity_version`),
+				t.execute(sql`truncate agent_identity_version cascade`),
 			);
 			expect(err.message).toMatch(/append-only/);
 		});

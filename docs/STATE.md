@@ -18,7 +18,7 @@
 |---|---|
 | Command Center modules (`COMMAND-CENTER.md`) | **15**, numbered 0–14 |
 | Core entities | **20** + SkillSource (supporting catalog): 18 built, `Dispatch` specced 2026-10-06 for module 6, and `File` specced 2026-10-06 for after the first mission. Every one has a field list (`DATA-CONTRACTS-V2.md`). |
-| Database tables built | **25** — the 18 entities, SkillSource, `role_skills`, `mission_skills`, and Better Auth's `session`, `account` and `verification` — plus `agent_identity_version` (module 5), **25** in all. Migrations `0000`–`0025` applied. |
+| Database tables built | **26** — the 18 entities, SkillSource, `role_skills`, `mission_skills`, and Better Auth's `session`, `account` and `verification`, plus `agent_identity_version` (module 5) and `dispatch` (module 6), **26** in all. Migrations `0000`–`0026` applied. |
 | Error codes in `src/contract/shared/errors.ts` | **22** — 6 generic · `NOT_OPERATOR` · 2 route · 12 `BLAST-RADIUS.md` · `GITHUB_REJECTED` |
 | Roles (`ROLES.md`) | **35** — 23 model · 11 code · 1 human |
 | Model agents — target, horizontal cut (`ROSTER-V2.md`) | **13** in every mission (A 3 · B 5 · C 3 · D 2), plus up to 2: concurrency when required, incident on demand |

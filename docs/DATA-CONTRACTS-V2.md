@@ -466,7 +466,9 @@ subject                what it was found in
 severity               'critical' | 'high' | 'medium' | 'low'
 class
 caught_by              the check or role that found it
-reported_by_dispatch_id?  FK → Dispatch — [specced] 2026-10-06; set from the token when a judge writes it
+reported_by_dispatch_id?  FK → Dispatch — [built] 2026-10-13, migration 0026; set from the token when a judge writes it
+idempotency_key?       set exactly when reported_by_dispatch_id is; unique per dispatch (2026-10-13)
+request_sha256?        SHA-256 of the canonical body; set exactly when idempotency_key is (2026-10-13)
 status                 'open' | 'confirmed' | 'dismissed'
 dismissed_reason?      required when status = 'dismissed'
 timestamps
@@ -593,26 +595,35 @@ Whether an agent is on a mission = whether its RosterEntry exists and is active.
 
 ### Dispatch
 
-`[specced]` 2026-10-06, built with module 6. One run of one agent on one piece of work. A RosterEntry is dispatched many times: once per module, again after a fix.
+`[specced]` 2026-10-06; table `[built]` 2026-10-13, migration 0026 (module 6, step 2). No route writes it yet. One run of one agent on one piece of work. A RosterEntry is dispatched many times: once per module, again after a fix.
 
 ```
-id · roster_entry_id   FK → RosterEntry
-mission_id?            FK → Mission — required exactly when the RosterEntry is mission-scoped
-brief_ref?             the module and requirement IDs this run is for; null for a firm session
+id · roster_entry_id   FK → RosterEntry; with mission_id, a composite FK to roster_entry(id, mission_id), so a dispatch never names another mission's entry
+mission_id             FK → Mission, NOT NULL — mission dispatches only until the firm roster is built (D8, 2026-10-13); the spec's "required exactly when mission-scoped" returns with Canon
+brief_ref?             { moduleId, requirementIds[] } — the module and requirement IDs this run is for; null for a firm session
 status                 'queued' | 'running' | 'complete' | 'blocked' | 'failed' | 'halted'
 halt_reason?           'token_hard_ceiling' | 'spend_ceiling' | 'wall_clock' | 'operator' — when halted; 'operator' added 2026-10-13, migration 0025
-estimated_tokens       integer NOT NULL
-token_soft_ceiling     integer NOT NULL — default 1.5× estimate
-token_hard_ceiling     integer NOT NULL — default 3× estimate
-tokens_used            integer NOT NULL — the runner's running count, starts at 0
-agent_version_sha256   NOT NULL — frozen when the dispatch starts
-skills_sha256          NOT NULL — frozen when the dispatch starts
+estimated_tokens       integer NOT NULL, > 0
+token_soft_ceiling     integer NOT NULL, >= estimate — default 1.5× estimate
+token_hard_ceiling     integer NOT NULL, >= soft — default 3× estimate
+tokens_used            integer NOT NULL — the runner's running count, starts at 0; always tokens_in + tokens_out + cache_read_tokens + cache_write_tokens (CHECK)
+tokens_in · tokens_out · cache_read_tokens · cache_write_tokens   integer NOT NULL, >= 0 — the split spend is priced from (2026-10-13)
+soft_ceiling_crossed   boolean NOT NULL
+spend_usd              numeric(14,6) NOT NULL, >= 0 — priced at the price_version frozen at start (2026-10-13)
+wall_clock_minutes     integer NOT NULL, > 0 — default 60, settable before start (2026-10-13, [hypothesis])
+agent_identity_version_id?  FK → AgentIdentityVersion — the exact version frozen at start; resolves agentVersionRef
+agent_version_sha256?  frozen when the dispatch starts
+skills_sha256?         frozen when the dispatch starts
 model?                 set when it starts
+price_version?         the price table version spend is computed with; set when it starts
 token_sha256?          SHA-256 of the dispatch's access token; never the token itself. Unique: it is the lookup key on every request
-idempotency_key        unique — a retried start cannot run twice
+idempotency_key        unique per mission — a retried create cannot make two dispatches
+request_sha256         SHA-256 of the canonical create body: same key and body replays, a different body is 409 IDEMPOTENCY_REPLAY
 started_at? · closed_at?
-timestamps
+timestamps             no deleted_at: a dispatch is evidence
 ```
+
+*As built 2026-10-13:* the five frozen fields (`agent_identity_version_id`, `agent_version_sha256`, `skills_sha256`, `model`, `price_version`) are nullable while `queued` and required by one CHECK once the dispatch leaves `queued`, because a queued dispatch has not frozen anything yet. The spec's NOT NULL holds for every dispatch that has run. `started_at` is set exactly when the status is not `queued`, and `closed_at` exactly when it is one of the four ending statuses, never before `started_at`. A judge's Finding carries a composite FK `(reported_by_dispatch_id, mission_id)` to the dispatch, so it can never land on another mission. Hashes are lowercase hex SHA-256 (CHECK).
 
 **The estimate becomes a constraint.** A dispatch cannot be inserted without `estimated_tokens` and both ceilings, which closes the `[attestation]` on RosterEntry. The ceilings are copied from the RosterEntry's defaults and may be changed per dispatch before it starts.
 
@@ -655,7 +666,7 @@ What an agent produced, and the evidence it consumed. Required to close a dispat
 
 ```
 id · roster_entry_id     FK -> RosterEntry
-dispatch_id              FK -> Dispatch, unique — [specced] 2026-10-06; one report closes one dispatch
+dispatch_id              FK -> Dispatch, unique, NOT NULL — [built] 2026-10-13, migration 0026; one report closes one dispatch. With mission_id and roster_entry_id, a composite FK to the dispatch, so a report always matches its dispatch's mission and entry
 mission_id
 status                   'complete' | 'blocked' | 'failed' | 'halted'
 halt_reason?             'token_hard_ceiling' | 'spend_ceiling' | 'wall_clock' | 'operator' — when halted
@@ -671,6 +682,8 @@ files_touched            integer
 file_types_touched       text[]              — calibration signal
 rereads                  integer             — calibration signal
 blockers                 [{ description, workaround, provisioning_gap: boolean }]
+edge_mismatches          [{ path, read_sha256, written_sha256, producer_dispatch_id }] — computed by the server at close, never sent by the agent (2026-10-13)
+filed_by                 'agent' | 'system' — the agent for complete and blocked, the runner for halted and failed (2026-10-13)
 deleted_at · timestamps           deleted_at added 2026-10-05, as built
 ```
 
