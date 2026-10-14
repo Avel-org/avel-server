@@ -7,6 +7,7 @@ import { authConfigFromEnv } from "./auth/config";
 import { previewAuthConfig, previewConfigFromEnv } from "./auth/preview";
 import { signInRecorder } from "./auth/sign-in-activity";
 import { getDb } from "./db/client";
+import { dispatchByTokenSha256 } from "./db/dispatch";
 import * as authSchema from "./db/schema/auth";
 import { githubRepoSource } from "./gateways/repo-source";
 import {
@@ -23,6 +24,7 @@ import {
 	devTemplateFiles,
 	TEMPLATE_REPOS,
 } from "./lib/templates";
+import { runnerCredentialSha256 } from "./lib/tokens";
 
 // Node does not read .env on its own; drizzle.config.ts and the seed do the
 // same. loadEnvFile never overrides a variable that is already set, so real
@@ -70,6 +72,11 @@ if (templateOwner && templateToken) {
 	);
 }
 
+// Throws, so the server refuses to start, on a short or unprefixed credential.
+const runnerCredential = runnerCredentialSha256(
+	process.env.AVEL_RUNNER_CREDENTIAL,
+);
+
 const auth = createAuth({
 	config,
 	database: drizzleAdapter(getDb(), { provider: "pg", schema: authSchema }),
@@ -94,6 +101,8 @@ serve({
 		// A Connection names an env var; the gateway reads it at read time.
 		repos: githubRepoSource({ env: (name) => process.env[name] }),
 		templates,
+		dispatchByToken: dispatchByTokenSha256,
+		runnerCredentialSha256: runnerCredential,
 	}).fetch,
 	port,
 });

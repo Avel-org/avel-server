@@ -1,6 +1,7 @@
 import { initContract } from "@ts-rest/core";
 import { z } from "zod";
 import { activityContract } from "./activity";
+import { agentContract } from "./agent";
 import {
 	agentTemplateContract,
 	identityVersionContract,
@@ -21,6 +22,7 @@ import { skillSourceContract } from "./skill-source";
 import { templateContract } from "./template";
 
 export * from "./activity";
+export * from "./agent";
 export * from "./agent-template";
 export * from "./client";
 export * from "./connection";
@@ -90,6 +92,7 @@ export const contract = c.router(
 		presets: presetContract,
 		playbooks: playbookContract,
 		templates: templateContract,
+		agent: agentContract,
 	},
 	{
 		// One entry per ERROR_STATUSES value. Written out, not mapped, so ts-rest

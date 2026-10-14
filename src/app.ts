@@ -13,12 +13,12 @@ import type { TemplateSource } from "./gateways/template-source";
 import type { Clock } from "./lib/clock";
 import type { IdGenerator } from "./lib/ids";
 import type { Logger } from "./lib/logger";
+import { previewHeader, requireTrustedOrigin } from "./middleware/auth";
 import {
-	type AuthVariables,
-	previewHeader,
-	requireOperator,
-	requireTrustedOrigin,
-} from "./middleware/auth";
+	type CallerVariables,
+	type DispatchTokenLookup,
+	resolveCaller,
+} from "./middleware/caller";
 import { corsFor } from "./middleware/cors";
 import {
 	ApiError,
@@ -29,6 +29,7 @@ import {
 } from "./middleware/errors";
 import { requestId } from "./middleware/request-id";
 import { activityRoutes } from "./routes/activity";
+import { agentRoutes } from "./routes/agent";
 import {
 	agentTemplateRoutes,
 	identityVersionRoutes,
@@ -64,6 +65,10 @@ export type AppDeps = {
 	repos: RepoSource;
 	/** Where the template route reads template repositories (src/gateways/template-source.ts). GitHub in production, a fixture in dev and tests. */
 	templates: TemplateSource;
+	/** Resolves an agent's bearer token to its dispatch (src/middleware/caller.ts). */
+	dispatchByToken: DispatchTokenLookup;
+	/** The runner credential's hex SHA-256; null when no runner is configured, so no request is the runner. */
+	runnerCredentialSha256: string | null;
 };
 
 /**
@@ -95,17 +100,29 @@ export function createApp(deps: AppDeps) {
 		presets: presetRoutes(routeDeps),
 		playbooks: playbookRoutes(routeDeps),
 		templates: templateRoutes({ ...routeDeps, templates: deps.templates }),
+		agent: agentRoutes(routeDeps),
 	});
 
-	const app = new Hono<{ Variables: AuthVariables }>();
+	const app = new Hono<{ Variables: CallerVariables }>();
 
 	// First, so a preflight is answered before auth can refuse it.
 	// Outermost, so every /api response carries it, errors included.
 	if (deps.preview) app.use("/api/*", previewHeader());
 	app.use("/api/*", corsFor(deps.webOrigins));
 	app.use("/api/*", requestId(deps.ids));
-	// After the request id, so a refusal still carries one.
-	app.use("/api/*", requireOperator(deps.auth, { preview: deps.preview }));
+	// After the request id, so a refusal still carries one. A request without
+	// a bearer token goes through requireOperator unchanged.
+	app.use(
+		"/api/*",
+		resolveCaller({
+			auth: deps.auth,
+			preview: deps.preview,
+			db: deps.db,
+			contract,
+			dispatchByToken: deps.dispatchByToken,
+			runnerCredentialSha256: deps.runnerCredentialSha256,
+		}),
+	);
 
 	app.use("/api/auth/*", requireTrustedOrigin(deps.auth.trustedOrigins));
 	// Better Auth's own routes: sign-in, the OAuth callback, session, sign-out.
@@ -128,7 +145,11 @@ export function createApp(deps: AppDeps) {
 			request: withRepeatedArrayParams(await platformRequest(req)),
 			contract,
 			router,
-			platformContext: { requestId: id, operator: ctx.get("operator") },
+			platformContext: {
+				requestId: id,
+				operator: ctx.get("operator"),
+				caller: ctx.get("caller"),
+			},
 			options: {
 				// A handler that answers outside the contract's shape is a 500
 				// INTERNAL, never a body the client's types do not describe.

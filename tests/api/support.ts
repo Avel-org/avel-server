@@ -6,6 +6,7 @@ import { createApp } from "../../src/app";
 import { createAuth } from "../../src/auth";
 import { signInRecorder } from "../../src/auth/sign-in-activity";
 import { closeDb, getDb } from "../../src/db/client";
+import { dispatchByTokenSha256 } from "../../src/db/dispatch";
 import * as schema from "../../src/db/schema";
 import { activityLog, user } from "../../src/db/schema";
 import * as authSchema from "../../src/db/schema/auth";
@@ -17,6 +18,8 @@ import {
 } from "../../src/gateways/template-source";
 import { fixedClock } from "../../src/lib/clock";
 import { type IdGenerator, randomIds, sequentialIds } from "../../src/lib/ids";
+import { sha256Hex } from "../../src/lib/tokens";
+import type { DispatchTokenLookup } from "../../src/middleware/caller";
 import { noRepos } from "../unit/repo-fixtures";
 import {
 	BASE_URL,
@@ -91,7 +94,12 @@ export type ApiHarness = {
 	/** A request with the session cookie and the app's origin. */
 	call: (
 		path: string,
-		init?: { method?: string; body?: unknown },
+		init?: {
+			method?: string;
+			body?: unknown;
+			/** Extra headers, after the cookie and origin, so they can replace them. */
+			headers?: Record<string, string>;
+		},
 	) => Promise<Response>;
 	logRows: (
 		entityId: string,
@@ -117,6 +125,10 @@ export async function withApi(
 		repos?: RepoSource;
 		/** Where the template route reads repositories. Default: none listed. */
 		templates?: TemplateSource;
+		/** Resolves agent bearer tokens. Default: the real lookup, on this transaction. */
+		dispatchByToken?: DispatchTokenLookup;
+		/** The runner's credential, in the clear; the app gets its hash. Default: no runner. */
+		runnerCredential?: string;
 	} = {},
 ) {
 	const db = options.countStatements ? countingDb() : getDb();
@@ -157,6 +169,11 @@ export async function withApi(
 			preview: options.preview ?? false,
 			repos: options.repos ?? noRepos,
 			templates: options.templates ?? noTemplates,
+			dispatchByToken: options.dispatchByToken ?? dispatchByTokenSha256,
+			runnerCredentialSha256:
+				options.runnerCredential === undefined
+					? null
+					: sha256Hex(options.runnerCredential),
 		});
 
 		let cookie = "";
@@ -186,6 +203,7 @@ export async function withApi(
 						...(init.body === undefined
 							? {}
 							: { "content-type": "application/json" }),
+						...init.headers,
 					},
 					body: init.body === undefined ? undefined : JSON.stringify(init.body),
 				}),

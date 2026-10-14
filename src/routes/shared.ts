@@ -2,9 +2,11 @@ import { and, eq, lt, or, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import type { Operator } from "../auth";
+import type { ActivityEntry } from "../db/activity";
 import type { Executor } from "../db/tx";
 import type { Clock } from "../lib/clock";
 import type { IdGenerator } from "../lib/ids";
+import type { AgentCaller, Caller } from "../middleware/caller";
 import { ApiError } from "../middleware/errors";
 
 /** What every resource route factory takes. */
@@ -18,6 +20,8 @@ export type RouteDeps = {
 export type RequestContext = {
 	requestId: string;
 	operator: Operator | undefined;
+	/** Who the request is from (src/middleware/caller.ts); unset on a dev-preview read. */
+	caller?: Caller;
 };
 
 /**
@@ -29,6 +33,35 @@ export function operatorOf(ctx: RequestContext): Operator {
 	if (!ctx.operator)
 		throw new Error("protected route reached without an operator");
 	return ctx.operator;
+}
+
+/**
+ * The calling agent. Only an agent may call an /api/agent/* route: an
+ * operator session there is 403 FORBIDDEN, since the route acts as a
+ * dispatch and the operator has none.
+ */
+export function agentOf(ctx: RequestContext): AgentCaller {
+	if (ctx.caller?.kind !== "agent") {
+		throw new ApiError("FORBIDDEN", "Only an agent may call this route");
+	}
+	return ctx.caller;
+}
+
+/**
+ * The ActivityLog actor columns for a caller, under the actor CHECKs: an
+ * operator names its user, an agent its roster entry, the runner neither.
+ */
+export function actorOf(
+	caller: Caller,
+): Pick<ActivityEntry, "actorKind" | "actorUserId" | "actorRosterEntryId"> {
+	switch (caller.kind) {
+		case "operator":
+			return { actorKind: "operator", actorUserId: caller.operator.id };
+		case "agent":
+			return { actorKind: "agent", actorRosterEntryId: caller.rosterEntry.id };
+		case "system":
+			return { actorKind: "system" };
+	}
 }
 
 /**

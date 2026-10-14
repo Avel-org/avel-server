@@ -8,6 +8,7 @@ import { noTemplates } from "../../src/gateways/template-source";
 import { type Clock, fixedClock } from "../../src/lib/clock";
 import { type IdGenerator, sequentialIds } from "../../src/lib/ids";
 import { createLogger } from "../../src/lib/logger";
+import { noDispatches } from "../../src/middleware/caller";
 import { noRepos } from "./repo-fixtures";
 
 // Helpers shared by the unit tests. Not collected as a test file: vitest only
@@ -116,6 +117,8 @@ export function buildApp(
 		preview: options.preview ?? false,
 		repos: noRepos,
 		templates: noTemplates,
+		dispatchByToken: noDispatches,
+		runnerCredentialSha256: null,
 	});
 	return { app, auth, memory, logs: lines, signIns };
 }

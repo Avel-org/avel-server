@@ -22,6 +22,7 @@ import type { Db } from "../../src/db/tx";
 import { noTemplates } from "../../src/gateways/template-source";
 import { fixedClock } from "../../src/lib/clock";
 import { type IdGenerator, sequentialIds } from "../../src/lib/ids";
+import { noDispatches } from "../../src/middleware/caller";
 import { noRepos } from "../unit/repo-fixtures";
 import {
 	BASE_URL,
@@ -227,6 +228,8 @@ describe.skipIf(!url)(
 					preview: false,
 					repos: noRepos,
 					templates: noTemplates,
+					dispatchByToken: noDispatches,
+					runnerCredentialSha256: null,
 				});
 			const apps = {
 				first: app(prefixedIds("11111111"), first),
