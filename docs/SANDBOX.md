@@ -160,6 +160,8 @@ The worktree half is already solved by `treehouse`, which provides a pool, lease
 - **File tools only.** The agent gets read, write, edit and list inside the room (`src/rooms/tools.ts`), called by the runner on its behalf. No shell, no installs, no network tool. Paths are refused when absolute, when they contain `..` or `.git`, or when they resolve outside the room through a symlink or junction.
 - **The tool's write check is `[attestation]`.** Write and edit refuse paths outside the entry's writable globs, but that is the tool checking itself, not a mount: nothing at the filesystem stops a write. The mechanism is the exit checkpoint (`src/rooms/checkpoint.ts`), which lists every path changed since the pinned commit, untracked and ignored files included, and refuses any outside the globs with `writes_outside_mount`.
 - **Rooms outlive their dispatch.** A halted or failed dispatch keeps its worktree so the operator can inspect the work, until an explicit release removes it. Nothing calls release from a route yet, and no table records rooms. Each kept room stays registered in its source clone's `.git/worktrees` until it is released, so those registrations pile up in the clone. They are harmless, and `git worktree prune` runs on every release.
+- **The agent works through those tools and nothing else** (`[built]` step 9d, 2026-10-14; `STEP-9-PLAN.md`). The real harness runs the Claude Agent SDK with its working directory in the room, every built-in tool removed, AVEL's seven tools (`room_read`, `room_list`, `room_write`, `room_edit`, `skill_read`, `report`, `finding`) as the only ones present, and a hook that denies any other call. It loads no settings or CLAUDE.md files and cannot start subagents. Its environment holds the API key and the system basics only: no database URL, no runner credential, no GitHub token.
+- **That is a tool boundary, not an OS boundary.** The SDK's process runs on the host with the operator's user privileges. Nothing at the OS stops it from reaching the network or other files; what stops the agent is that it has no tool to ask for them. `[attestation]` until a container provider runs it.
 
 ## Mounts stop writes. They do not stop whole-tree commands.
 
@@ -268,12 +270,14 @@ The hard ceiling is deliberately loose. Runaway loops overshoot by an order of m
 
 ## The agent's API token never enters a room
 
-`[specced]` 2026-10-06. Each dispatch has an access token for AVEL's own API (`DATA-CONTRACTS-V2.md`, *Dispatch*). It is held by the dispatch runner, outside every room. An agent's tools call the runner over a local channel, and the runner makes the API call with the token.
+`[specced]` 2026-10-06; `[built]` for the real harness 2026-10-14. Each dispatch has an access token for AVEL's own API (`DATA-CONTRACTS-V2.md`, *Dispatch*). It is held by the dispatch runner, outside every room. An agent's tools call the runner over a local channel, and the runner makes the API call with the token.
 
 - **The room where agent-written code runs has no network,** so a token inside it could not reach the API anyway. Keeping it in the runner means no room needs an exception to reach the API.
 - **Code an agent writes can never read the token,** because the token is not in any environment the agent's code executes in. This is the same principle as the GitHub credential living only in the delivery room.
 - **The runner sees every call an agent makes,** so it can count and log them alongside tokens used.
 - **The token dies with the dispatch.** Closing or halting the dispatch makes it resolve to nothing on the next request. Nothing has to be revoked separately.
+
+*As built 2026-10-14:* the runner and the agent's session share one process, the server's. The `report` and `finding` tools close over the token and call the server's own routes in process (`src/runner/agent-tools.ts`), so the token is never in the model's context, the session's environment or the room.
 
 This is a different credential from the GitHub token. The agent token reaches only AVEL's API, under the agent's allowed actions, and the dispatch runner may hold it. The GitHub credential reaches client repositories, and only the delivery room holds it.
 

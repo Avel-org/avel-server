@@ -841,6 +841,20 @@ J decided this for module 7. `SANDBOX.md` has the as-built note.
 - **Rooms live under `%LOCALAPPDATA%\avel\rooms\<dispatchId>`,** with the root injected through dependencies so tests use a temp directory.
 - **A room's source is a local clone, never a fetch:** the mission's template at `template_version`, or else its one approved intake's repository at the commit read, under `AVEL_SOURCES_DIR` (`templates/<slug>`, `repos/<owner>/<repo>`). The runner never holds the GitHub credential, so it cannot clone. A source that cannot be resolved refuses `source_unavailable`, which retrying will not fix.
 
+## Decided 2026-10-14: the dispatch brief and the real harness
+
+J approved the step 9 plan on 2026-10-14. `STEP-9-PLAN.md` holds the detail, including the harness options table; this section keeps the reasons.
+
+- **Every brief has four parts: Scope, Read, Method and Done when.** The parts mirror how a person briefs Claude: a project, its instructions and files, one chat per task. Canon's additions arrive as operator-approved plan changes, never as the agent widening its own brief.
+- **Every requirement names a check outside the agent.** A test, a typecheck, a command or a file that must exist. An agent saying it is done is the failure this product exists to catch, so a requirement with no outside check is refused (`checkPlan` rule 5, and `requirement_unchecked` for missions that predate it). The gate runs the checks, never the agent.
+- **Read lists raw sources, never Canon's summaries,** at the room's commit with each file's blob sha, so the brief's hash covers what the agent was told to read.
+- **The brief is rendered by a pure function and frozen with its hash at start.** The `claude_code` preset's own text is not AVEL's to hash, so the harness version is recorded instead.
+- **The harness is the Claude Agent SDK, in process, pinned to one version.** Every built-in tool is removed and AVEL's seven tools are the only ones present; a hook denies anything else. Settings, CLAUDE.md files and subagents are off. The alternative, the built-in tools with permission rules, would have let the built-in Read open any file on the host.
+- **The dispatch token stays in the runner.** The report and finding tools close over it and call the server's own routes. The agent never sees it, and the files it read are recorded by the read tool, not taken from its word.
+- **Sonnet 5.5 (`claude-sonnet-5-5`) is the default model.** Prices were checked against the published pricing page on 2026-10-14. Cache writes are priced at the 1-hour rate, so spend can read high, never low. A price relayed at $0.20 per million cache-read tokens was wrong; the page says $0.10.
+- **The real harness is opt-in** (`AVEL_HARNESS=agent-sdk`). The FakeHarness stays the default and the test harness, so tests and CI never spend.
+- **Budget:** $100 in total for real-model work, a ~$2 ceiling on the first smoke run, and every run logged in `COST-LOG.md`.
+
 ---
 
 ## Open questions

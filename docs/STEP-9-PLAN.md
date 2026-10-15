@@ -1,6 +1,6 @@
 # Unit 6+7+8, step 9: the dispatch brief and the real harness
 
-Approved by J on 2026-10-14. The real-model parts (9d, 9e) still wait on J's default model, its prices (input, output, cache read, cache write) and an OK for the ~$2 smoke run.
+Approved by J on 2026-10-14. Steps 9a to 9e are built (2026-10-14). J chose `claude-sonnet-5-5` and OK'd the smoke run; what is and isn't built is in `STATE.md`, and the reasons are in `DECISIONS-V2.md`.
 
 ## J's decision
 
