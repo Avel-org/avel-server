@@ -40,7 +40,7 @@ import {
 	tableFor,
 	wallClockSpent,
 } from "./budget";
-import type { Harness } from "./harness";
+import type { Harness, HarnessSession } from "./harness";
 import { missionRoomSource, missionSourceMd } from "./room-source";
 import { dispatchSkills, skillsSha256 } from "./skills";
 
@@ -186,7 +186,7 @@ function refuse(
  * mission_not_active, roster_entry_inactive, agent_identity_missing,
  * requirement_unchecked (a dispatch queued before step 9's rule), model_price_unknown, spend_ceiling_reached and harness_unavailable,
  * refusing with the first. Then freezes the identity version, both hashes,
- * the brief and its hash, the model and the price version, mints the
+ * the brief and its hash, the harness version, the model and the price version, mints the
  * token, stores only its hash, and hands the token to the harness, never
  * to a response or a log. A dispatch with no briefRef freezes no brief.
  *
@@ -292,6 +292,7 @@ export async function startDispatch(
 			skillsSha256: skills,
 			briefMd,
 			briefSha256: briefHash,
+			harnessVersion: deps.harness.version,
 			model,
 			priceVersion: deps.prices.current,
 			tokenSha256: sha256Hex(token),
@@ -314,7 +315,16 @@ export async function startDispatch(
 			priceVersion: deps.prices.current,
 		},
 	});
-	const session = { dispatchId: d.id, token, model, roomRoot: room.root };
+	const session: HarnessSession = {
+		dispatchId: d.id,
+		token,
+		model,
+		roomRoot: room.root,
+		writableGlobs: room.writableGlobs,
+		identityMd: version.identityMd,
+		briefMd,
+		skills: skillSet.map((s) => ({ slug: s.slug, contentMd: s.contentMd })),
+	};
 	if (!(await deps.harness.start(session))) {
 		throw refuse("The harness cannot take this dispatch now", {
 			details: { reason: "harness_unavailable", ...at },

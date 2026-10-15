@@ -177,6 +177,15 @@ export async function readTool(room: ToolRoom, input: string): Promise<string> {
 	return readFile(await fileAt(room, rel), "utf8");
 }
 
+/** A file's bytes, under readTool's rules: what an artifact's sha256 covers. */
+export async function readBytesTool(
+	room: ToolRoom,
+	input: string,
+): Promise<Buffer> {
+	const rel = normalizeRoomPath(input);
+	return readFile(await fileAt(room, rel));
+}
+
 export type ListEntry = { name: string; kind: "file" | "directory" };
 
 /** One directory's entries, by name in code-unit order, without .git. */

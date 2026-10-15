@@ -1,6 +1,6 @@
 import {
+	PRICE_TABLES,
 	PRICE_VERSION,
-	PRICES,
 	type PriceTable,
 	spendUsd,
 	type TokenSplit,
@@ -17,10 +17,10 @@ export type PriceBook = {
 	tables: Readonly<Record<string, PriceTable>>;
 };
 
-/** src/lib/prices.ts's one table. Tests pass their own book. */
+/** src/lib/prices.ts's tables, every version. Tests pass their own book. */
 export const DEFAULT_PRICE_BOOK: PriceBook = {
 	current: PRICE_VERSION,
-	tables: { [PRICE_VERSION]: PRICES },
+	tables: PRICE_TABLES,
 };
 
 /** The table a version names, or undefined when the book has no such version. */

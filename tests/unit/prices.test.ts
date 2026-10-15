@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	PRICE_TABLES,
 	PRICE_VERSION,
 	PRICES,
 	type PriceTable,
@@ -8,8 +9,7 @@ import {
 	type TokenSplit,
 } from "../../src/lib/prices";
 
-// Made-up prices: the shipped table holds only the zero-priced harness, and
-// real model prices come from the operator.
+// Made-up prices, so the arithmetic tests do not move when a real price does.
 const TABLE: PriceTable = {
 	"test-model": {
 		inputPerMTok: 3,
@@ -33,12 +33,29 @@ const split = (
 ): TokenSplit => ({ tokensIn, tokensOut, cacheReadTokens, cacheWriteTokens });
 
 describe("prices", () => {
-	it("ships only the zero-priced harness, under a dated version", () => {
-		expect(PRICE_VERSION).toBe("prices-2026-10-13");
-		expect(Object.keys(PRICES)).toEqual(["fake-harness"]);
+	it("ships the zero-priced harness and Sonnet 5.5 at its list prices, under a dated version", () => {
+		expect(PRICE_VERSION).toBe("prices-2026-10-14");
+		expect(Object.keys(PRICES)).toEqual(["fake-harness", "claude-sonnet-5-5"]);
 		expect(
 			spendUsd("fake-harness", split(10 ** 9, 10 ** 9, 10 ** 9, 10 ** 9)),
 		).toBe(0);
+		const M = 1_000_000;
+		expect(spendUsd("claude-sonnet-5-5", split(M))).toBe(2);
+		expect(spendUsd("claude-sonnet-5-5", split(0, M))).toBe(10);
+		expect(spendUsd("claude-sonnet-5-5", split(0, 0, M))).toBe(0.1);
+		// One cache-write count, priced at the 1-hour rate.
+		expect(spendUsd("claude-sonnet-5-5", split(0, 0, 0, M))).toBe(4);
+	});
+
+	it("keeps every older version, so a dispatch started under one still prices", () => {
+		expect(Object.keys(PRICE_TABLES)).toEqual([
+			"prices-2026-10-13",
+			"prices-2026-10-14",
+		]);
+		expect(Object.keys(PRICE_TABLES["prices-2026-10-13"] ?? {})).toEqual([
+			"fake-harness",
+		]);
+		expect(PRICES).toBe(PRICE_TABLES[PRICE_VERSION]);
 	});
 
 	it("prices only models in the table", () => {

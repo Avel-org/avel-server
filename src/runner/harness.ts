@@ -5,8 +5,9 @@ import type { TokenSplit } from "../lib/prices";
  * agent's model. The runner drives it and never trusts it with the budget:
  * the harness reports usage, and the runner counts it, prices it and stops
  * it (SANDBOX.md, The runner enforces budget). An AppDeps gateway, like the
- * repo and template sources. No real model is wired yet; production and
- * tests both use the FakeHarness.
+ * repo and template sources. The FakeHarness runs no model and is the
+ * default and the tests' harness; AgentSdkHarness (agent-sdk-harness.ts)
+ * runs a real one when AVEL_HARNESS=agent-sdk.
  */
 
 /** What a running session reports, read one at a time by the runner. */
@@ -20,6 +21,9 @@ export type HarnessEvent =
 	/** The session died. The runner closes the dispatch as failed. */
 	| { kind: "fail" };
 
+/** A skill the session's agent may read in full by its slug. */
+export type SessionSkill = { slug: string; contentMd: string };
+
 /** What the runner hands the harness to start a session. */
 export type HarnessSession = {
 	dispatchId: string;
@@ -28,11 +32,21 @@ export type HarnessSession = {
 	model: string;
 	/** The dispatch's room (src/rooms): where the agent's file tools work. */
 	roomRoot: string;
+	/** The room's resolved writable globs: where write and edit may go. */
+	writableGlobs: readonly string[];
+	/** The agent's identity, from the version frozen at start. */
+	identityMd: string;
+	/** The brief frozen at start; null for a dispatch with no briefRef. */
+	briefMd: string | null;
+	/** The dispatch's stack and domain skills, the brief's Method. */
+	skills: readonly SessionSkill[];
 };
 
 export type Harness = {
 	/** The model this harness runs: what a dispatch freezes and is priced by. */
 	readonly model: string;
+	/** The harness and its version, such as claude-agent-sdk@0.3.296: dispatch.harness_version. */
+	readonly version: string;
 	/** Starts a session; false when the harness cannot take it now. */
 	start: (session: HarnessSession) => Promise<boolean>;
 	/** Whether a session for this dispatch exists, e.g. after a restart. */
@@ -45,6 +59,9 @@ export type Harness = {
 
 /** The FakeHarness's model id. src/lib/prices.ts prices it at zero. */
 export const FAKE_HARNESS_MODEL = "fake-harness";
+
+/** The FakeHarness's harness_version. */
+export const FAKE_HARNESS_VERSION = "fake-harness@1";
 
 /**
  * A FakeHarness script: usage steps reported in order, then the outcome.
@@ -64,12 +81,13 @@ const IDLE: FakeScript = { steps: [], outcome: "until_stopped" };
  */
 export class FakeHarness implements Harness {
 	readonly model: string;
+	readonly version = FAKE_HARNESS_VERSION;
 	/** False makes every start refuse, as a harness at capacity would. */
 	accepting = true;
 	private readonly scripts = new Map<string, FakeScript>();
 	private readonly sessions = new Map<
 		string,
-		{ token: string; roomRoot: string; events: HarnessEvent[] }
+		{ session: HarnessSession; events: HarnessEvent[] }
 	>();
 	/** Every dispatch id stop() was called with, in order. */
 	readonly stopped: string[] = [];
@@ -85,12 +103,17 @@ export class FakeHarness implements Harness {
 
 	/** The token a session was started with, for tests that call as the agent. */
 	tokenFor(dispatchId: string): string | undefined {
-		return this.sessions.get(dispatchId)?.token;
+		return this.sessions.get(dispatchId)?.session.token;
 	}
 
 	/** The room a session was started in. */
 	roomFor(dispatchId: string): string | undefined {
-		return this.sessions.get(dispatchId)?.roomRoot;
+		return this.sessions.get(dispatchId)?.session.roomRoot;
+	}
+
+	/** Everything a session was started with. */
+	sessionFor(dispatchId: string): HarnessSession | undefined {
+		return this.sessions.get(dispatchId)?.session;
 	}
 
 	/** Forgets every session, as a restart would. */
@@ -106,11 +129,7 @@ export class FakeHarness implements Harness {
 			split: { ...split },
 		}));
 		if (s.outcome !== "until_stopped") events.push({ kind: s.outcome });
-		this.sessions.set(session.dispatchId, {
-			token: session.token,
-			roomRoot: session.roomRoot,
-			events,
-		});
+		this.sessions.set(session.dispatchId, { session, events });
 		return true;
 	}
 

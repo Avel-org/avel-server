@@ -620,9 +620,9 @@ agent_identity_version_id?  FK → AgentIdentityVersion — the exact version fr
 agent_version_sha256?  frozen when the dispatch starts
 skills_sha256?         frozen when the dispatch starts
 brief_md? · brief_sha256?   the rendered four-part brief and its hash, frozen together at start (CHECK: both or neither); [built] 2026-10-14, migration 0027. Written at start since step 9c (src/runner/brief.ts): Scope is the briefRef's module and requirements with their criteria; Read is each module read matched against the room's commit (`git ls-tree`, symlinks and submodules left out; a read naming a directory covers everything under it) with every file's blob sha, at most 500 files listed and a read set sha256 over all of them, then the one approved intake's sourceMd under a fence with its sha256; Method is the dispatch's stack and domain skills by slug; Done when is the plan's checks for those requirements. brief_sha256 is the hex SHA-256 of brief_md's UTF-8 bytes, so it covers the blob shas and both hashes in the text. A dispatch with no briefRef freezes neither
-harness_version?       the harness and its version that ran the dispatch; [built] 2026-10-14, migration 0027
+harness_version?       the harness and its version that ran the dispatch, frozen at start since step 9d: `fake-harness@1`, or `claude-agent-sdk@<version>` when AVEL_HARNESS=agent-sdk; [built] 2026-10-14, migration 0027
 model?                 set when it starts
-price_version?         the price table version spend is computed with; set when it starts
+price_version?         the price table version spend is computed with; set when it starts. src/lib/prices.ts keeps every version: `prices-2026-10-13` (the FakeHarness only) and `prices-2026-10-14` (adds `claude-sonnet-5-5` at $2 in, $10 out, $0.10 cache read and $4 cache write per million tokens, the 1-hour write rate, so spend may read high, never low)
 token_sha256?          SHA-256 of the dispatch's access token; never the token itself. Unique: it is the lookup key on every request
 idempotency_key        unique per mission — a retried create cannot make two dispatches
 request_sha256         SHA-256 of the canonical create body: same key and body replays, a different body is 409 IDEMPOTENCY_REPLAY

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { FAKE_HARNESS_MODEL, FakeHarness } from "../../src/runner/harness";
+import {
+	FAKE_HARNESS_MODEL,
+	FakeHarness,
+	type HarnessSession,
+} from "../../src/runner/harness";
 
 const split = (tokensIn: number) => ({
 	tokensIn,
@@ -8,11 +12,15 @@ const split = (tokensIn: number) => ({
 	cacheWriteTokens: 0,
 });
 
-const session = (dispatchId: string) => ({
+const session = (dispatchId: string): HarnessSession => ({
 	dispatchId,
 	token: `avl_dsp_${dispatchId}`,
 	model: FAKE_HARNESS_MODEL,
 	roomRoot: `rooms/${dispatchId}`,
+	writableGlobs: [],
+	identityMd: "# Kel",
+	briefMd: null,
+	skills: [],
 });
 
 describe("FakeHarness", () => {

@@ -2,12 +2,10 @@
  * Model prices (module 6). A dispatch records the price version it started
  * under, so its spend can be recomputed exactly later. Pure: no clock, no IO.
  *
- * Only the dev and test harness is priced here. Real model prices come from
- * the operator, never from memory (BE lead, 2026-10-13).
+ * Real model prices come from the operator, never from memory (BE lead,
+ * 2026-10-13). Every table ever current stays here, under its version, so a
+ * dispatch started under an older one still prices.
  */
-
-/** Bumped whenever any price in PRICES changes. Stored as dispatch.price_version. */
-export const PRICE_VERSION = "prices-2026-10-13";
 
 /** US dollars per million tokens, at most six decimal places. */
 export type ModelPrice = {
@@ -19,14 +17,41 @@ export type ModelPrice = {
 
 export type PriceTable = Readonly<Record<string, ModelPrice>>;
 
-export const PRICES: PriceTable = {
-	"fake-harness": {
-		inputPerMTok: 0,
-		outputPerMTok: 0,
-		cacheReadPerMTok: 0,
-		cacheWritePerMTok: 0,
+const FAKE_HARNESS_PRICE: ModelPrice = {
+	inputPerMTok: 0,
+	outputPerMTok: 0,
+	cacheReadPerMTok: 0,
+	cacheWritePerMTok: 0,
+};
+
+/**
+ * Every price table by version, oldest first. Append a new version when any
+ * price changes; never edit one a dispatch may have started under.
+ *
+ * prices-2026-10-14: claude-sonnet-5-5 as J chose it for dispatches, checked
+ * against platform.claude.com/docs/en/about-claude/pricing on 2026-10-14:
+ * $2 input, $10 output, $0.10 cache hits, $2.50 5-minute and $4 1-hour cache
+ * writes. A dispatch's split has one cache-write count, so it is priced at
+ * the 1-hour rate: spend may read high, never low.
+ */
+export const PRICE_TABLES: Readonly<Record<string, PriceTable>> = {
+	"prices-2026-10-13": { "fake-harness": FAKE_HARNESS_PRICE },
+	"prices-2026-10-14": {
+		"fake-harness": FAKE_HARNESS_PRICE,
+		"claude-sonnet-5-5": {
+			inputPerMTok: 2,
+			outputPerMTok: 10,
+			cacheReadPerMTok: 0.1,
+			cacheWritePerMTok: 4,
+		},
 	},
 };
+
+/** The version a new dispatch starts under. Stored as dispatch.price_version. */
+export const PRICE_VERSION = "prices-2026-10-14";
+
+/** The current table. */
+export const PRICES: PriceTable = PRICE_TABLES[PRICE_VERSION] as PriceTable;
 
 /** A dispatch's four token counts, as the runner reports them. */
 export type TokenSplit = {

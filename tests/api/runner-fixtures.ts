@@ -12,7 +12,7 @@ import type { Tx } from "../../src/db/tx";
 import type { Clock } from "../../src/lib/clock";
 import type { IdGenerator } from "../../src/lib/ids";
 import type { PriceBook } from "../../src/runner/budget";
-import type { FakeHarness } from "../../src/runner/harness";
+import type { FakeHarness, Harness } from "../../src/runner/harness";
 import type { RunnerDeps } from "../../src/runner/runner";
 import {
 	DISPATCH_PLAN,
@@ -128,7 +128,7 @@ const runnerIdsByNs = new Map<string, IdGenerator>();
 
 export function runnerDeps(
 	h: Pick<ApiHarness, "tx" | "ns">,
-	harness: FakeHarness,
+	harness: Harness,
 	prices: PriceBook,
 	clock: Clock,
 	rooms: Pick<RunnerDeps, "rooms" | "roomSources"> = {

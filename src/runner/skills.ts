@@ -58,6 +58,7 @@ export function dispatchSkillSet<S extends AttachedSkill>(
 export type DispatchSkill = AttachedSkill & {
 	name: string;
 	description: string;
+	contentMd: string;
 };
 
 /** dispatchSkillSet over the mission's live attached skills. */
@@ -72,6 +73,7 @@ export async function dispatchSkills(
 			slug: skill.slug,
 			name: skill.name,
 			description: skill.description,
+			contentMd: skill.contentMd,
 			layer: skill.layer,
 			status: skill.status,
 			recommendedFor: skill.recommendedFor,

@@ -29,8 +29,11 @@ import {
 import { runnerCredentialSha256 } from "./lib/tokens";
 import { worktreeRooms } from "./rooms/provider";
 import { localSources } from "./rooms/sources";
+import { AgentSdkHarness } from "./runner/agent-sdk-harness";
 import { DEFAULT_PRICE_BOOK } from "./runner/budget";
-import { FakeHarness } from "./runner/harness";
+import { FakeHarness, type Harness } from "./runner/harness";
+import { startRunnerLoop } from "./runner/loop";
+import { applyUsage } from "./runner/runner";
 
 // Node does not read .env on its own; drizzle.config.ts and the seed do the
 // same. loadEnvFile never overrides a variable that is already set, so real
@@ -86,6 +89,38 @@ const roomsRoot = path.join(
 	"rooms",
 );
 
+// The harness (step 9d). The FakeHarness unless AVEL_HARNESS=agent-sdk,
+// which runs real agents on the Claude Agent SDK and spends real money; it
+// refuses to start without ANTHROPIC_API_KEY. The key is taken out of
+// process.env once read, so no other child process (git) inherits it.
+const realHarness = process.env.AVEL_HARNESS === "agent-sdk";
+let harness: Harness = new FakeHarness();
+let sdkHarness: AgentSdkHarness | null = null;
+if (realHarness) {
+	const apiKey = process.env.ANTHROPIC_API_KEY;
+	if (!apiKey) {
+		throw new Error("AVEL_HARNESS=agent-sdk needs ANTHROPIC_API_KEY");
+	}
+	delete process.env.ANTHROPIC_API_KEY;
+	sdkHarness = new AgentSdkHarness({
+		model: process.env.AVEL_HARNESS_MODEL || "claude-sonnet-5-5",
+		apiKey,
+		configDir: path.join(path.dirname(roomsRoot), "runner-config"),
+		ids: randomIds,
+		logger,
+		maxBudgetUsd: Number(process.env.AVEL_HARNESS_MAX_BUDGET_USD ?? 2),
+		maxTurns: Number(process.env.AVEL_HARNESS_MAX_TURNS ?? 60),
+	});
+	harness = sdkHarness;
+	logger.warn(
+		{ model: sdkHarness.model, harness: sdkHarness.version },
+		"REAL HARNESS is ON: started dispatches run a real model and spend money",
+	);
+}
+const rooms = worktreeRooms(roomsRoot);
+// Local clones only; unset, every start refuses source_unavailable.
+const roomSources = localSources(process.env.AVEL_SOURCES_DIR || undefined);
+
 // Throws, so the server refuses to start, on a short or unprefixed credential.
 const runnerCredential = runnerCredentialSha256(
 	process.env.AVEL_RUNNER_CREDENTIAL,
@@ -103,30 +138,46 @@ const auth = createAuth({
 	}),
 });
 
-serve({
-	fetch: createApp({
+const app = createApp({
+	clock: systemClock,
+	ids: randomIds,
+	logger,
+	auth,
+	db: getDb,
+	webOrigins: config.webOrigins,
+	preview: preview.enabled,
+	// A Connection names an env var; the gateway reads it at read time.
+	repos: githubRepoSource({ env: (name) => process.env[name] }),
+	templates,
+	dispatchByToken: dispatchByTokenSha256,
+	runnerCredentialSha256: runnerCredential,
+	harness,
+	prices: DEFAULT_PRICE_BOOK,
+	rooms,
+	roomSources,
+});
+
+// The real harness files reports and findings through the app itself, in
+// process, and the runner ticks here. With the FakeHarness nothing ticks.
+if (sdkHarness) {
+	sdkHarness.bindAgentApi((request) => Promise.resolve(app.fetch(request)));
+	const runnerDeps = {
+		db: getDb,
 		clock: systemClock,
 		ids: randomIds,
-		logger,
-		auth,
-		db: getDb,
-		webOrigins: config.webOrigins,
-		preview: preview.enabled,
-		// A Connection names an env var; the gateway reads it at read time.
-		repos: githubRepoSource({ env: (name) => process.env[name] }),
-		templates,
-		dispatchByToken: dispatchByTokenSha256,
-		runnerCredentialSha256: runnerCredential,
-		// No real model yet. Nothing ticks the runner in this process: a
-		// later step wires the runner process (src/runner/runner.ts).
-		harness: new FakeHarness(),
+		harness: sdkHarness,
 		prices: DEFAULT_PRICE_BOOK,
-		rooms: worktreeRooms(roomsRoot),
-		// Local clones only; unset, every start refuses source_unavailable.
-		roomSources: localSources(process.env.AVEL_SOURCES_DIR || undefined),
-	}).fetch,
-	port,
-});
+		rooms,
+		roomSources,
+	};
+	sdkHarness.bindUsageSink((id, split) => applyUsage(runnerDeps, id, split));
+	startRunnerLoop(runnerDeps, {
+		intervalMs: Number(process.env.AVEL_RUNNER_INTERVAL_MS ?? 5000),
+		logger,
+	});
+}
+
+serve({ fetch: app.fetch, port });
 logger.info(
 	{ port },
 	`avel-server listening on http://localhost:${port}/api/health`,
