@@ -18,10 +18,8 @@ date · mission · slice · agent · model · in_tokens · out_tokens · usd · 
 
 ## Log
 
-<!-- example, delete on first real entry
-2026-08-19 · counselos · S0 · atlas · sonnet-4.6 · 184300 · 22100 · 0.88 · schema scaffold
-2026-08-19 · counselos · S0 · iyo   · sonnet-4.6 ·  96400 · 14800 · 0.51 · integration tests
--->
+2026-10-14 · step-9e-smoke · 9e · kel · claude-sonnet-5-5 · 4091 · 115 · 0.0175 · halted by the 3000-token hard ceiling, as designed; system report
+2026-10-14 · step-9e-smoke · 9e · kel · claude-sonnet-5-5 · 13144 · 399 · 0.0159 · complete; agent report, 2 files read, 2 written
 
 ---
 
