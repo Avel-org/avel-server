@@ -1,4 +1,6 @@
+import { sql } from "drizzle-orm";
 import type { getDb } from "./client";
+import type { ClientId } from "./client-id";
 
 export type Db = ReturnType<typeof getDb>;
 export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
@@ -18,4 +20,50 @@ export function withTx<T>(
 	fn: (tx: Tx) => Promise<T>,
 ): Promise<T> {
 	return db.transaction(fn);
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * Runs `fn` in one transaction scoped to one client, for the tables under
+ * row-level security (drizzle/0028_drive.sql). Their policies read
+ * `avel.client_id`; this sets it with `set_config(..., true)`, which lasts
+ * until the transaction ends and never reaches the next transaction on the
+ * same pooled connection.
+ *
+ * `clientId` is a ClientId, which only the lookups in src/db/client-id.ts
+ * make: from the client, engagement or intake row, never a request body or
+ * a model.
+ *
+ * Nested inside a transaction scoped to another client, it refuses: one
+ * transaction never reads two clients. Nested in an unscoped transaction, it
+ * runs as a savepoint and puts the outer scope back when `fn` returns.
+ */
+export function withClientScope<T>(
+	db: Executor,
+	clientId: ClientId,
+	fn: (tx: Tx) => Promise<T>,
+): Promise<T> {
+	if (!UUID.test(clientId)) {
+		throw new Error(`withClientScope: "${clientId}" is not a uuid`);
+	}
+	return db.transaction(async (tx) => {
+		const [outer] = await tx.execute<{ scope: string | null }>(
+			sql`select current_setting('avel.client_id', true) as scope`,
+		);
+		const previous = outer?.scope ?? "";
+		if (previous !== "" && previous !== clientId) {
+			throw new Error(
+				"withClientScope: this transaction is already scoped to another client",
+			);
+		}
+		await tx.execute(
+			sql`select set_config('avel.client_id', ${clientId}, true)`,
+		);
+		const result = await fn(tx);
+		await tx.execute(
+			sql`select set_config('avel.client_id', ${previous}, true)`,
+		);
+		return result;
+	});
 }

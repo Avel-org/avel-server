@@ -26,7 +26,7 @@ import {
 type FindingRow = typeof finding.$inferSelect;
 
 /** The contract's Finding, field by field: the key and request hash stay off the wire. */
-function toFindingWire(r: FindingRow): Finding {
+export function toFindingWire(r: FindingRow): Finding {
 	return {
 		id: r.id,
 		missionId: r.missionId,

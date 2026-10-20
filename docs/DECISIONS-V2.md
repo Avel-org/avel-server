@@ -651,7 +651,7 @@ One run is one Dispatch: one estimate, one count, one report, one token.
 
 Canon, Trace and Uno work for the agency rather than inside one mission. The activity log can name an agent only through a RosterEntry, and RosterEntries belonged to missions. So Canon's chat suggestions would have been unattributable. A firm-scoped RosterEntry fixes that without changing the log.
 
-**A Canon chat session is a dispatch.** Decided by the operator. It gets a budget, a hard ceiling, an audit trail, and a token that dies when the session ends. Its proposals name the session through `Proposal.proposed_by_dispatch_id`. This extends the 2026-10-06 Canon chat decision above; it changes none of its bounds.
+**A Canon chat session is a dispatch.** Decided by the operator. It gets a budget, a hard ceiling, an audit trail, and a token that dies when the session ends. Its proposals name the session through `Proposal.proposed_by_dispatch_id`. This extends the 2026-10-06 Canon chat decision above; it changes none of its bounds. *Reversed 2026-10-19:* Canon is not a dispatch, and there is no firm roster (*Decided 2026-10-19: Canon is the briefer*).
 
 ### What agents may do is set per family, not per role
 
@@ -686,7 +686,7 @@ The operator decided nine questions that the backend and frontend sessions raise
 - **The token works only while the dispatch is `running`.** One rule covers every other status, with no list of exceptions to keep correct.
 - **The runner is the `system` actor, with its own credential.** It writes token counts and halts, which no agent may write. Giving it the operator's session would make every halt look like an operator action.
 - **`token_sha256` is unique,** because it is looked up on every request.
-- **At most one live firm entry per agent template.** Two Canons would split one agent's chat history and budget across two records.
+- **At most one live firm entry per agent template.** Two Canons would split one agent's chat history and budget across two records. *Withdrawn 2026-10-19 with the firm roster.*
 
 ### Canon reads clients, read-only
 
@@ -706,7 +706,7 @@ Agents retry on timeouts. A duplicate CompletionReport or Proposal corrupts attr
 ### Order
 
 - **The finding routes move to module 9.** Judges write `open` Findings during the gate, and confirming them is part of gating. Leaving the routes in module 12 would have put them after the first mission.
-- **Proposals (module 14) come after the first mission.** That mission runs with each next module dispatched by hand. The Canon chat shows as not built until then.
+- **Proposals (module 14) come after the first mission.** That mission runs with each next module dispatched by hand. The Canon chat shows as not built until then. *Reversed 2026-10-19 for the briefing conversation, which is built before the first mission. Proposals still come after it.*
 - **An activity read route is added now,** read-only, as the missions read route was. The Activity page exists, and the dev seed already writes rows for it.
 
 ### Three more, the same day
@@ -733,7 +733,7 @@ The operator wants documents in the Command Center: a client's files, and docs t
 
 - **One store with a scope:** `general`, `client` or `engagement`. Client files appear as Notes and Files tabs on each client's panel in `/clients`. General docs get a Drive page of their own (`ROUTES.md`). Separate stores per kind would duplicate the access rules three times.
 - **Decided now, built after the first mission.** The first mission is an internal template build that needs no client files. Building the Drive before it would add a table during the freeze for no gain in the number that mission exists to produce. It is not a freeze exception.
-- **One blob gateway for every byte AVEL keeps,** export snapshots and files alike: `put` and `get` by sha256 key, local disk in dev and tests, R2 in production. This answers the open question of where frozen export bytes live, which module 10 needed anyway. Two storage systems would drift.
+- **One blob gateway for every byte AVEL keeps,** export snapshots and files alike: `put` and `get` by sha256 key (*2026-10-19: namespaced by owner, so client bytes are never shared across clients; see `DATA-CONTRACTS-V2.md`, File*), local disk in dev and tests, R2 in production. This answers the open question of where frozen export bytes live, which module 10 needed anyway. Two storage systems would drift.
 - **Deleting a file destroys its bytes** and keeps a tombstone row. A client document can carry a duty to destroy it. This is a stated exception to soft delete, and the only one.
 - **Agents learn only through the operator.** A file becomes agent knowledge when the operator promotes it to a knowledge skill, reviewed and pinned by hash. A mission agent reads the files its dispatch brief lists, hashed with the brief, and never searches. This keeps the knowledge vault's deferral intact (*Sequencing corrections*): "agents read the Drive" must not become retrieval by the back door, because a run that read whatever a search returned cannot be attributed or replayed.
 - **Uploads are the riskiest surface AVEL adds,** so the rules are fixed now. The server computes the hash and the mime type and enforces a size cap. Downloads are always attachments with `nosniff`, never HTML or SVG inline. Files reach rooms only as copies.
@@ -744,7 +744,7 @@ The operator wants documents in the Command Center: a client's files, and docs t
 Decided by the operator when module 3 started. Module 4's preset create and update were built in the same pass, so module 4 is complete.
 
 - **The planner's modules live in the brief,** as `modules: [{ id, name, requirementIds }]`, not in a table. COMMAND-CENTER says the planner produces modules, and no entity held them. A table would have been another freeze exception; the brief is jsonb and DATA-CONTRACTS already requires the planner to extend the brief's list rather than start a second one.
-- **The operator writes the plan, and code checks it.** The Intake pattern: a mechanical check (`checkPlan`) confirms ids, coverage, and that every requirement sits in exactly one module. Canon cannot draft it until it runs as a dispatch (modules 6 + 7 + 8), and a template-derived plan works only for template missions.
+- **The operator writes the plan, and code checks it.** The Intake pattern: a mechanical check (`checkPlan`) confirms ids, coverage, and that every requirement sits in exactly one module. Canon cannot draft it until it runs as a dispatch (modules 6 + 7 + 8), and a template-derived plan works only for template missions. *2026-10-19: Canon is no longer a dispatch, so this reason is gone; whether Canon drafts the plan is open.*
 - **The approved brief is fixed.** A plan adds requirements, criteria and modules, and never edits or removes what the operator approved at Intake. Requirement ids are permanent, and an approval that the plan could rewrite would sign off nothing.
 - **A plan saves without passing.** The check is reported on every read and write. Refusing to save a half-finished plan would push the work into the client. The check binds when a mission leaves `draft`, which the dispatch unit builds.
 - **`Mission.template_version` is the template repository's commit sha.** Exact, and the same pinning module 2 uses for `repo_commit_sha`. A semver string lets two contents share a version, which would corrupt the comparison `template_ref` exists for.
@@ -854,6 +854,63 @@ J approved the step 9 plan on 2026-10-14. `STEP-9-PLAN.md` holds the detail, inc
 - **Sonnet 5.5 (`claude-sonnet-5-5`) is the default model.** Prices were checked against the published pricing page on 2026-10-14. Cache writes are priced at the 1-hour rate, so spend can read high, never low. A price relayed at $0.20 per million cache-read tokens was wrong; the page says $0.10.
 - **The real harness is opt-in** (`AVEL_HARNESS=agent-sdk`). The FakeHarness stays the default and the test harness, so tests and CI never spend.
 - **Budget:** $100 in total for real-model work, a ~$2 ceiling on the first smoke run, and every run logged in `COST-LOG.md`.
+
+## Decided 2026-10-19: Canon is the briefer, and the gate starts
+
+J decided the first group below on 2026-10-15 to 2026-10-19, before the first mission. Shapes are in `DATA-CONTRACTS-V2.md` (*CanonSession*, *CanonQuestion*, *ClientMemory*, *Intake*). The second group is BE Main's proposal, marked as such, for J to finalize.
+
+### Decided by J
+
+- **Canon is the project briefer, built on the Claude Projects model.** The operator chats with it about a new client or a template project and uploads documents. Canon works through them the way a Claude project does, with instructions, project knowledge, a conversation and a question pop-up, and drafts the project. It is not a dispatch agent.
+- **This reverses "A Canon chat session is a dispatch"** and the firm RosterEntry (*Decided 2026-10-06: agents call the API*, *A firm roster for agents that work outside missions*). A dispatch is one run of a mission agent, in a room, against a frozen brief. Canon has no room, no brief and no files to write. Making it a dispatch forced a RosterEntry with no mission and a nullable `Dispatch.mission_id`.
+- **Every dispatch belongs to a mission, and every RosterEntry belongs to a mission.** This is already true of the built schema (`roster_entry.mission_id` and `dispatch.mission_id` are NOT NULL, with the composite FK). The firm-scope spec is withdrawn, so it stays true.
+- **Canon's bounds are unchanged, and a CanonSession row now carries them.** It still gets a budget, a hard ceiling, an audit trail and attribution. The 2026-10-06 bounds still hold: Canon reads, drafts, and never acts.
+- **Canon drafts missions only. The operator approves every one.** Canon never approves. Approval stays operator-only in code (`ROLES.md`).
+- **A dispatch starts only when the operator clicks it.** There is no autonomous dispatching and no dispatcher agent. "Creating or starting a dispatch" stays on the list no agent may do (`ROLES.md`).
+- **Canon may recommend a roster, and the recommendation lives outside the presets.** It is shown beside the presets and is visibly a recommendation. A preset is a reusable agency asset. A recommendation is written for one project by a model, and storing it as a preset would make a model's output look like an approved asset.
+- **Canon's questions are stored rows that feed the approval check.** When Canon is unsure, it asks through a question with 2 to 4 options and free text, as Claude's question pop-up does. An Intake with an open question cannot be approved.
+- **Uploads are optional, with no minimum.** Most will be Markdown files and artifacts.
+- **No memory and no document may leak between clients.** This is enforced in the database, not only in code.
+- **The scheduler ("Next up") comes after the first mission.**
+- **Canon is built before the first mission.** This reverses "the Canon chat shows as not built until then" (*Decided 2026-10-06: build sync*, *Order*) for the briefing conversation. The Proposal queue (module 14) still comes after the first mission.
+- **The Drive's `File` and `intake_files` move before the first mission,** because Canon's uploads are Files. This follows from Canon moving forward. It is the fifth exception to the schema freeze.
+
+- **Row-level security goes on the new client-scoped tables only** (J, 2026-10-19). The list and the reasons are below.
+- **Canon writes to the activity log as its own actor** (J, 2026-10-19). `actor_kind` gains `'canon'`, with `actor_canon_session_id` set exactly when the actor is Canon. The log named agents only through a RosterEntry, and Canon no longer has one.
+- **Approval refuses with `PRECONDITION_FAILED`, reason `intake_questions_open` (422), while any CanonQuestion on the Intake is open** (J, 2026-10-19). The frontend was told first, as the contract rule requires.
+
+- **The gate judges one integration commit** (J, 2026-10-19).
+  - When a dispatch closes, its room is snapshotted as a dispatch commit and kept under `refs/avel/dispatches/<id>`, with a fixed identity and dates taken from the injected clock.
+  - At gate time, the complete dispatches are laid onto the pinned commit in close order. If two of them touched one path, the gate refuses with `integration_conflict`. Nothing is merged.
+  - The reason: no agent work was ever committed, so there was no commit to judge.
+- **`CompletionReport.result_commit_sha`** records the dispatch commit (J, 2026-10-19). It is the sixth exception to the schema freeze.
+- **The operator confirms or dismisses findings through routes** (J, 2026-10-19). Without them, any open judge finding would block a mission forever.
+- **The operator runs the gate on demand,** with `POST /api/missions/:id/gate` (J, 2026-10-19).
+  - Overrides travel in the request body, bound to a finding and a commit, and are not stored in a table.
+  - The receipt, the verdict and the overrides go into the `mission.gate_run` activity row.
+  - The receipt is stored as a string, so its hash still reproduces byte for byte.
+  - There is no GateRun table until the first mission shows what one needs.
+- **Mission one is gated without a test runner** (J, 2026-10-19). Test, typecheck and command checks report `not_run` from a source that is not installed, so each one is a warn tagged `degraded` and shown on the receipt. A mandatory acceptance gate can then pass on `file_exists` and the checkpoints alone. Adding `runner` to `GATE_CONFIG.availableSources` turns those warns back into blocks.
+- **A gate run with no complete dispatch is refused** (`nothing_to_judge`). This was BE Main's call, because J's answers did not cover it. Judging the unchanged base commit would produce a receipt for work that was never done.
+
+### Proposed by BE Main, for J to finalize
+
+- **Row-level security, as approved above:** `file`, `intake_files`, `canon_session`, `canon_message`, `canon_question` and `client_memory`. It uses ENABLE plus FORCE, and a policy on `client_id = current_setting('avel.client_id', true)`, set per transaction from server records. The 26 existing tables are not retrofitted. Adding RLS to a new table costs little, while retrofitting means touching every route. The app stops connecting as the `postgres` superuser in the same change, because a superuser bypasses RLS.
+- **`Intake.open_questions` stays as built.** avel-web consumes it, and changing it waits for the frontend. Approval also requires every CanonQuestion on the Intake to be closed.
+- **A Canon session has no bearer token.** Its tools run in process and close over the session id. The server fills in the client, the intake and the session from the session row, never from the model. The token existed because mission agents call the API from a separate process, and Canon does not.
+- **Project knowledge is in context, with citations.** Uploaded Markdown goes into the prompt split by heading, cached, as search-result blocks with citations, so every drafted requirement can name the passage it came from. Retrieval waits until a project's documents pass a threshold J sets.
+- **Project memory belongs to one client.** Canon proposes entries, and the operator keeps, edits or removes them. It never reaches a mission agent, which reads only its frozen brief (*The dispatch brief and the real harness*). Agency-wide memory is promoted by the operator only and holds no client facts. Whether that is `KnowledgeEntry` is open.
+- **Gate order:** `decide()` first, as a pure function with property tests and the five leak fixes in the 2026-10-19 gate research. Next come the producers that need no runner: the spec-check, the test-glob checkpoint, prior findings, judge coverage and `file_exists`. A `receipt.json` follows. The tests, typecheck and coverage producers wait for a running room or a CI mirror, which J chooses.
+- **`decide()` rules, as built in 9a** (BE-Worker's interpretations, accepted by BE Main):
+  - A checkpoint fail, a prior-finding fail or an open judge finding blocks on every gate, listed or not. Those rules run before "an unlisted gate is ignored".
+  - A checkpoint that errored or never ran blocks, and no override clears it. Otherwise a checkpoint that never ran would let a write outside the mount ship.
+  - A confirmed judge finding blocks on every gate. A written override can clear it.
+  - The synthesized `not_run` for a gate with no evidence cannot be overridden. Otherwise an operator could remove the evidence, override the empty gate, and the mission would ship.
+  - Evidence and overrides are bound to the commit. Evidence from another commit counts as none, and an override needs a non-empty rationale.
+  - At v1 the model's severity and the operator's re-grade are recorded and do not change the verdict.
+  - The test-file checkpoint applies by side. An author or a judge that writes under a test glob fails, and so does the fixture role. A tester that writes outside the test globs fails. A delete or a rename counts as a write to both paths.
+  - Open for J: a prior finding has no executable check (`Finding.rule` is free text). It needs either a structured check on Finding or a separate table of checks, and either one is a schema and contract change. Deferred until after the first mission, since mission one has no prior findings.
+- **"Canon cannot draft the plan until it runs as a dispatch"** (*Decided 2026-10-10: the mission planner*) loses its reason. Whether Canon drafts the plan's modules is open. For the first mission, the operator writes the plan.
 
 ---
 

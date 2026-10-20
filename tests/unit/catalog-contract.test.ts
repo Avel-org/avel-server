@@ -212,7 +212,8 @@ describe("agentTemplateSchema", () => {
 	const seeded = buildSeed(seedIds(), SEED_RUN_AT).agentTemplate;
 
 	it("parses every seeded template", () => {
-		expect(seeded).toHaveLength(16);
+		// The operator, fifteen agents, and Canon (2026-10-19).
+		expect(seeded).toHaveLength(17);
 		for (const row of seeded) {
 			const wire = templateWire({
 				deletedAt: null,

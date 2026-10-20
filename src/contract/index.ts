@@ -6,11 +6,15 @@ import {
 	agentTemplateContract,
 	identityVersionContract,
 } from "./agent-template";
+import { canonContract } from "./canon";
 import { clientContract } from "./client";
 import { connectionContract } from "./connection";
 import { dispatchContract } from "./dispatch";
 import { engagementContract } from "./engagement";
+import { findingContract } from "./finding";
+import { gateContract } from "./gate";
 import { intakeContract } from "./intake";
+import { intakeFileContract } from "./intake-file";
 import { missionContract } from "./mission";
 import { missionLifecycleContract } from "./mission-lifecycle";
 import { missionPlanContract } from "./mission-plan";
@@ -25,11 +29,15 @@ import { templateContract } from "./template";
 export * from "./activity";
 export * from "./agent";
 export * from "./agent-template";
+export * from "./canon";
 export * from "./client";
 export * from "./connection";
 export * from "./dispatch";
 export * from "./engagement";
+export * from "./finding";
+export * from "./gate";
 export * from "./intake";
+export * from "./intake-file";
 export * from "./mission";
 export * from "./mission-lifecycle";
 export * from "./mission-plan";
@@ -85,6 +93,9 @@ export const contract = c.router(
 		dispatches: dispatchContract,
 		activity: activityContract,
 		intakes: intakeContract,
+		intakeFiles: intakeFileContract,
+		findings: findingContract,
+		gate: gateContract,
 		connections: connectionContract,
 		agentTemplates: agentTemplateContract,
 		identityVersions: identityVersionContract,
@@ -95,6 +106,7 @@ export const contract = c.router(
 		playbooks: playbookContract,
 		templates: templateContract,
 		agent: agentContract,
+		canon: canonContract,
 	},
 	{
 		// One entry per ERROR_STATUSES value. Written out, not mapped, so ts-rest

@@ -1988,5 +1988,60 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 		report: { filedBy: "system" },
 	});
 
+	// Canon, the project briefer (BE Main, 2026-10-19). Not a dispatch agent,
+	// so it sits on no roster and has no waves; opening a Canon session
+	// freezes this template's current identity version. Its identity comes
+	// from the module-5 generator like every other template's. Added last, so
+	// every earlier seed id stays where it was.
+	const canonRoles = ["intake", "strategy"] as const;
+	const canonTemplateId = ids.next();
+	rows.agentTemplate.push({
+		id: canonTemplateId,
+		slug: "canon",
+		name: "Canon",
+		title: "Project briefer",
+		kind: "horizontal",
+		roles: [...canonRoles],
+		engagementId: null,
+		waveDefaults: [],
+		description:
+			"Briefs a project from the operator's documents: drafts the intake, asks what it cannot decide, and proposes what the client's memory should keep. Writes no files and is never dispatched.",
+		writablePaths: [],
+		version: 1,
+		createdAt: at(0),
+		updatedAt: at(0),
+	});
+	const canonIdentity = generateIdentity({
+		slug: "canon",
+		name: "Canon",
+		kind: "horizontal",
+		roles: [...canonRoles],
+		writablePaths: [],
+		roleSkills: attachedSkills(canonRoles),
+	});
+	if ("refused" in canonIdentity) {
+		throw new Error(`seed: identity for canon: ${canonIdentity.refused}`);
+	}
+	rows.agentIdentityVersion.push({
+		id: ids.next(),
+		agentTemplateId: canonTemplateId,
+		number: 1,
+		identityMd: canonIdentity.identityMd,
+		depthMd: canonIdentity.depthMd,
+		sha256: canonIdentity.sha256,
+		identityTokens: canonIdentity.identityTokens,
+		depthTokens: canonIdentity.depthTokens,
+		inputs: canonIdentity.inputs,
+		generatedBy: null,
+		createdAt: at(1),
+	});
+	log(
+		at(1),
+		"agent_template.identity_regenerated",
+		"agent_template",
+		canonTemplateId,
+		{ number: 1, sha256: canonIdentity.sha256 },
+	);
+
 	return rows;
 }

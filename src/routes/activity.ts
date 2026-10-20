@@ -21,6 +21,7 @@ export const actorColumns = {
 	actorKind: activityLog.actorKind,
 	actorUserId: activityLog.actorUserId,
 	actorRosterEntryId: activityLog.actorRosterEntryId,
+	actorCanonSessionId: activityLog.actorCanonSessionId,
 	login: user.githubLogin,
 	agentTemplateId: agentTemplate.id,
 	agentSlug: agentTemplate.slug,
@@ -34,6 +35,7 @@ export type ActorRow = {
 	actorKind: ActivityActor["kind"];
 	actorUserId: string | null;
 	actorRosterEntryId: string | null;
+	actorCanonSessionId: string | null;
 	login: string | null;
 	agentTemplateId: string | null;
 	agentSlug: string | null;
@@ -46,6 +48,9 @@ type Row = typeof activityLog.$inferSelect & ActorRow;
 /** What the runner is called wherever an actor is shown. */
 export const RUNNER_DISPLAY = "AVEL runner";
 
+/** What Canon is called wherever an actor is shown. Never the runner's label. */
+export const CANON_DISPLAY = "Canon";
+
 /**
  * The actor's label. The CHECKs on activity_log tie each kind to its foreign
  * key, and the foreign keys keep the joined rows, so a missing name is a
@@ -55,6 +60,10 @@ export function actorDisplay(row: ActorRow): string {
 	switch (row.actorKind) {
 		case "system":
 			return RUNNER_DISPLAY;
+		case "canon":
+			if (row.actorCanonSessionId === null)
+				throw new Error(`activity ${row.id}: canon has no session`);
+			return CANON_DISPLAY;
 		case "operator":
 			if (row.login === null)
 				throw new Error(`activity ${row.id}: operator has no user row`);
@@ -78,6 +87,7 @@ export function activityActor(row: ActorRow): ActivityActor {
 		kind: row.actorKind,
 		userId: row.actorUserId,
 		rosterEntryId: row.actorRosterEntryId,
+		canonSessionId: row.actorCanonSessionId,
 		display: actorDisplay(row),
 	};
 	if (row.actorKind !== "agent") return { ...base, agent: null };
@@ -106,6 +116,7 @@ function toWire(row: Row): ActivityEntry {
 		actorKind: row.actorKind,
 		actorUserId: row.actorUserId,
 		actorRosterEntryId: row.actorRosterEntryId,
+		actorCanonSessionId: row.actorCanonSessionId,
 		action: row.action,
 		entityType: row.entityType,
 		entityId: row.entityId,

@@ -23,7 +23,21 @@ export default async function setup() {
 	try {
 		await conn`select pg_advisory_lock(${MIGRATION_LOCK})`;
 		await migrate(drizzle(conn), { migrationsFolder: "drizzle" });
+		if (isLocalTestDatabase(url)) {
+			// The row-level security tests log in as avel_app. The migration
+			// creates it without LOGIN; a local test database gives it the same
+			// local password as scripts/db-init/02-create-app-role.sql.
+			await conn`alter role avel_app login password 'avel_app'`;
+		}
 	} finally {
 		await conn.end();
 	}
+}
+
+function isLocalTestDatabase(url: string) {
+	const { hostname, pathname } = new URL(url);
+	return (
+		(hostname === "localhost" || hostname === "127.0.0.1") &&
+		pathname.endsWith("_test")
+	);
 }

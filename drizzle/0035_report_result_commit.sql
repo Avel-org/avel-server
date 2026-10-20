@@ -1,0 +1,3 @@
+ALTER TABLE "completion_report" ADD COLUMN "result_commit_sha" text;--> statement-breakpoint
+ALTER TABLE "completion_report" ADD CONSTRAINT "completion_report_result_commit_sha_hex" CHECK ("completion_report"."result_commit_sha" is null or "completion_report"."result_commit_sha" ~ '^[0-9a-f]{40}$');--> statement-breakpoint
+ALTER TABLE "completion_report" ADD CONSTRAINT "completion_report_system_has_no_commit" CHECK ("completion_report"."filed_by" <> 'system' or "completion_report"."result_commit_sha" is null);

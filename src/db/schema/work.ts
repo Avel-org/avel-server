@@ -490,6 +490,10 @@ export const completionReport = pgTable(
 			.$type<StoredEdgeMismatch[]>()
 			.notNull(),
 		filedBy: reportFiledByEnum("filed_by").notNull(),
+		// The dispatch's commit, as the agent reported it. Only an agent's own
+		// report carries one; a report the system files never does. The
+		// sixth freeze exception (J, 2026-10-19).
+		resultCommitSha: text("result_commit_sha"),
 		...softDelete,
 		...timestamps,
 	},
@@ -505,6 +509,14 @@ export const completionReport = pgTable(
 		check(
 			"completion_report_halt_reason_iff_halted",
 			sql`(${t.status} = 'halted') = (${t.haltReason} is not null)`,
+		),
+		check(
+			"completion_report_result_commit_sha_hex",
+			sql`${t.resultCommitSha} is null or ${t.resultCommitSha} ~ '^[0-9a-f]{40}$'`,
+		),
+		check(
+			"completion_report_system_has_no_commit",
+			sql`${t.filedBy} <> 'system' or ${t.resultCommitSha} is null`,
 		),
 	],
 );
