@@ -4,9 +4,11 @@ import {
 	bigint,
 	boolean,
 	check,
+	foreignKey,
 	index,
 	integer,
 	jsonb,
+	type PgTableExtraConfigValue,
 	pgEnum,
 	pgTable,
 	text,
@@ -18,10 +20,26 @@ import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { EXPORT_STATUSES, INTAKE_STATUSES } from "../../contract/shared/status";
 import { engagement } from "./agency";
 import { user } from "./auth";
+import { canonSession } from "./canon";
 import { id, softDelete, timestamps } from "./columns";
-import { cut, exportTargetKind, gate } from "./enums";
+import { cut, exportTargetKind, gate, type Wave } from "./enums";
 import { connection } from "./platform";
 import { mission, rosterPreset } from "./work";
+
+/**
+ * Canon's roster recommendation: a preset's agents, each with why. Shown
+ * beside the presets, never stored as one. The cut follows derived_cut.
+ */
+export interface RecommendedRoster {
+	agents: Array<{
+		agentTemplateId: string;
+		waves: Wave[];
+		territory: string | null;
+		writablePaths: string[] | null;
+		estimatedTokens: number | null;
+		reason: string;
+	}>;
+}
 
 const at = (name: string) =>
 	timestamp(name, { withTimezone: true, mode: "date" });
@@ -74,11 +92,27 @@ export const intake = pgTable(
 		repoUrl: text("repo_url"),
 		repoCommitSha: text("repo_commit_sha"),
 		repoReadAt: at("repo_read_at"),
+		// The Canon session that drafted it; null when the operator wrote it.
+		// The composite key below holds it to a session about this intake.
+		draftedByCanonSessionId: uuid("drafted_by_canon_session_id").references(
+			(): AnyPgColumn => canonSession.id,
+		),
+		// Canon's roster recommendation, shown beside the presets, never stored
+		// as one.
+		recommendedRoster: jsonb("recommended_roster").$type<RecommendedRoster>(),
 		...softDelete,
 		...timestamps,
 	},
-	(t) => [
+	// Annotated: intake and canon_session reference each other.
+	(t): PgTableExtraConfigValue[] => [
 		index("intake_engagement_id_idx").on(t.engagementId),
+		// The target of canon_session_intake_engagement_fk.
+		uniqueIndex("intake_id_engagement_id_uq").on(t.id, t.engagementId),
+		foreignKey({
+			name: "intake_drafted_by_canon_session_fk",
+			columns: [t.draftedByCanonSessionId, t.id],
+			foreignColumns: [canonSession.id, canonSession.intakeId],
+		}),
 		check(
 			"intake_approval_complete",
 			sql`${t.status} <> 'approved' or (${t.approvedBy} is not null and ${t.approvedAt} is not null and ${t.missionId} is not null)`,

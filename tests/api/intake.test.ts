@@ -11,8 +11,21 @@ import {
 	preconditionDetails,
 	successEnvelope,
 } from "../../src/contract";
-import { activityLog, engagement, intake, mission } from "../../src/db/schema";
+import type { ClientId } from "../../src/db/client-id";
+import {
+	activityLog,
+	canonQuestion,
+	canonSession,
+	engagement,
+	intake,
+	mission,
+} from "../../src/db/schema";
 import { remove } from "../../src/db/schema/columns";
+import {
+	questionValues,
+	seedCanonIdentity,
+	sessionValues,
+} from "../db/canon-fixtures";
 import { type ApiHarness, clock, closeApi, withApi } from "./support";
 
 const url = process.env.DATABASE_URL;
@@ -164,6 +177,9 @@ describe.skipIf(!url)("/api/intakes", () => {
 				approvedBy: null,
 				approvedAt: null,
 				missionId: null,
+				draftedByCanonSessionId: null,
+				openCanonSessionId: null,
+				recommendedRoster: null,
 				createdAt: clock.now().toISOString(),
 				updatedAt: clock.now().toISOString(),
 			});
@@ -526,6 +542,78 @@ describe.skipIf(!url)("/api/intakes", () => {
 			});
 			const still = await json(await h.call(`/api/intakes/${id}`), 200, one);
 			expect(still.data.status).toBe("proposed");
+		});
+	});
+
+	it("refuses approval while Canon has an open question, naming each one in created order", async () => {
+		await withIntake(async (h) => {
+			const id = await readyToApprove(h);
+			const [eng] = await h.tx
+				.select({ clientId: engagement.clientId })
+				.from(engagement)
+				.where(eq(engagement.id, h.engagementId));
+			const clientId = eng?.clientId as string;
+			const tenant = {
+				clientId,
+				engagementId: h.engagementId,
+				intakeId: id,
+				scope: clientId as ClientId,
+			};
+			const operator = await h.operatorId();
+			const session = sessionValues(
+				tenant,
+				operator,
+				await seedCanonIdentity(h.tx),
+			);
+			await h.tx.insert(canonSession).values(session);
+			const later = new Date(clock.now().getTime() + 1000);
+			const first = questionValues(tenant, session.id, { header: "Auth" });
+			const second = questionValues(tenant, session.id, {
+				header: "Payments",
+				createdAt: later,
+				updatedAt: later,
+			});
+			const answered = questionValues(tenant, session.id, {
+				header: "Hosting",
+				status: "answered",
+				answer: { selected: ["Vercel"] },
+				decidedBy: operator,
+				decidedAt: clock.now(),
+			});
+			await h.tx.insert(canonQuestion).values([second, answered, first]);
+
+			const refused = await failure(
+				await post(h.call, `/api/intakes/${id}/approve`, APPROVE),
+				422,
+			);
+			expect(preconditionDetails.parse(refused.details)).toEqual({
+				reason: "intake_questions_open",
+				engagementId: h.engagementId,
+				issues: [
+					{ path: ["canonQuestions", first.id], message: "Auth" },
+					{ path: ["canonQuestions", second.id], message: "Payments" },
+				],
+			});
+			expect(
+				await h.tx
+					.select()
+					.from(mission)
+					.where(eq(mission.engagementId, h.engagementId)),
+			).toEqual([]);
+
+			await h.tx
+				.update(canonQuestion)
+				.set({
+					status: "dismissed",
+					decidedBy: operator,
+					decidedAt: clock.now(),
+				})
+				.where(eq(canonQuestion.canonSessionId, session.id));
+			await json(
+				await post(h.call, `/api/intakes/${id}/approve`, APPROVE),
+				200,
+				one,
+			);
 		});
 	});
 

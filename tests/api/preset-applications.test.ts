@@ -134,6 +134,7 @@ describe.skipIf(!process.env.DATABASE_URL)("preset applications", () => {
 				kind: "operator",
 				userId: await operatorId(),
 				rosterEntryId: null,
+				canonSessionId: null,
 				display: operator.login,
 				agent: null,
 			};

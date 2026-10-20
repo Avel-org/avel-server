@@ -6,7 +6,13 @@ import { oneOrMany } from "./shared/query";
 const c = initContract();
 
 /** Must equal the actor_kind pgEnum; tests/api/activity.test.ts checks it. */
-export const activityActorKind = z.enum(["operator", "system", "agent"]);
+/** Canon, the project briefer, is named by its session, never as "system" (2026-10-19). */
+export const activityActorKind = z.enum([
+	"operator",
+	"system",
+	"agent",
+	"canon",
+]);
 
 /** Must equal the activity_action pgEnum; tests/api/activity.test.ts checks it. */
 export const activityAction = z.enum([
@@ -55,6 +61,24 @@ export const activityAction = z.enum([
 	"dispatch.closed",
 	"completion_report.filed",
 	"finding.opened",
+	"file.uploaded",
+	"file.purged",
+	"mission.gate_run",
+	"finding.confirmed",
+	"finding.dismissed",
+	"canon_session.opened",
+	"canon_session.closed",
+	"canon_session.halted",
+	"canon_question.asked",
+	"canon_question.answered",
+	"canon_question.acknowledged",
+	"canon_question.dismissed",
+	"client_memory.proposed",
+	"client_memory.kept",
+	"client_memory.edited",
+	"client_memory.removed",
+	"client_memory.written",
+	"intake.drafted_by_canon",
 ]);
 
 /** Must equal the activity_entity_type pgEnum; tests/api/activity.test.ts checks it. */
@@ -75,6 +99,10 @@ export const activityEntityType = z.enum([
 	"dispatch",
 	"completion_report",
 	"finding",
+	"canon_session",
+	"canon_question",
+	"client_memory",
+	"file",
 ]);
 
 export type ActivityActorKind = z.infer<typeof activityActorKind>;
@@ -99,6 +127,8 @@ export const activityActor = z.object({
 	userId: uuid.nullable(),
 	/** Set exactly when kind is agent. */
 	rosterEntryId: uuid.nullable(),
+	/** Set exactly when kind is canon. */
+	canonSessionId: uuid.nullable(),
 	display: z.string(),
 	/** Set exactly when kind is agent, even after the entry or template is removed. */
 	agent: activityAgent.nullable(),
@@ -115,6 +145,8 @@ export const activityEntry = z.object({
 	actorUserId: uuid.nullable(),
 	/** Set exactly when actorKind is agent. */
 	actorRosterEntryId: uuid.nullable(),
+	/** Set exactly when actorKind is canon. */
+	actorCanonSessionId: uuid.nullable(),
 	action: activityAction,
 	entityType: activityEntityType,
 	entityId: uuid,
@@ -125,7 +157,7 @@ export const activityEntry = z.object({
 	payload: z.record(z.string(), z.unknown()),
 	/**
 	 * Who acted, for display. An operator is their GitHub login, the system is
-	 * "AVEL runner", and an agent is "Name · territory" from its RosterEntry
+	 * "AVEL runner", Canon is "Canon", and an agent is "Name · territory" from its RosterEntry
 	 * and AgentTemplate, or the bare name when the entry has no territory.
 	 */
 	actor: activityActor,

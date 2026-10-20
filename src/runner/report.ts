@@ -15,6 +15,7 @@ import type { Tx } from "../db/tx";
 import type { AgentCaller } from "../middleware/caller";
 import { ApiError } from "../middleware/errors";
 import { exitCheckpoint, type FileChange } from "../rooms/checkpoint";
+import { snapshotDispatch } from "../rooms/snapshot";
 import { normalizeRoomPath, ToolError } from "../rooms/tools";
 import { inStep, lockDispatch, lockMission, type RunnerDeps } from "./runner";
 
@@ -72,6 +73,15 @@ export async function fileAgentReport(
 			);
 		}
 		const changes = await exitCheckpoint({ ...room, dispatchId: d.id });
+		// The room as the dispatch commit the gate integrates (module 9), dated
+		// with the same instant the dispatch closes at.
+		const closedAt = deps.clock.now();
+		const resultCommitSha = await snapshotDispatch(
+			room,
+			room.commit,
+			d.id,
+			closedAt.toISOString(),
+		);
 
 		// A running dispatch froze these at start (CHECK).
 		const { agentVersionSha256, skillsSha256, model } = d;
@@ -108,13 +118,14 @@ export async function fileAgentReport(
 			})),
 			edgeMismatches: await edgeMismatches(tx, m.id, d.id, read),
 			filedBy: "agent",
+			resultCommitSha,
 			...stamp(deps.clock),
 		});
 		await tx
 			.update(dispatch)
 			.set({
 				status: body.status,
-				closedAt: deps.clock.now(),
+				closedAt,
 				...touch(deps.clock),
 			})
 			.where(eq(dispatch.id, d.id));

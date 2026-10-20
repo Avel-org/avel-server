@@ -24,11 +24,13 @@ import {
 import * as authSchema from "../../src/db/schema/auth";
 import { stamp } from "../../src/db/schema/columns";
 import type { Db } from "../../src/db/tx";
+import { memoryBlobs } from "../../src/gateways/blob";
 import { noTemplates } from "../../src/gateways/template-source";
 import { fixedClock } from "../../src/lib/clock";
 import { type IdGenerator, sequentialIds } from "../../src/lib/ids";
 import { worktreeRooms } from "../../src/rooms/provider";
 import { localSources } from "../../src/rooms/sources";
+import { DEFAULT_UPLOAD_MAX_BYTES } from "../../src/routes/files";
 import { DEFAULT_PRICE_BOOK } from "../../src/runner/budget";
 import { FakeHarness } from "../../src/runner/harness";
 import { DISPATCH_PLAN, dispatchValues, sha } from "../db/dispatch-fixtures";
@@ -262,6 +264,7 @@ describe.skipIf(!url)(
 					prices: DEFAULT_PRICE_BOOK,
 					rooms,
 					roomSources,
+					drive: { blobs: memoryBlobs(), maxBytes: DEFAULT_UPLOAD_MAX_BYTES },
 				});
 			const operatorApp = appFor(halter, "11111111");
 			const agentApp = appFor(reporter, "22222222");

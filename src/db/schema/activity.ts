@@ -12,10 +12,18 @@ import {
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { engagement } from "./agency";
 import { user } from "./auth";
+import { canonSession } from "./canon";
 import { id } from "./columns";
 import { mission, rosterEntry } from "./work";
 
-export const actorKind = pgEnum("actor_kind", ["operator", "system", "agent"]);
+export const actorKind = pgEnum("actor_kind", [
+	"operator",
+	"system",
+	"agent",
+	// Canon, the project briefer: not a dispatch and not on a roster, so it is
+	// named by its session (actor_canon_session_id). Added 2026-10-19.
+	"canon",
+]);
 
 /**
  * Closed vocabulary. An action enters this list in the same change as the
@@ -74,6 +82,24 @@ export const activityAction = pgEnum("activity_action", [
 	"dispatch.closed",
 	"completion_report.filed",
 	"finding.opened",
+	"file.uploaded",
+	"file.purged",
+	"mission.gate_run",
+	"finding.confirmed",
+	"finding.dismissed",
+	"canon_session.opened",
+	"canon_session.closed",
+	"canon_session.halted",
+	"canon_question.asked",
+	"canon_question.answered",
+	"canon_question.acknowledged",
+	"canon_question.dismissed",
+	"client_memory.proposed",
+	"client_memory.kept",
+	"client_memory.edited",
+	"client_memory.removed",
+	"client_memory.written",
+	"intake.drafted_by_canon",
 ]);
 
 export const activityEntityType = pgEnum("activity_entity_type", [
@@ -93,6 +119,10 @@ export const activityEntityType = pgEnum("activity_entity_type", [
 	"dispatch",
 	"completion_report",
 	"finding",
+	"canon_session",
+	"canon_question",
+	"client_memory",
+	"file",
 ]);
 
 /**
@@ -110,6 +140,9 @@ export const activityLog = pgTable(
 		actorRosterEntryId: uuid("actor_roster_entry_id").references(
 			() => rosterEntry.id,
 		),
+		actorCanonSessionId: uuid("actor_canon_session_id").references(
+			() => canonSession.id,
+		),
 		action: activityAction("action").notNull(),
 		entityType: activityEntityType("entity_type").notNull(),
 		entityId: uuid("entity_id").notNull(),
@@ -123,6 +156,7 @@ export const activityLog = pgTable(
 		index("activity_log_mission_id_idx").on(t.missionId),
 		index("activity_log_engagement_id_idx").on(t.engagementId),
 		index("activity_log_at_idx").on(t.at),
+		index("activity_log_actor_canon_session_id_idx").on(t.actorCanonSessionId),
 		check(
 			"activity_log_operator_has_user",
 			sql`(${t.actorKind} = 'operator') = (${t.actorUserId} is not null)`,
@@ -130,6 +164,13 @@ export const activityLog = pgTable(
 		check(
 			"activity_log_agent_has_roster_entry",
 			sql`(${t.actorKind} = 'agent') = (${t.actorRosterEntryId} is not null)`,
+		),
+		// Compared as text: 'canon' is added by the migration before this one,
+		// and the migrator applies a batch in one transaction, where an enum
+		// literal of an uncommitted value is refused ("unsafe use of new value").
+		check(
+			"activity_log_canon_has_session",
+			sql`(${t.actorKind}::text = 'canon') = (${t.actorCanonSessionId} is not null)`,
 		),
 	],
 );

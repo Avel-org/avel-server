@@ -8,18 +8,23 @@ import {
 	successEnvelope,
 } from "../../src/contract";
 import { closeDb } from "../../src/db/client";
+import type { ClientId } from "../../src/db/client-id";
 import {
 	activityLog,
 	agentTemplate,
+	canonSession,
+	engagement,
+	intake,
 	rosterEntry,
 	rosterPreset,
 } from "../../src/db/schema";
 import { remove, stamp } from "../../src/db/schema/columns";
+import { seedCanonIdentity, sessionValues } from "../db/canon-fixtures";
 import { seedIds, seedRosteredAgent } from "./agent-fixtures";
 import { clock, withApi } from "./support";
 
 // The three actor wires (GET /api/activity, a mission's recentActivity, a
-// preset's applications) come from one resolver. Each kind, on each wire,
+// preset's applications) come from one resolver. Each kind, Canon included, on each wire,
 // with the agent's entry and template removed after it acted.
 
 const at = (s: number) => new Date(clock.now().getTime() - s * 1000);
@@ -47,8 +52,36 @@ describe.skipIf(!process.env.DATABASE_URL)("the actor wires", () => {
 				version: 1,
 				...stamp(clock),
 			});
+			// Canon acts through a session on an intake of the same engagement.
+			const [eng] = await tx
+				.select({ clientId: engagement.clientId })
+				.from(engagement)
+				.where(eq(engagement.id, engagementId));
+			const clientId = eng?.clientId as string;
+			const intakeId = ids.next();
+			await tx.insert(intake).values({
+				id: intakeId,
+				engagementId,
+				status: "draft",
+				sourceMd: "# Ask",
+				openQuestions: [],
+				...stamp(clock),
+			});
+			const session = sessionValues(
+				{
+					clientId,
+					engagementId,
+					intakeId,
+					scope: clientId as ClientId,
+				},
+				userId,
+				await seedCanonIdentity(tx),
+				{ id: ids.next() },
+			);
+			await tx.insert(canonSession).values(session);
 			const kinds = [
 				{ actorKind: "system" as const },
+				{ actorKind: "canon" as const, actorCanonSessionId: session.id },
 				{ actorKind: "operator" as const, actorUserId: userId },
 				{ actorKind: "agent" as const, actorRosterEntryId: agent.entryId },
 			];
@@ -93,6 +126,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the actor wires", () => {
 					kind: "system",
 					userId: null,
 					rosterEntryId: null,
+					canonSessionId: null,
 					display: "AVEL runner",
 					agent: null,
 				},
@@ -100,6 +134,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the actor wires", () => {
 					kind: "operator",
 					userId,
 					rosterEntryId: null,
+					canonSessionId: null,
 					display: operator.login,
 					agent: null,
 				},
@@ -107,6 +142,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the actor wires", () => {
 					kind: "agent",
 					userId: null,
 					rosterEntryId: agent.entryId,
+					canonSessionId: null,
 					display: "Kel · accounts",
 					agent: {
 						templateId: agent.templateId,
@@ -114,6 +150,14 @@ describe.skipIf(!process.env.DATABASE_URL)("the actor wires", () => {
 						name: "Kel",
 						territory: "accounts",
 					},
+				},
+				canon: {
+					kind: "canon",
+					userId: null,
+					rosterEntryId: null,
+					canonSessionId: session.id,
+					display: "Canon",
+					agent: null,
 				},
 			};
 
@@ -132,13 +176,13 @@ describe.skipIf(!process.env.DATABASE_URL)("the actor wires", () => {
 				["mission", detail.map((r) => r.actor)],
 				["preset", applied.map((r) => r.actor)],
 			] as const) {
-				expect(actors.length, wire).toBeGreaterThanOrEqual(3);
+				expect(actors.length, wire).toBeGreaterThanOrEqual(4);
 				for (const a of actors) {
 					expect(a.display, wire).not.toBeNull();
 					expect(a, `${wire} ${a.kind}`).toEqual(expected[a.kind]);
 				}
 				expect(new Set(actors.map((a) => a.kind)), wire).toEqual(
-					new Set(["system", "operator", "agent"]),
+					new Set(["system", "operator", "agent", "canon"]),
 				);
 			}
 		});

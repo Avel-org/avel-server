@@ -174,13 +174,15 @@ Four deliberate exceptions:
 
 Plus **SkillSource** (supporting catalog). Deferred: PromptFragment (V1.5). Session is not an AVEL entity: Better Auth owns sessions, in its `session`, `account` and `verification` tables (see *User*).
 
-**Two names, two things.** `Finding` is the entity below: a defect recorded against a mission. `GateFinding` is the typed result a gate check produces and `decide()` reads (`COMMAND-CENTER.md` module 9). Its shape is decided in module 9.
+**Two names, two things.** `Finding` is the entity below: a defect recorded against a mission. `GateFinding` is the typed result a gate check produces and `decide()` reads (`COMMAND-CENTER.md` module 9). Its shape is in `src/lib/gate/types.ts` (module 9a, 2026-10-19, uncommitted).
 
 Up from twelve. `Client` and `Engagement` close the agency layer, `Intake` holds Canon's proposal before an operator approves it into a Mission, `Finding` turns a confirmed defect from one mission into an executable check on every mission after it, `CompletionReport` makes cost and edge consumption required fields rather than habits, and `Proposal` is how anything proactive reaches the operator without acting on its own.
 
 `Dispatch` joined on 2026-10-06 `[specced]`, built with module 6. It is the run itself: one agent, one piece of work, one budget, one access token. Before it, nothing sat between "on the team" (`RosterEntry`) and "finished" (`CompletionReport`).
 
-`File` joined on 2026-10-06 `[specced]`, built after the first mission: one document store, scoped general, client or engagement.
+`File` joined on 2026-10-06 `[specced]`, built after the first mission: one document store, scoped general, client or engagement. Moved before the first mission on 2026-10-19.
+
+Plus Canon's supporting entities, `[specced]` 2026-10-19: **CanonSession · CanonMessage · CanonQuestion · ClientMemory** (see *Canon's entities*).
 
 ---
 
@@ -223,7 +225,8 @@ derived_cut_evidence?       text — the directory structure that decided it
 derived_conventions?        jsonb ConventionSet — extracted from the repo, see below
 derived_boundaries?         jsonb Boundary[] — the feature/layer split found in the tree
 suggested_preset_id?        FK → RosterPreset — follows from the cut
-drafted_by_dispatch_id?     FK → Dispatch — [specced] 2026-10-06; the firm session that drafted it, null when the operator did
+drafted_by_dispatch_id?     FK → Dispatch — [specced] 2026-10-06; withdrawn 2026-10-19: Canon is not a dispatch. Replaced by drafted_by_canon_session_id? FK → CanonSession [specced]
+recommended_roster?         jsonb [{ agentTemplateId, territory?, reason }] — Canon's roster recommendation, shown beside the presets, never stored as one [specced] 2026-10-19
 approved_by?                FK → User
 approved_at?
 mission_id?                 FK → Mission, set on approval
@@ -453,7 +456,7 @@ decided_at?
 timestamps             created_at, updated_at (as built 2026-10-05); status and decided_at change after creation
 ```
 
-**A model proposal names the run that made it.** `proposed_by_dispatch_id` leads to the agent, its version hash and its budget, so a Canon chat suggestion is attributable to one session. A CHECK ties it to `source = 'model'`.
+**A model proposal names the run that made it.** `proposed_by_dispatch_id` leads to the agent, its version hash and its budget, so a Canon chat suggestion is attributable to one session. A CHECK ties it to `source = 'model'`. *2026-10-19: Canon is not a dispatch, so a Canon proposal needs a session reference instead. Decided with module 14.*
 
 **Approving a proposal starts its action through the normal path.** A `next_module` proposal still creates a dispatch that needs its estimate, its room, and its ceilings. Approval skips nothing.
 
@@ -596,7 +599,7 @@ Whether an agent is on a mission = whether its RosterEntry exists and is active.
 
 **`access_overrides` only narrows** (built 2026-10-12). Each override names one tool row from `accessFor` by `skill_id` and `grant`, and lowers it to `read` or `none`. It is written through the roster entry update (`PATCH`, `accessOverrides`; `null` clears it) while the mission is a draft. An override that names no tool row the agent has, raises a mode, or repeats a row is refused (422 `access_override_invalid`, with `issues`). It is the freeze exception recorded in `DECISIONS-V2.md`, *Per-agent overrides*. Nothing enforces it until module 7.
 
-**The firm roster** `[specced]`. Canon, Trace and Uno work for the agency between missions rather than inside one, so their entries have `scope = 'firm'` and no mission. A CHECK requires `mission_id` exactly when `scope = 'mission'`. A firm entry has no `territory`, `writable_paths`, or `absorbed_boundaries`: firm agents write no files. A partial unique index allows at most one live firm entry per `agent_template_id` (decided 2026-10-06), so there is one Canon. Without a firm entry, an agent working outside a mission could not be named by `ActivityLog.actor_roster_entry_id`, and its actions could not be attributed.
+**The firm roster** `[specced]`, *withdrawn 2026-10-19: every RosterEntry belongs to a mission, and Canon is not a dispatch (`DECISIONS-V2.md`, Decided 2026-10-19). Where Trace and Uno run is open.* Canon, Trace and Uno work for the agency between missions rather than inside one, so their entries have `scope = 'firm'` and no mission. A CHECK requires `mission_id` exactly when `scope = 'mission'`. A firm entry has no `territory`, `writable_paths`, or `absorbed_boundaries`: firm agents write no files. A partial unique index allows at most one live firm entry per `agent_template_id` (decided 2026-10-06), so there is one Canon. Without a firm entry, an agent working outside a mission could not be named by `ActivityLog.actor_roster_entry_id`, and its actions could not be attributed.
 
 ### Dispatch
 
@@ -645,7 +648,7 @@ timestamps             no deleted_at: a dispatch is evidence
 
 **The token works only while the dispatch is `running`.** `queued`, `complete`, `blocked`, `failed` and `halted` all answer `401 DISPATCH_CLOSED`.
 
-**A firm session is a dispatch.** A Canon chat session is a dispatch of Canon's firm RosterEntry, with no mission and no brief, under its own estimate and ceilings. Chat therefore has a budget, an audit trail, and a token that dies when the session ends, like every other agent.
+**A firm session is a dispatch.** *Withdrawn 2026-10-19; see CanonSession.* A Canon chat session is a dispatch of Canon's firm RosterEntry, with no mission and no brief, under its own estimate and ceilings. Chat therefore has a budget, an audit trail, and a token that dies when the session ends, like every other agent.
 
 **Agent access.** An agent reaches the API with its dispatch's token, sent as `Authorization: Bearer`. The token is random and opaque. The server stores only its hash and resolves every request to a caller:
 
@@ -909,13 +912,115 @@ intake_files           intake_id FK → Intake · file_id FK → File — source
 
 **`client_id` is the one-way door,** as on KnowledgeEntry and Finding. A client's or an engagement's file is never readable by an agent working another client's mission.
 
-**Bytes live behind the blob gateway,** the same one that holds frozen export snapshots: `put` and `get` by sha256 key, in `AppDeps`. Local disk in dev and tests, R2 in production (`DECISIONS-V2.md`, *Decided 2026-10-06: the Drive*).
+**Bytes live behind the blob gateway,** the same one that holds frozen export snapshots, in `AppDeps`. *Changed 2026-10-19:* keys are namespaced by owner: `put(prefix, bytes) → { sha256, key }`, `get(key)` and `remove(key)`, with `clients/<clientId>/<sha256>` or `general/<sha256>`. `storage_key` holds the key, and `sha256` stays the content hash. Under row-level security, a purge cannot see another client's rows. With a shared blob for identical bytes, it would either delete that client's bytes or never delete any. So identical bytes are shared within one client only. Local disk in dev and tests, R2 in production (`DECISIONS-V2.md`, *Decided 2026-10-06: the Drive*).
 
 **Deleting a file hard-deletes its bytes and keeps the row as a tombstone.** A client document can carry a duty to destroy it, which a soft delete cannot honor. The row keeps `sha256`, `name`, `uploaded_by` and the time, sets `purged_at` and clears `storage_key`. This is the one stated exception to the soft-delete invariant below, decided by the operator.
 
 **Uploads and downloads are byte routes outside the contract,** like the zip download. A download always sends `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`, and never serves HTML or SVG inline, so an uploaded file cannot run script in the app's origin.
 
 **Agents never search the store.** A mission agent reads the files listed in its dispatch brief, hashed with the brief the way its skills are. Firm agents read across scopes, per `ROLES.md`. Files reach a room only as copies, never as a mount of the store (`SANDBOX.md`). Agents learn from a file only when the operator promotes it to a knowledge skill, through draft, review and approval pinned by hash (`SKILLS.md`). There is no retrieval and no write-back.
+
+*2026-10-19:* `File` and `intake_files` move before the first mission, because Canon's uploads are Files (`DECISIONS-V2.md`, *Decided 2026-10-19: Canon is the briefer*). Canon reads the files attached to its own Intake, and those files only. Row-level security on both tables is `[specced]`, proposed by BE Main for J to finalize. See *Client isolation* below.
+
+### Canon's entities
+
+`[specced]` 2026-10-19. The design is J's, and the column detail is proposed by BE Main for J to finalize. Canon is the project briefer, and these entities are not dispatches (`DECISIONS-V2.md`, *Decided 2026-10-19*). All four carry `client_id`, copied by the server from the Intake's engagement and never taken from a body or a model. Each one is under row-level security.
+
+#### CanonSession
+
+One briefing conversation on one Intake. It carries the bounds a dispatch carried for Canon: a budget, ceilings, frozen versions and attribution.
+
+```
+id · intake_id         FK → Intake, NOT NULL
+engagement_id          FK → Engagement, NOT NULL — added when built: (intake_id, engagement_id) → intake and (engagement_id, client_id) → engagement, so the session's client is the intake's
+client_id              FK → Client, NOT NULL — server-set; the RLS key
+status                 'open' | 'closed' | 'halted'
+halt_reason?           'token_hard_ceiling' | 'spend_ceiling' | 'operator'
+agent_identity_version_id   FK → AgentIdentityVersion — Canon's identity, frozen at open
+model · price_version · harness_version   frozen at open
+estimated_tokens · token_soft_ceiling · token_hard_ceiling   as on Dispatch, same CHECKs
+tokens_used · tokens_in · tokens_out · cache_read_tokens · cache_write_tokens · spend_usd   as on Dispatch; written only by the server
+opened_by              FK → User
+turn_started_at?       set while Canon is answering, null otherwise (CHECK: null unless open). Set atomically with the operator's message; cleared by the harness when the turn ends for any reason, and by a sweep after 10 minutes [hypothesis]. Decided 2026-10-19: deriving the turn from the last message strands a session whose turn ended without a reply
+opened_at · closed_at?
+timestamps             no deleted_at: a session is evidence
+```
+
+**Activity payloads for Canon's tables hold ids, hashes, statuses and counts only** (2026-10-19). `activity_log` is not under row-level security, so client text such as content, questions or answers never goes in a payload.
+
+**No bearer token.** Canon's tools run in process and close over the session id. The server derives the intake, the client and the session from the session row.
+
+**Canon is its own actor in the activity log** (decided by J 2026-10-19). ActivityLog names an agent only through `actor_roster_entry_id`, and Canon has no RosterEntry. So `actor_kind` gains `'canon'`, and `actor_canon_session_id` (FK → CanonSession) is set exactly when `actor_kind = 'canon'` (CHECK). On the wire, the entry carries `actorCanonSessionId`, and the resolved actor carries `canonSessionId` with `display` set to "Canon". Canon never reuses `system`, which means the runner.
+
+#### CanonMessage
+
+```
+id · canon_session_id  FK → CanonSession
+client_id              server-set
+seq                    integer, unique per session — the order, never timestamps
+role                   'operator' | 'canon'
+content_md
+citations              jsonb [{ chunkId, heading: string[], quote }] — what Canon's text rests on, by knowledge chunk id `<sha256>:<start>-<end>`; [] for the operator. The wire resolves fileId, fileName and purged from the chunk's sha256 against the intake's files, preferring a file that isn't purged, then the oldest. A chunk no intake file matches is a 500, never a dropped citation (changed 2026-10-19)
+created_at             append-only
+```
+
+#### CanonQuestion
+
+Claude's question pop-up, stored. A question Canon asks when it cannot decide from the documents.
+
+```
+id · intake_id · canon_session_id   FKs; the question belongs to the Intake and outlives the session
+client_id              server-set
+header                 at most 12 characters
+question               text
+options                jsonb [{ label, description }], 2 to 4 — free text ("Other") is always allowed
+multi_select           boolean
+reason                 why Canon is asking: what it could not decide, and from what
+source_chunk_ids       text[] — the passages that raised it, as knowledge chunk ids `<sha256>:<start>-<end>` (CHECK on the form); may be empty. Changed from source_file_ids on 2026-10-19: a file id loses the passage
+status                 'open' | 'answered' | 'acknowledged' | 'dismissed'
+answer?                jsonb { selected: string[], other?: string }
+effect_md?             what the answer changed in the draft
+decided_by? · decided_at?   FK → User; set exactly when status is not 'open' (CHECK)
+timestamps
+```
+
+**An Intake with an open CanonQuestion cannot be approved:** `422 PRECONDITION_FAILED` with reason `intake_questions_open`, and `details.issues` set to `[{ path: ['canonQuestions', id], message: header }]` in created order (decided by J 2026-10-19). This is in addition to the `open_questions` acknowledgement, which is unchanged.
+
+#### ClientMemory
+
+Project memory for one client, the way a Claude project remembers. Canon proposes, and the operator decides.
+
+```
+id · client_id         FK → Client, NOT NULL
+content_md
+status                 'proposed' | 'kept' | 'removed'
+proposed_by_canon_session_id?   FK → CanonSession; null when the operator wrote it
+decided_by? · decided_at?
+timestamps
+```
+
+**Canon reads only its client's kept memory.** A mission agent never reads ClientMemory. It reads its frozen brief. Agency-wide memory holds no client facts, and only the operator promotes into it. Whether that is `KnowledgeEntry` is open.
+
+#### Client isolation
+
+`[specced]`, proposed by BE Main for J to finalize. The tables `file`, `intake_files`, `canon_session`, `canon_message`, `canon_question` and `client_memory` have row-level security enabled and forced. The policy compares `client_id` with `current_setting('avel.client_id', true)`, which the server sets per transaction from its own records. With no setting, a read sees no client rows.
+
+- **General rows** (`client_id` null, on `file`) are visible under every scope. They are written only with no scope set. A write must match the scope exactly, so a client-scoped transaction can never create a row every client would read.
+- **The scope is read through `avel_client_scope()`,** which is `nullif(current_setting('avel.client_id', true), '')::uuid`. After a transaction that set it, a pooled connection reads the setting back as `''` rather than NULL, and `''::uuid` throws. Every policy uses the helper.
+- **`withClientScope` in `src/db/tx.ts`** sets the scope with `set_config(..., true)`, which lasts for the transaction only. That keeps it safe on a transaction-mode pooler.
+- **`intake_files` has no `client_id`.** Its policy reaches the client through the intake's engagement, and its WITH CHECK requires the file to be visible under `file`'s own policy.
+
+`[built]` 2026-10-19 for `file` and `intake_files`, migration `0028`, uncommitted.
+
+The app connects as a role that is neither superuser nor table owner, because those bypass RLS. The role is `avel_app`. It has `NOBYPASSRLS`, owns nothing, and cannot UPDATE or DELETE `activity_log` or DELETE `file`. Its login is set per environment, never in git. Operator views across clients use an explicit scope, never an unset one.
+
+**SECURITY DEFINER, three functions only** (`drizzle/0040`, 2026-10-19): `canon_session_client_id(uuid)`, `canon_question_client_id(uuid)` and `client_memory_client_id(uuid)`.
+- **What they return:** each one returns the row's `client_id`, or null for an unknown id, and nothing else.
+- **Why they exist:** those tables are under forced row-level security. The routes keyed by a Canon id alone (`/api/canon-sessions/:id`, `/api/canon-questions/:id`, `/api/client-memory/:id`) cannot learn the client their scope needs without reading the row that scope guards.
+- **What crosses:** one fact, which client owns an id. The row itself is still read and written under `withClientScope` with that client, so a wrong answer could only make the read come back empty.
+- **How they are locked down:** each is STABLE and pins `search_path` to `pg_catalog, pg_temp`. Only `avel_app` can execute them; EXECUTE is revoked from PUBLIC.
+- **The owner they run as must bypass row-level security.** An owner that did not would make every id-keyed route answer 404, which fails safe.
+- **Tested:** `tests/db/canon-lookups.test.ts` asserts all of this, including that no other SECURITY DEFINER function exists in `public`.
 
 ### ActivityLog
 Append-only. `action` and `entity_type` are **closed vocabularies**. Adding a mutation adds its action to the enum in the same change. The action prefix is a *domain*, not the entity_type (`roster.preset_applied` logs against entity_type `mission`, as built; corrected 2026-10-10, this said `roster_entry`). Two payloads are read back by routes, so their shapes are contract: `roster.preset_applied` is `{ presetId, presetVersion, added: uuid[], removed: uuid[] }`, and `playbook.created` / `playbook.updated` hold the full playbook as written (wire shape). The write happens **inside the same transaction** as the mutation.

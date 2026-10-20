@@ -110,6 +110,19 @@ describe("the error envelope is a discriminated union on code", () => {
 			"report_dispatch_mismatch",
 			"writes_outside_mount",
 			"requirement_unchecked",
+			"intake_questions_open",
+			"finding_not_open",
+			"dispatches_running",
+			"integration_conflict",
+			"nothing_to_judge",
+			"dispatch_commit_missing",
+			"intake_not_draft",
+			"canon_session_open",
+			"canon_session_not_open",
+			"canon_turn_running",
+			"canon_question_not_open",
+			"client_memory_not_proposed",
+			"client_memory_removed",
 		]);
 	});
 

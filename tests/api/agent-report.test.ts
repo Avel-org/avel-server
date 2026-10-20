@@ -17,6 +17,7 @@ import {
 } from "../../src/db/schema";
 import type { Tx } from "../../src/db/tx";
 import { worktreeRooms } from "../../src/rooms/provider";
+import { dispatchRef } from "../../src/rooms/snapshot";
 import { localSources } from "../../src/rooms/sources";
 import { FakeHarness } from "../../src/runner/harness";
 import {
@@ -26,7 +27,13 @@ import {
 	sha,
 } from "../db/dispatch-fixtures";
 import { refusal as dbRefusal } from "../db/fixtures";
-import { makeRepo, removeDir, tempDir, writeFiles } from "../unit/git-fixtures";
+import {
+	gitIn,
+	makeRepo,
+	removeDir,
+	tempDir,
+	writeFiles,
+} from "../unit/git-fixtures";
 import { bearer, dispatchWithToken, seedIds } from "./agent-fixtures";
 import {
 	activeMission,
@@ -142,7 +149,7 @@ describe.skipIf(!process.env.DATABASE_URL)("POST /api/agent/report", () => {
 
 	it(
 		"files a complete report from the room and the dispatch, closes the dispatch, kills the token and stops the session",
-		setup(async (h, { harness, m, run }) => {
+		setup(async (h, { harness, m, run, root }) => {
 			// What the runner counted: the report takes it, whatever is sent.
 			await h.tx
 				.update(dispatch)
@@ -190,6 +197,28 @@ describe.skipIf(!process.env.DATABASE_URL)("POST /api/agent/report", () => {
 				haltReason: null,
 				closedAt: clock.now(),
 			});
+
+			// The room, kept as the dispatch commit the gate integrates: on the
+			// room's pinned commit, under the dispatch ref, dated at the close.
+			const [stored] = await h.tx
+				.select({ sha: completionReport.resultCommitSha })
+				.from(completionReport)
+				.where(eq(completionReport.id, wire.id));
+			const room = await worktreeRooms(root).get(run.id);
+			if (!room || !stored?.sha) throw new Error("no room or no commit");
+			expect(stored.sha).toMatch(/^[0-9a-f]{40}$/);
+			expect(gitIn(room.repoPath, "rev-parse", dispatchRef(run.id))).toBe(
+				stored.sha,
+			);
+			expect(gitIn(room.repoPath, "rev-parse", `${stored.sha}^`)).toBe(
+				room.commit,
+			);
+			expect(gitIn(room.repoPath, "show", `${stored.sha}:src/a.ts`)).toBe(
+				"export const a = 2;",
+			);
+			expect(
+				gitIn(room.repoPath, "log", "-1", "--format=%an|%ct", stored.sha),
+			).toBe(`AVEL|${Math.floor(clock.now().getTime() / 1000)}`);
 
 			const life = await lifeOf(h.tx, run.id);
 			expect(
