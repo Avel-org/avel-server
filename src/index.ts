@@ -8,9 +8,12 @@ import { createAuth } from "./auth";
 import { authConfigFromEnv } from "./auth/config";
 import { previewAuthConfig, previewConfigFromEnv } from "./auth/preview";
 import { signInRecorder } from "./auth/sign-in-activity";
-import { getDb } from "./db/client";
+import { sweepStuckCanonTurns } from "./db/canon";
+import { getDb, useDatabaseUrl } from "./db/client";
 import { dispatchByTokenSha256 } from "./db/dispatch";
+import { assertRuntimeRole, runtimeDatabaseUrl } from "./db/runtime";
 import * as authSchema from "./db/schema/auth";
+import { localDiskBlobs } from "./gateways/blob";
 import { githubRepoSource } from "./gateways/repo-source";
 import {
 	fixtureTemplateSource,
@@ -29,8 +32,11 @@ import {
 import { runnerCredentialSha256 } from "./lib/tokens";
 import { worktreeRooms } from "./rooms/provider";
 import { localSources } from "./rooms/sources";
+import { DEFAULT_UPLOAD_MAX_BYTES } from "./routes/files";
 import { AgentSdkHarness } from "./runner/agent-sdk-harness";
 import { DEFAULT_PRICE_BOOK } from "./runner/budget";
+import { type CanonModel, canonTick, offlineCanonModel } from "./runner/canon";
+import { AgentSdkCanonModel } from "./runner/canon/sdk-model";
 import { FakeHarness, type Harness } from "./runner/harness";
 import { startRunnerLoop } from "./runner/loop";
 import { applyUsage } from "./runner/runner";
@@ -43,6 +49,14 @@ if (existsSync(".env")) process.loadEnvFile(".env");
 
 const port = Number(process.env.PORT ?? 8787);
 const logger = createLogger({ level: process.env.LOG_LEVEL });
+// The server runs as avel_app (AVEL_APP_DATABASE_URL), never the owner in
+// DATABASE_URL, so row-level security holds. Both refuse to start otherwise:
+// unset, the owner's login, a superuser or BYPASSRLS role, or a table owner.
+useDatabaseUrl(runtimeDatabaseUrl(process.env));
+logger.info(
+	{ role: await assertRuntimeRole(getDb()) },
+	"database runtime role checked",
+);
 // Dev preview: refuses to start unless every guard holds (src/auth/preview.ts).
 const preview = previewConfigFromEnv(process.env);
 const { config, missing } = preview.enabled
@@ -96,6 +110,10 @@ const roomsRoot = path.join(
 const realHarness = process.env.AVEL_HARNESS === "agent-sdk";
 let harness: Harness = new FakeHarness();
 let sdkHarness: AgentSdkHarness | null = null;
+// Canon's model turns run on the same opt-in: no real model without it.
+// Without it, every turn answers that no model is connected, so a posted
+// message still ends its turn and the sweep still runs.
+let canonModel: CanonModel = offlineCanonModel();
 if (realHarness) {
 	const apiKey = process.env.ANTHROPIC_API_KEY;
 	if (!apiKey) {
@@ -112,12 +130,35 @@ if (realHarness) {
 		maxTurns: Number(process.env.AVEL_HARNESS_MAX_TURNS ?? 60),
 	});
 	harness = sdkHarness;
+	canonModel = new AgentSdkCanonModel({
+		apiKey,
+		configDir: path.join(path.dirname(roomsRoot), "canon-config"),
+		logger,
+		maxBudgetUsd: Number(process.env.AVEL_CANON_MAX_BUDGET_USD ?? 1),
+		maxTurns: Number(process.env.AVEL_CANON_MAX_TURNS ?? 30),
+	});
 	logger.warn(
 		{ model: sdkHarness.model, harness: sdkHarness.version },
 		"REAL HARNESS is ON: started dispatches run a real model and spend money",
 	);
+} else {
+	logger.warn(
+		"No model is connected: dispatches run the FakeHarness and Canon answers every message with a fixed reply",
+	);
 }
 const rooms = worktreeRooms(roomsRoot);
+// The Drive's bytes: AVEL_BLOB_DIR, else beside the rooms. R2 replaces this
+// in production behind the same interface (src/gateways/blob.ts).
+const blobRoot =
+	process.env.AVEL_BLOB_DIR || path.join(path.dirname(roomsRoot), "blobs");
+const uploadMaxBytes = Number(
+	process.env.AVEL_UPLOAD_MAX_BYTES || DEFAULT_UPLOAD_MAX_BYTES,
+);
+if (!Number.isInteger(uploadMaxBytes) || uploadMaxBytes <= 0) {
+	throw new Error(
+		"AVEL_UPLOAD_MAX_BYTES must be a positive whole number of bytes",
+	);
+}
 // Local clones only; unset, every start refuses source_unavailable.
 const roomSources = localSources(process.env.AVEL_SOURCES_DIR || undefined);
 
@@ -155,6 +196,10 @@ const app = createApp({
 	prices: DEFAULT_PRICE_BOOK,
 	rooms,
 	roomSources,
+	drive: {
+		blobs: localDiskBlobs(blobRoot, randomIds),
+		maxBytes: uploadMaxBytes,
+	},
 });
 
 // The real harness files reports and findings through the app itself, in
@@ -175,6 +220,40 @@ if (sdkHarness) {
 		intervalMs: Number(process.env.AVEL_RUNNER_INTERVAL_MS ?? 5000),
 		logger,
 	});
+}
+
+// Canon's turns: a posted operator message starts one; this tick answers it.
+// It always runs, model or not, because nothing else ends a turn.
+{
+	const canonDeps = {
+		db: getDb,
+		clock: systemClock,
+		ids: randomIds,
+		prices: DEFAULT_PRICE_BOOK,
+		blobs: localDiskBlobs(blobRoot, randomIds),
+		model: canonModel,
+		logger,
+		sweepStuckTurns: sweepStuckCanonTurns,
+	};
+	let canonBusy = false;
+	setInterval(
+		async () => {
+			if (canonBusy) return;
+			canonBusy = true;
+			try {
+				const results = await canonTick(canonDeps);
+				if (results.length > 0) logger.info({ results }, "canon turns ran");
+			} catch (err) {
+				logger.error(
+					{ err: err instanceof Error ? err.message : String(err) },
+					"canon tick failed",
+				);
+			} finally {
+				canonBusy = false;
+			}
+		},
+		Number(process.env.AVEL_CANON_INTERVAL_MS ?? 3000),
+	);
 }
 
 serve({ fetch: app.fetch, port });

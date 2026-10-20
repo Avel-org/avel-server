@@ -36,10 +36,14 @@ import {
 	agentTemplateRoutes,
 	identityVersionRoutes,
 } from "./routes/agent-templates";
+import { canonRoutes } from "./routes/canon";
 import { clientRoutes } from "./routes/clients";
 import { connectionRoutes } from "./routes/connections";
 import { dispatchRoutes } from "./routes/dispatches";
 import { engagementRoutes } from "./routes/engagements";
+import { type Drive, fileRoutes, intakeFileRoutes } from "./routes/files";
+import { findingRoutes } from "./routes/findings";
+import { gateRoutes } from "./routes/gate";
 import { health } from "./routes/health";
 import { intakeRoutes } from "./routes/intake";
 import { missionLifecycleRoutes } from "./routes/mission-lifecycle";
@@ -82,6 +86,8 @@ export type AppDeps = {
 	rooms: RoomProvider;
 	/** Where a room's source clone is found (src/rooms/sources.ts). AVEL_SOURCES_DIR in production. */
 	roomSources: RoomSourceResolver;
+	/** The Drive's blob store and upload cap (src/routes/files.ts). Local disk in dev, memory or a temp dir in tests. */
+	drive: Drive;
 };
 
 /**
@@ -112,6 +118,9 @@ export function createApp(deps: AppDeps) {
 		dispatches: dispatchRoutes(runnerDeps),
 		activity: activityRoutes(routeDeps),
 		intakes: intakeRoutes({ ...routeDeps, repos: deps.repos }),
+		intakeFiles: intakeFileRoutes(routeDeps),
+		findings: findingRoutes(routeDeps),
+		gate: gateRoutes({ ...routeDeps, roomSources: deps.roomSources }),
 		connections: connectionRoutes(routeDeps),
 		agentTemplates: agentTemplateRoutes(routeDeps),
 		identityVersions: identityVersionRoutes(routeDeps),
@@ -122,6 +131,7 @@ export function createApp(deps: AppDeps) {
 		playbooks: playbookRoutes(routeDeps),
 		templates: templateRoutes({ ...routeDeps, templates: deps.templates }),
 		agent: agentRoutes(runnerDeps),
+		canon: canonRoutes(runnerDeps),
 	});
 
 	const app = new Hono<{ Variables: CallerVariables }>();
@@ -158,6 +168,16 @@ export function createApp(deps: AppDeps) {
 
 	// An image, not an envelope, so it sits outside the contract router.
 	app.get("/api/templates/:slug/cover", templateCover(deps.templates));
+
+	// Bytes, not envelopes, so the Drive's byte routes sit outside it too.
+	const files = fileRoutes({
+		...routeDeps,
+		drive: deps.drive,
+		trustedOrigins: deps.auth.trustedOrigins,
+	});
+	app.post("/api/intakes/:intakeId/files", files.upload);
+	app.get("/api/intakes/:intakeId/files/:fileId/content", files.download);
+	app.delete("/api/intakes/:intakeId/files/:fileId", files.purge);
 
 	app.all("/api/*", async (ctx) => {
 		const id = ctx.get("requestId");

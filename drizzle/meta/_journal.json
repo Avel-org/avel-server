@@ -197,6 +197,97 @@
       "when": 1792004277056,
       "tag": "0027_dispatch_brief",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1792451562914,
+      "tag": "0028_drive",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1792453453335,
+      "tag": "0029_scope_hardening",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1792453775470,
+      "tag": "0030_canon",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1792454732479,
+      "tag": "0031_activity_canon_vocabulary",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1792454778365,
+      "tag": "0032_activity_canon_actor",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1792456109959,
+      "tag": "0033_file_immutable",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1792456144757,
+      "tag": "0034_activity_file_vocabulary",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1792457427927,
+      "tag": "0035_report_result_commit",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1792457467586,
+      "tag": "0036_activity_gate_vocabulary",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1792458056323,
+      "tag": "0037_question_source_chunk_ids",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1792458970919,
+      "tag": "0038_activity_canon_routes_vocabulary",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1792459035476,
+      "tag": "0039_canon_routes",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1792460035878,
+      "tag": "0040_canon_client_lookups",
+      "breakpoints": true
     }
   ]
 }

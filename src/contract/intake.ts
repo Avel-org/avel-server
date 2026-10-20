@@ -1,6 +1,7 @@
 import { initContract } from "@ts-rest/core";
 import { z } from "zod";
 import { missionCut } from "./mission";
+import { presetAgentSchema } from "./preset";
 import { boundarySchema, conventionSetSchema } from "./repo-read";
 import { successEnvelope } from "./shared/envelope";
 import { pageMeta, pageQuery } from "./shared/pagination";
@@ -208,6 +209,19 @@ export const intakeSchema = z.object({
 	approvedBy: uuid.nullable(),
 	approvedAt: iso.nullable(),
 	missionId: uuid.nullable(),
+	/** The Canon session that drafted it; null when the operator wrote it. */
+	draftedByCanonSessionId: uuid.nullable(),
+	/** The intake's open Canon session, if one is open. Derived, never stored. */
+	openCanonSessionId: uuid.nullable(),
+	/**
+	 * Canon's roster recommendation, shown beside the presets and never stored
+	 * as one. The cut follows derivedCut.
+	 */
+	recommendedRoster: z
+		.object({
+			agents: z.array(presetAgentSchema.extend({ reason: z.string() })),
+		})
+		.nullable(),
 	createdAt: iso,
 	updatedAt: iso,
 });

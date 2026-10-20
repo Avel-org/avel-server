@@ -4,6 +4,7 @@ import {
 	pgTable,
 	text,
 	timestamp,
+	uniqueIndex,
 	uuid,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
@@ -43,7 +44,12 @@ export const engagement = pgTable(
 		...softDelete,
 		...timestamps,
 	},
-	(t) => [index("engagement_client_id_idx").on(t.clientId)],
+	(t) => [
+		index("engagement_client_id_idx").on(t.clientId),
+		// The target of file_engagement_client_fk: a file names an engagement
+		// and that engagement's client together.
+		uniqueIndex("engagement_id_client_id_uq").on(t.id, t.clientId),
+	],
 );
 
 export const clientInsert = createInsertSchema(client);

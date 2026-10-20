@@ -4,11 +4,13 @@ import { vi } from "vitest";
 import { createApp } from "../../src/app";
 import { createAuth } from "../../src/auth";
 import type { AuthConfig } from "../../src/auth/config";
+import { memoryBlobs } from "../../src/gateways/blob";
 import { noTemplates } from "../../src/gateways/template-source";
 import { type Clock, fixedClock } from "../../src/lib/clock";
 import { type IdGenerator, sequentialIds } from "../../src/lib/ids";
 import { createLogger } from "../../src/lib/logger";
 import { noDispatches } from "../../src/middleware/caller";
+import { DEFAULT_UPLOAD_MAX_BYTES } from "../../src/routes/files";
 import { DEFAULT_PRICE_BOOK } from "../../src/runner/budget";
 import { FakeHarness } from "../../src/runner/harness";
 import { noRepos } from "./repo-fixtures";
@@ -126,6 +128,7 @@ export function buildApp(
 		prices: DEFAULT_PRICE_BOOK,
 		rooms: memoryRooms(),
 		roomSources: anySource,
+		drive: { blobs: memoryBlobs(), maxBytes: DEFAULT_UPLOAD_MAX_BYTES },
 	});
 	return { app, auth, memory, logs: lines, signIns };
 }

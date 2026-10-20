@@ -1,5 +1,5 @@
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { createApp } from "../../src/app";
@@ -11,6 +11,7 @@ import * as schema from "../../src/db/schema";
 import { activityLog, user } from "../../src/db/schema";
 import * as authSchema from "../../src/db/schema/auth";
 import { type Tx, withTx } from "../../src/db/tx";
+import { memoryBlobs } from "../../src/gateways/blob";
 import type { RepoSource } from "../../src/gateways/repo-source";
 import {
 	noTemplates,
@@ -22,8 +23,10 @@ import { sha256Hex } from "../../src/lib/tokens";
 import type { DispatchTokenLookup } from "../../src/middleware/caller";
 import type { RoomProvider } from "../../src/rooms/provider";
 import type { RoomSourceResolver } from "../../src/rooms/sources";
+import { DEFAULT_UPLOAD_MAX_BYTES, type Drive } from "../../src/routes/files";
 import { DEFAULT_PRICE_BOOK, type PriceBook } from "../../src/runner/budget";
 import { FakeHarness, type Harness } from "../../src/runner/harness";
+import { appRoleUrl } from "../db/app-role";
 import { noRepos } from "../unit/repo-fixtures";
 import { anySource, memoryRooms } from "../unit/room-fixtures";
 import {
@@ -142,9 +145,40 @@ export async function withApi(
 		rooms?: RoomProvider;
 		/** Room sources. Default: every source resolves. */
 		roomSources?: RoomSourceResolver;
+		/** The Drive. Default: blobs in memory, the default upload cap. */
+		drive?: Drive;
+		/**
+		 * Run the whole app as avel_app, the runtime role, instead of the
+		 * owner. Row-level security applies only then: as the owner (a
+		 * superuser locally) every policy is bypassed, and a route that forgot
+		 * its client scope would still pass.
+		 */
+		asApp?: boolean;
 	} = {},
 ) {
-	const db = options.countStatements ? countingDb() : getDb();
+	const appConnection = options.asApp
+		? postgres(appRoleUrl(), { max: 1, onnotice: () => {} })
+		: undefined;
+	try {
+		await runApi(
+			fn,
+			options,
+			appConnection
+				? drizzle(appConnection, { schema })
+				: options.countStatements
+					? countingDb()
+					: getDb(),
+		);
+	} finally {
+		await appConnection?.end();
+	}
+}
+
+async function runApi(
+	fn: (h: ApiHarness) => Promise<void>,
+	options: Parameters<typeof withApi>[1] & {},
+	db: ReturnType<typeof getDb>,
+) {
 	// Test files run in parallel, each in a transaction that never commits.
 	// Two of them inserting the same primary key or unique value (an id, the
 	// operator's GitHub id or email) wait on each other's uncommitted rows
@@ -192,6 +226,10 @@ export async function withApi(
 			prices: options.prices ?? DEFAULT_PRICE_BOOK,
 			rooms: options.rooms ?? memoryRooms(),
 			roomSources: options.roomSources ?? anySource,
+			drive: options.drive ?? {
+				blobs: memoryBlobs(),
+				maxBytes: DEFAULT_UPLOAD_MAX_BYTES,
+			},
 		});
 
 		let cookie = "";
@@ -225,8 +263,14 @@ export async function withApi(
 					},
 					body: init.body === undefined ? undefined : JSON.stringify(init.body),
 				}),
+			// The clock is fixed, so `at` ties; the ids are sequential, so they
+			// order rows as they were written. Unordered, Postgres may return any order.
 			logRows: (entityId) =>
-				tx.select().from(activityLog).where(eq(activityLog.entityId, entityId)),
+				tx
+					.select()
+					.from(activityLog)
+					.where(eq(activityLog.entityId, entityId))
+					.orderBy(asc(activityLog.at), asc(activityLog.id)),
 		};
 		await fn(harness);
 		throw new Rollback();

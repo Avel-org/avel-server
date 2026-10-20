@@ -295,10 +295,11 @@ describe("seed dispatches", () => {
 	});
 
 	it("names the seed operator for operator acts, the runner for its own, and agents for theirs", () => {
-		const split = { operator: 0, system: 0, agent: 0 };
+		const split = { operator: 0, system: 0, agent: 0, canon: 0 };
 		for (const a of rows.activityLog) split[a.actorKind] += 1;
-		expect(split).toEqual({ operator: 88, system: 24, agent: 4 });
-		expect(rows.activityLog).toHaveLength(116);
+		// 89: Canon's identity_regenerated row (2026-10-19) is the seed operator's.
+		expect(split).toEqual({ operator: 89, system: 24, agent: 4, canon: 0 });
+		expect(rows.activityLog).toHaveLength(117);
 		for (const a of rows.activityLog) {
 			expect(a.actorUserId, a.action).toBe(
 				a.actorKind === "operator" ? SEED_OPERATOR_ID : null,

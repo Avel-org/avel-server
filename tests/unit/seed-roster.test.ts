@@ -19,11 +19,13 @@ describe("seed roster", () => {
 		rows.agentTemplate.find((t) => t.id === id)?.slug;
 	const LAYER_BUILDERS = ["leonora", "kel", "dunn", "gat", "ghost", "leon"];
 
-	it("holds the operator and the fifteen agents of the register, and no others", () => {
+	it("holds the operator, the fifteen agents of the register and Canon, and no others", () => {
 		expect([...bySlug.keys()].sort()).toEqual(
 			[
 				"atlas",
 				"brennan",
+				// Canon, the project briefer (2026-10-19): on no roster.
+				"canon",
 				"dunn",
 				"fantem",
 				"fenn",

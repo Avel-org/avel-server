@@ -20,10 +20,12 @@ import {
 import * as authSchema from "../../src/db/schema/auth";
 import { stamp } from "../../src/db/schema/columns";
 import type { Db } from "../../src/db/tx";
+import { memoryBlobs } from "../../src/gateways/blob";
 import { noTemplates } from "../../src/gateways/template-source";
 import { fixedClock } from "../../src/lib/clock";
 import { type IdGenerator, sequentialIds } from "../../src/lib/ids";
 import { noDispatches } from "../../src/middleware/caller";
+import { DEFAULT_UPLOAD_MAX_BYTES } from "../../src/routes/files";
 import { DEFAULT_PRICE_BOOK } from "../../src/runner/budget";
 import { FakeHarness } from "../../src/runner/harness";
 import { noRepos } from "../unit/repo-fixtures";
@@ -293,6 +295,7 @@ describe.skipIf(!url)(
 					prices: DEFAULT_PRICE_BOOK,
 					rooms: memoryRooms(),
 					roomSources: anySource,
+					drive: { blobs: memoryBlobs(), maxBytes: DEFAULT_UPLOAD_MAX_BYTES },
 				});
 			const apps = {
 				starter: appFor(starter, "11111111"),

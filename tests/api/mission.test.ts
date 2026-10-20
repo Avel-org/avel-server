@@ -723,6 +723,7 @@ describe.skipIf(!url)("/api/missions", () => {
 					kind: "system",
 					userId: null,
 					rosterEntryId: null,
+					canonSessionId: null,
 					display: "AVEL runner",
 					agent: null,
 				});

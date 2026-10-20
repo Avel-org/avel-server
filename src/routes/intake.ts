@@ -11,6 +11,8 @@ import {
 	parseGitHubRepoUrl,
 } from "../contract";
 import { logActivity } from "../db/activity";
+import { openCanonQuestions, openCanonSessionIds } from "../db/canon";
+import { clientIdOfIntake } from "../db/client-id";
 import { client, connection, engagement, intake, mission } from "../db/schema";
 import { live, stamp, touch } from "../db/schema/columns";
 import { type Executor, type Tx, withTx } from "../db/tx";
@@ -30,8 +32,11 @@ import {
 
 type Row = typeof intake.$inferSelect;
 
-/** Database row (snake_case columns, Dates) to wire shape (camelCase, ISO strings). */
-function toWire(row: Row): Intake {
+/**
+ * Database row (snake_case columns, Dates) to wire shape (camelCase, ISO
+ * strings). openCanonSessionId is derived, never stored: see wireOf.
+ */
+function toWire(row: Row, openCanonSessionId: string | null): Intake {
 	return {
 		id: row.id,
 		engagementId: row.engagementId,
@@ -50,9 +55,18 @@ function toWire(row: Row): Intake {
 		approvedBy: row.approvedBy,
 		approvedAt: row.approvedAt?.toISOString() ?? null,
 		missionId: row.missionId,
+		draftedByCanonSessionId: row.draftedByCanonSessionId,
+		openCanonSessionId,
+		recommendedRoster: row.recommendedRoster ?? null,
 		createdAt: row.createdAt.toISOString(),
 		updatedAt: row.updatedAt.toISOString(),
 	};
+}
+
+/** One intake's wire, with its open Canon session read under its client's scope. */
+async function wireOf(db: Executor, row: Row): Promise<Intake> {
+	const open = await openCanonSessionIds(db, [row.id]);
+	return toWire(row, open.get(row.id) ?? null);
 }
 
 /**
@@ -254,11 +268,15 @@ export function intakeRoutes(deps: RouteDeps & { repos: RepoSource }) {
 					.where(filters),
 			]);
 			const { items, nextCursor } = toPage(rows, query.limit);
+			const open = await openCanonSessionIds(
+				db,
+				items.map((r) => r.id),
+			);
 			return {
 				status: 200,
 				body: {
 					success: true as const,
-					data: items.map(toWire),
+					data: items.map((r) => toWire(r, open.get(r.id) ?? null)),
 					meta: { nextCursor, total: counted?.n ?? 0 },
 				},
 			};
@@ -269,7 +287,7 @@ export function intakeRoutes(deps: RouteDeps & { repos: RepoSource }) {
 				and(eq(intake.id, params.id), live(intake)),
 			);
 			if (!row) throw notFound("intake", params.id);
-			return { status: 200, body: ok(toWire(row)) };
+			return { status: 200, body: ok(await wireOf(deps.db(), row)) };
 		},
 
 		create: async ({ body }, ctx) => {
@@ -299,7 +317,7 @@ export function intakeRoutes(deps: RouteDeps & { repos: RepoSource }) {
 				});
 				return inserted;
 			});
-			return { status: 201, body: ok(toWire(row)) };
+			return { status: 201, body: ok(await wireOf(deps.db(), row)) };
 		},
 
 		revise: async ({ params, body }, ctx) => {
@@ -322,7 +340,7 @@ export function intakeRoutes(deps: RouteDeps & { repos: RepoSource }) {
 					},
 				);
 			});
-			return { status: 200, body: ok(toWire(row)) };
+			return { status: 200, body: ok(await wireOf(deps.db(), row)) };
 		},
 
 		propose: async ({ params }, ctx) => {
@@ -340,7 +358,7 @@ export function intakeRoutes(deps: RouteDeps & { repos: RepoSource }) {
 					{},
 				);
 			});
-			return { status: 200, body: ok(toWire(row)) };
+			return { status: 200, body: ok(await wireOf(deps.db(), row)) };
 		},
 
 		approve: async ({ params, body }, ctx) => {
@@ -355,6 +373,30 @@ export function intakeRoutes(deps: RouteDeps & { repos: RepoSource }) {
 					acknowledged: body.acknowledged,
 				});
 				if (issues.length > 0) throw checkFailed(issues);
+				// Canon asks before it guesses. An open question means the brief
+				// still rests on a guess, so approval waits. The helper sets the
+				// client scope itself: unscoped, row-level security would hide
+				// every question and read as "none open".
+				const clientId = await clientIdOfIntake(tx, current.id);
+				if (clientId === null)
+					throw new Error(`intake ${current.id} has no client`);
+				const open = await openCanonQuestions(tx, clientId, current.id);
+				if (open.length > 0) {
+					throw new ApiError(
+						"PRECONDITION_FAILED",
+						"Canon still has open questions on this intake",
+						{
+							details: {
+								reason: "intake_questions_open",
+								engagementId: current.engagementId,
+								issues: open.map((q) => ({
+									path: ["canonQuestions", q.id],
+									message: q.header,
+								})),
+							},
+						},
+					);
+				}
 				// The cut is derived from the repository (module 2), never chosen
 				// here, so an intake whose repository has not been read waits.
 				if (current.derivedCut === null) {
@@ -444,7 +486,7 @@ export function intakeRoutes(deps: RouteDeps & { repos: RepoSource }) {
 					{ missionId, acknowledged: body.acknowledged },
 				);
 			});
-			return { status: 200, body: ok(toWire(row)) };
+			return { status: 200, body: ok(await wireOf(deps.db(), row)) };
 		},
 
 		readRepo: async ({ params, body }, ctx) => {
@@ -528,7 +570,7 @@ export function intakeRoutes(deps: RouteDeps & { repos: RepoSource }) {
 					},
 				);
 			});
-			return { status: 200, body: ok(toWire(row)) };
+			return { status: 200, body: ok(await wireOf(deps.db(), row)) };
 		},
 
 		reject: async ({ params, body }, ctx) => {
@@ -546,7 +588,7 @@ export function intakeRoutes(deps: RouteDeps & { repos: RepoSource }) {
 					{ reason: body.reason },
 				);
 			});
-			return { status: 200, body: ok(toWire(row)) };
+			return { status: 200, body: ok(await wireOf(deps.db(), row)) };
 		},
 	});
 }

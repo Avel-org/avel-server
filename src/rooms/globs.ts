@@ -54,6 +54,14 @@ function matchFrom(
 	);
 }
 
+/**
+ * Whether matchesGlob understands a glob. It matches nothing for any other,
+ * which grants no write here but would let a gate checkpoint miss every path.
+ */
+export function supportedGlob(glob: string): boolean {
+	return globSegments(glob) !== null;
+}
+
 /** Whether a normalized room path (a/b/c.ts) matches one writable glob. */
 export function matchesGlob(path: string, glob: string): boolean {
 	const segments = globSegments(glob);

@@ -1,0 +1,4 @@
+ALTER TABLE "activity_log" ADD COLUMN "actor_canon_session_id" uuid;--> statement-breakpoint
+ALTER TABLE "activity_log" ADD CONSTRAINT "activity_log_actor_canon_session_id_canon_session_id_fk" FOREIGN KEY ("actor_canon_session_id") REFERENCES "public"."canon_session"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "activity_log_actor_canon_session_id_idx" ON "activity_log" USING btree ("actor_canon_session_id");--> statement-breakpoint
+ALTER TABLE "activity_log" ADD CONSTRAINT "activity_log_canon_has_session" CHECK (("activity_log"."actor_kind"::text = 'canon') = ("activity_log"."actor_canon_session_id" is not null));

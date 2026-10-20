@@ -2,7 +2,7 @@
 
 *The single source of truth for build status, counts, and gaps. **No other document may state build status, entity counts, or agent counts.** They link here.*
 
-**Last updated:** 2026-10-14
+**Last updated:** 2026-10-19
 
 ---
 
@@ -17,15 +17,18 @@
 | Thing | Count |
 |---|---|
 | Command Center modules (`COMMAND-CENTER.md`) | **15**, numbered 0–14 |
-| Core entities | **20** + SkillSource (supporting catalog): 18 built, `Dispatch` specced 2026-10-06 for module 6, and `File` specced 2026-10-06 for after the first mission. Every one has a field list (`DATA-CONTRACTS-V2.md`). |
-| Database tables built | **26** — the 18 entities, SkillSource, `role_skills`, `mission_skills`, and Better Auth's `session`, `account` and `verification`, plus `agent_identity_version` (module 5) and `dispatch` (module 6), **26** in all. Migrations `0000`–`0027` applied. |
-| Error codes in `src/contract/shared/errors.ts` | **24** — 6 generic · `NOT_OPERATOR` · 2 route · 12 `BLAST-RADIUS.md` · `GITHUB_REJECTED` · `DISPATCH_CLOSED` · `AGENT_NOT_PERMITTED` (counted in the file 2026-10-14) |
+| Core entities | **20** + SkillSource (supporting catalog): all 20 built (`Dispatch` with module 6; `File` on 2026-10-19, moved before the first mission for Canon). Plus Canon's **4** supporting entities, built 2026-10-19: CanonSession, CanonMessage, CanonQuestion, ClientMemory. Every one has a field list (`DATA-CONTRACTS-V2.md`). |
+| Database tables built | **32**: the 26 of 2026-10-14, plus `file`, `intake_files`, `canon_session`, `canon_message`, `canon_question` and `client_memory`. Migrations `0000`–`0040` applied on `avel_dev` (41), counted against `information_schema` on 2026-10-19. |
+| Tables under row-level security | **6**, all enabled and forced: `file`, `intake_files` and the four Canon tables. The other 26 are not, by J's ruling (2026-10-19). |
+| SECURITY DEFINER functions | **3**, the Canon client-id lookups (`DATA-CONTRACTS-V2.md`, *Client isolation*). A test asserts there are no others. |
+| Error codes in `src/contract/shared/errors.ts` | **24** — 6 generic · `NOT_OPERATOR` · 2 route · 12 `BLAST-RADIUS.md` · `GITHUB_REJECTED` · `DISPATCH_CLOSED` · `AGENT_NOT_PERMITTED` (counted in the file 2026-10-19; unchanged since 2026-10-14) |
+| Precondition reasons in the same file | **64** (counted 2026-10-19) |
 | Roles (`ROLES.md`) | **35** — 23 model · 11 code · 1 human |
 | Model agents — target, horizontal cut (`ROSTER-V2.md`) | **13** in every mission (A 3 · B 5 · C 3 · D 2), plus up to 2: concurrency when required, incident on demand |
 | Model agents — `template-booking` (`TEMPLATE-BOOKING.md`) | **10**, plus the operator |
 | Orchestrator | **1** — Axis, the human |
 | Roster runs so far | **2**: one feature agent (Mission 002) and one verification agent, each once. Separately, **2** smoke dispatches ran on the real harness on 2026-10-14, on a scratch repo in a rolled-back transaction, outside any mission (`COST-LOG.md`) |
-| Agent identity files | **0** run in a mission. The generator is built (module 5): identities come from the roles in `ROLES.md`, never hand-written. The dev seed holds 16 versions for its 15 model agents. The 19 hand-written v1 files are superseded. |
+| Agent identity files | **0** run in a mission. The generator is built (module 5): identities come from the roles in `ROLES.md`, never hand-written. The dev seed holds 17 versions: one for each of its 15 model agents, a second for one of them, and one for Canon (2026-10-19). The 19 hand-written v1 files are superseded. |
 
 Honest external framing: *a role catalog of 35 jobs, assigned to a small set of named model agents per project, plus one human operator and a set of code functions.* Never "25 AI agents," and never "18 build agents" — both describe rosters that no longer exist. <!--allow-stale-->
 
@@ -38,7 +41,7 @@ Legend: ⬜ not started · ◐ partly built · ✅ built.
 | # | Module | State |
 |---|---|---|
 | 0 | Foundation | ✅ |
-| 1 | Intake | ✅ |
+| 1 | Intake | ✅ The intake itself. Canon, the briefer, is ◐ (2026-10-19): sessions, messages, the question pop-up, client memory, the roster recommendation, the knowledge prep with citations, and the model turn behind `AVEL_HARNESS=agent-sdk` are built and tested with a fake model. No real model has run a Canon turn. Approval refuses `intake_questions_open` while a question is open |
 | 2 | Repo read | ✅ GitHub only; Next.js app-router layouts return no cut |
 | 3 | Mission planner | ◐ plan read and write with its mechanical check, `template_ref`/`template_version` (a templated mission's type must match), template reads from the repositories (dev fixture until the repositories exist), playbook reads and writes with versions, `computeCoherence` (the first-wave block and the vertical-cut roles warning) |
 | 4 | Roles and roster | ✅ catalog reads and writes, roster reads and writes, apply-preset, mission skills, preset create and update, `accessFor` (derived access, not enforced until module 7), per-entry access overrides, agent descriptions. Agent template writes are built in module 5 |
@@ -46,7 +49,7 @@ Legend: ⬜ not started · ◐ partly built · ✅ built.
 | 6 | Dispatch and runner | 🟨 mission start and halt with readiness; dispatches queued, started, halted and read; the runner core (`src/runner/`): budget at the soft and hard ceilings, the mission spend ceiling and the wall clock, system-filed reports for halted and failed dispatches, and a sweep for over-limit runs. Step 9 (`STEP-9-PLAN.md`, 2026-10-14): plan `reads` and `checks` with `checkPlan` rule 5 and `requirement_unchecked`; the four-part brief rendered and frozen with its hash at start, and served at `GET /api/dispatches/:id/brief`; `AgentSdkHarness` on the Claude Agent SDK `0.3.296`, behind `AVEL_HARNESS=agent-sdk`, with the runner ticking in the server process; `claude-sonnet-5-5` priced at `prices-2026-10-14`. The FakeHarness stays the default and the test harness. Unbuilt: the CLI fallback (D1) |
 | 7 | Sandbox rooms | 🟨 Tier 0, worktree-only (`src/rooms/`): one git worktree per dispatch, opened at start from a local clone under `AVEL_SOURCES_DIR` (template first, else the one approved intake's repo; `source_unavailable` otherwise), kept after close until released. File tools only (read, write, edit, list), with path, symlink, `.git` and Windows-alias refusals; the write check is `[attestation]`. The exit checkpoint (changed files against the writable globs, `writes_outside_mount`) is built and tested, and step 8 calls it. No container and no running room. The real harness calls the file tools for the agent (step 9d); nothing calls release yet |
 | 8 | Completion records | ✅ the agent's own report (`POST /api/agent/report`, complete or blocked) after the room's exit checkpoint (`writes_outside_mount` keeps the dispatch running). The server computes tokens, hashes, model, artifacts written and files touched from the dispatch and the room, and records edge mismatches against each path's latest producer on the mission without refusing. The report and the dispatch close in one transaction, and the token dies. System-filed reports for halted and failed dispatches come from the runner (module 6). A report's status equals its dispatch's by construction, checked by tests, not by a database constraint |
-| 9 | The gate | ⬜ |
+| 9 | The gate | ◐ (2026-10-19) `decide()` (`src/lib/gate/`, `DECIDE_VERSION` 1) with property tests; producers that need no runner (spec-check, `file_exists`, the test-file checkpoint, protected paths, judge coverage); `GATE_CONFIG` v1; the receipt (canonical JSON and its SHA-256, unsigned); dispatch commits at close and the integration commit; `POST /api/missions/:id/gate` with run reads; finding triage (list, confirm, dismiss). Unbuilt: test, typecheck and command checks (no runner, so they are degraded warns), prior findings (a Finding holds no executable check), mutation, permissions, signing, the GateRun table |
 | 10 | Render | ⬜ |
 | 11 | Delivery | ⬜ |
 | 12 | Knowledge and metrics | ⬜ |
@@ -72,12 +75,11 @@ Legend: ⬜ not started · ◐ partly built · ✅ built.
   - `role_skills` holds only `role`-layer skills, and `mission_skills` only `stack` and `domain`. No trigger enforces either.
 - **The API test harness runs the app on one rolled-back transaction**, so a handler that wrote through `deps.db()` instead of its own transaction would not be caught by the atomicity tests. `logActivity` accepts only a `Tx`, which covers the log rows but not the mutation writes.
 - **A dev preview mode exists** (`AVEL_DEV_PREVIEW=1`): read-only access with no session, for viewing seeded data locally before the GitHub OAuth App is set up. It refuses to start outside a `_dev` database, outside localhost, or in production. It is a deliberate hole in the auth wall, guarded by those three startup checks. Real GitHub sign-in was configured in dev on 2026-10-14, so the flag can now be removed; it is still on.
-- **Canon chat (decided 2026-10-06) has no proposal kind yet.** `Proposal.kind` and the `proposal_kind` enum hold `next_module · calibration · post_delivery · intake_questions`. Chat suggestions need a kind, added in the same change as the code that writes them, not before. Proposals (module 14) come after the first mission (decided 2026-10-06), so the Canon chat stays not built until then.
-- **Agents can call the API, narrowly** (module 6, 2026-10-13). One middleware resolves the operator, an agent (by its running dispatch's token) and the runner (by its credential). The per-family table is built from `ROLES.md`, with Operate and Firm still refusing. Two agent routes exist: read its own dispatch, and, for judges, file an open Finding (`Finding.reported_by_dispatch_id`, with per-dispatch idempotency keys). Dispatch start issues the token (2026-10-13) and only the harness holds it. Unbuilt: the firm roster and `Intake.drafted_by_dispatch_id`. Built before the first mission, the first of two exceptions to the 2026-10-05 schema freeze (decided 2026-10-06).
+- **Canon's suggestions have no proposal kind yet.** *2026-10-19: Canon's briefing is built as its own entities, not as proposals. This item now covers only suggestions outside a briefing.* `Proposal.kind` and the `proposal_kind` enum hold `next_module · calibration · post_delivery · intake_questions`. Chat suggestions need a kind, added in the same change as the code that writes them, not before. Proposals (module 14) come after the first mission (decided 2026-10-06), so the Canon chat stays not built until then.
+- **Agents can call the API, narrowly** (module 6, 2026-10-13). One middleware resolves the operator, an agent (by its running dispatch's token) and the runner (by its credential). The per-family table is built from `ROLES.md`, with Operate and Firm still refusing. Two agent routes exist: read its own dispatch, and, for judges, file an open Finding (`Finding.reported_by_dispatch_id`, with per-dispatch idempotency keys). Dispatch start issues the token (2026-10-13) and only the harness holds it. *The firm roster and `Intake.drafted_by_dispatch_id` were withdrawn on 2026-10-19: Canon is not a dispatch (`DECISIONS-V2.md`).* Built before the first mission, the first of two exceptions to the 2026-10-05 schema freeze (decided 2026-10-06).
 - **The preset "Used by" read scans ActivityLog.** `GET /api/presets/:id/applications` filters on `action` and `payload->>'presetId'`, which no index serves. Fine at today's volume; an expression index is a migration.
 - **One approved intake per mission is assumed, not enforced.** The plan route reads the approving Intake by `mission_id`. Approval mints the mission id, so it is 1:1 today, but `intake.mission_id` has no unique index. Adding one is a schema change under the freeze.
 - **The coherence disjointness warning is deferred** (decided 2026-10-10). `writable_paths` has no exclusion form, so the canonical vertical layout, where feature agents exclude test files, cannot be expressed and would always warn. It waits until exclusions are designed, after the first mission. A human's foundations entry will be exempt.
-- **Finding has no reference to the dispatch that wrote it.** `Finding.reported_by_dispatch_id` is specced (decided 2026-10-06) and built before module 9.
 - **avel-web still consumes the contract through a live `link:`** to a sibling checkout, which its CI cannot resolve. Decided 2026-10-06: it moves to a git dependency pinned to an avel-server commit. Both repos are private, so avel-web's CI needs a read token for avel-server, which the operator creates. The pin can point only at a pushed commit. `CLAUDE.md` still describes the live link; it changes when the pin lands.
 - **No delete routes exist.** Soft delete is exercised only in tests.
 - **The `auth.signed_in` row is written in its own transaction, before Better Auth inserts the session.** If that insert then fails, a log row remains for a session that does not exist. Sign-in fails closed when the log write fails.
@@ -91,6 +93,29 @@ Legend: ⬜ not started · ◐ partly built · ✅ built.
   - **The gate does not run the brief's checks.** Module 9 runs them; while the Docker running room is on hold, only `file_exists` checks can run.
 - **Better Auth stamps its own times.** Its tables have snake_case columns, uuid ids from the injected `IdGenerator`, and no database defaults, but `created_at`, `updated_at` and `expires_at` come from Better Auth's clock, not the injected `Clock` (`src/auth/index.ts`). This is an exception to `CLAUDE.md`'s determinism rule, recorded rather than fixed.
 - **Client-side contract conformance is unspecified.** See `CLIENT-CONTRACT-CONFORMANCE.md` — the artifact a client repository must carry has no defined format, and the top-priority gate cannot be built until it does.
+
+### Built 2026-10-19, and what is not proven
+
+Three backend sessions built this in one day (`DECISIONS-V2.md`, *Decided 2026-10-19*). Nothing below has run in a mission.
+
+- **The runtime role** `[built]`. The server connects as `avel_app` (`AVEL_APP_DATABASE_URL`), never the owner. `DATABASE_URL` stays the owner, for migrations, the seed and tests. The server refuses to start without the variable, as the owner's login, on another database, or when the role is a superuser, BYPASSRLS, or a member of either or of an RLS table's owner (`src/db/runtime.ts`).
+- **The client scope** `[built]`. `withClientScope` sets `avel.client_id` for one transaction and takes only a branded `ClientId` from a server-side lookup (`src/db/client-id.ts`). Policies read it through `avel_client_scope()`.
+- **The Drive** `[built]`: `File`, `intake_files`, a blob gateway with keys per client, upload, download (always an attachment), purge (bytes destroyed, row kept) and the file list. The 10 MB cap is `[hypothesis]`.
+- **Canon** `[built]`: its four tables, 16 routes under one client's scope each, the dev-seed template (roles `intake`, `strategy`) with a generated identity, and the model turn (`src/runner/canon/`) on its own 3-second tick. The tick always runs (2026-10-20): the real model behind `AVEL_HARNESS=agent-sdk`, otherwise `offlineCanonModel`, which answers every turn with a fixed "no model is connected" reply. Before that, the tick ran only with the real model, so without it a posted message left its session mid-turn for good. The turn sweep's 10 minutes is `[hypothesis]`.
+- **The gate** `[built]`: see module 9 above.
+- **Route tests can run as `avel_app`** (`withApi(fn, { asApp: true })`). Without it a route test runs as the owner, which bypasses row-level security.
+
+Not proven, or not built:
+- **No real model has run a Canon turn.** Whether the Agent SDK passes search-result blocks and their citations through unchanged is `[hypothesis]` until a live run.
+- **The git half of the gate has passing tests, but its 27 deliberate breaks were never recorded**: the run was killed for low memory. Commits are made with `--no-gpg-sign`, and file modes across platforms are `[attestation]`.
+- **`avel_dev` needs a re-seed before Canon can open a session there**, because the Canon template is new in the seed. A re-seed resets dev data.
+- **A Canon turn can run twice** if the server restarts mid-turn; the sweep bounds it at 10 minutes. Turns run one at a time across all clients. The prompt hash is logged, not stored.
+- **Orphan blobs** left when a transaction fails after the bytes are written have no sweep. The upload and purge lock has no concurrency test.
+- **`touchesClient` does not show client-memory activity**, which carries no engagement.
+- **A protected file that is a symlink is invisible to the protected-paths check**, because tree reads leave symlinks out.
+- **Neon** `[unspecified]`: never run there. The role must be created with SQL; a console role joins `neon_superuser`, which bypasses row-level security.
+- **`pnpm check` stops at lint on a Windows checkout** with `core.autocrlf=true`; an LF copy lints clean.
+- **The full suite ran on 2026-10-19 with two workers**: 1466 passed, 1 skipped, 2 failed in `tests/db/seed.test.ts`, which still expected the seed's counts from before Canon's template. Fixed; that file then passed 7/7.
 
 ### Carried from the previous build
 
@@ -121,7 +146,6 @@ Fourteen known flaws in the agent design, all addressed in the specification and
 - **`cc-palette.html` is not in this repository.** `ROUTES.md` references it as the source of the tokens. It needs an owner doc and a location, or the reference goes.
 - **`avel-gates-diagram.html` and `avel-cc-shell.html` are not in this repository.** They are in the operator's frontend bundle, under `design/` (operator, 2026-10-05). `DOC-OWNERSHIP.md`, `STUDY-GUIDE.md` and `DAY-ONE-FRONTEND.md` reference them.
 - **No mobile doc is written, and none is needed now.** Offline capture is deferred (`DECISIONS-V2.md`, *Decided 2026-10-05*). `DAY-ONE-FRONTEND.md` still lists the old mobile doc as a blocker; that file belongs to another session.
-- **The Drive is specced, not built** (decided 2026-10-06): `File`, `intake_files`, the blob gateway and the byte routes. Built after the first mission. The blob gateway itself comes earlier, with module 10's snapshots.
 - **The Platform family has no Owns or Checked-by fields** (`ROLES.md`, *Open questions*). They were deferred to module 4, which is now starting. Module 4's code does not need them, so the doc is what's due.
 - **Two figures in `WHY-AVEL-EXISTS.md` are not fully verified.** See that doc's *Sources*.
 
