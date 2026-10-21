@@ -17,7 +17,14 @@ import { ApiError } from "../middleware/errors";
 import { exitCheckpoint, type FileChange } from "../rooms/checkpoint";
 import { snapshotDispatch } from "../rooms/snapshot";
 import { normalizeRoomPath, ToolError } from "../rooms/tools";
-import { inStep, lockDispatch, lockMission, type RunnerDeps } from "./runner";
+import {
+	countPending,
+	haltAtCeiling,
+	inStep,
+	lockDispatch,
+	lockMission,
+	type RunnerDeps,
+} from "./runner";
 
 /**
  * The agent's own CompletionReport (module 8): the only way a dispatch
@@ -26,7 +33,8 @@ import { inStep, lockDispatch, lockMission, type RunnerDeps } from "./runner";
  * from the room, never from the agent.
  *
  * One step: lock the mission, then the dispatch (running only, else 422
- * dispatch_not_running), run the room's exit checkpoint (422
+ * dispatch_not_running), count the usage the runner has not read yet
+ * (countPending), run the room's exit checkpoint (422
  * writes_outside_mount, and the dispatch stays running, so the agent can
  * fix its room and report again), compare what it read with what each
  * producer last wrote on the mission, then write. Logs, in this order,
@@ -54,16 +62,22 @@ export async function fileAgentReport(
 	return inStep(deps, async (step) => {
 		const { tx } = step;
 		const m = await lockMission(tx, missionId);
-		const d = await lockDispatch(tx, agent.dispatch.id);
-		if (!m || !d) throw new Error(`dispatch ${agent.dispatch.id} vanished`);
-		const at = { dispatchId: d.id, missionId: m.id };
-		if (d.status !== "running") {
+		const locked = await lockDispatch(tx, agent.dispatch.id);
+		if (!m || !locked) {
+			throw new Error(`dispatch ${agent.dispatch.id} vanished`);
+		}
+		const at = { dispatchId: locked.id, missionId: m.id };
+		if (locked.status !== "running") {
 			throw new ApiError(
 				"PRECONDITION_FAILED",
-				`A ${d.status} dispatch takes no report`,
+				`A ${locked.status} dispatch takes no report`,
 				{ details: { reason: "dispatch_not_running", ...at } },
 			);
 		}
+		// Usage the harness reported and the runner has not read yet counts
+		// before the report takes the dispatch's tokens (runner H1).
+		const pending = await countPending(step, deps, m, locked, requestId);
+		const d = pending.d;
 		const room = await deps.rooms.get(d.id);
 		if (!room) {
 			throw new ApiError(
@@ -93,6 +107,9 @@ export async function fileAgentReport(
 			throw new Error(`running dispatch ${d.id} froze nothing`);
 		}
 		const reportId = deps.ids.next();
+		// The report is a snapshot at the close: usage counted after it
+		// (applyUsage) raises the dispatch's tokensUsed, never actualTokens,
+		// so tokensUsed may end above it.
 		await tx.insert(completionReport).values({
 			id: reportId,
 			rosterEntryId: d.rosterEntryId,
@@ -154,6 +171,7 @@ export async function fileAgentReport(
 			payload: { status: body.status, reportId },
 		});
 		step.stops.push(d.id);
+		if (pending.counted) await haltAtCeiling(step, deps, m, requestId);
 		return reportId;
 	});
 }

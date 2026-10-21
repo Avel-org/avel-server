@@ -547,4 +547,52 @@ describe("AgentSdkHarness sessions", () => {
 		expect(await h.has(s.dispatchId)).toBe(false);
 		expect(await h.next(s.dispatchId)).toBeNull();
 	});
+
+	it("takes its queued usage and the message still streaming, counts the rest of that message at its stop, and restores what it took", async () => {
+		let release!: () => void;
+		const paused = new Promise<void>((r) => {
+			release = r;
+		});
+		let reached!: () => void;
+		const atPause = new Promise<void>((r) => {
+			reached = r;
+		});
+		const { h } = harness(async function* () {
+			yield* message("m1", 100, 40);
+			yield ev({
+				type: "message_start",
+				message: { id: "m2", usage: { input_tokens: 50, output_tokens: 1 } },
+			});
+			yield ev({ type: "message_delta", usage: { output_tokens: 7 } });
+			reached();
+			await paused;
+			yield ev({ type: "message_delta", usage: { output_tokens: 10 } });
+			yield ev({ type: "message_stop" });
+			yield resultMsg(150, 50);
+		});
+		h.bindAgentApi(recordingApi().api);
+		const s = session();
+		const split = (tokensIn: number, tokensOut: number) => ({
+			tokensIn,
+			tokensOut,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0,
+		});
+		expect(await h.takeUsage(s.dispatchId)).toEqual(split(0, 0));
+		await h.start(s);
+		await atPause;
+		// m1 is queued; m2 is mid-stream at 50 in and 7 out.
+		expect(await h.takeUsage(s.dispatchId)).toEqual(split(150, 47));
+		expect(await h.takeUsage(s.dispatchId)).toEqual(split(0, 0));
+		await h.restoreUsage(s.dispatchId, split(150, 47));
+		release();
+		await h.settled(s.dispatchId);
+		// The restored 150 and 47, m2's last 3 out, and nothing more at the
+		// result: its totals equal what was counted.
+		expect(await drain(h, s.dispatchId)).toEqual([
+			{ kind: "usage", split: split(150, 47) },
+			{ kind: "usage", split: split(0, 3) },
+			{ kind: "fail" },
+		]);
+	});
 });

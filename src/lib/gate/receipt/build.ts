@@ -9,8 +9,11 @@ import type {
 	IgnoredOverride,
 } from "../types";
 
-/** Bumped whenever the same input could give a different receipt. */
-export const RECEIPT_VERSION = 1;
+/**
+ * Bumped whenever the same input could give a different receipt.
+ * 2 (2026-10-21): assurance, and the decision's notChecked.
+ */
+export const RECEIPT_VERSION = 2;
 
 /**
  * What `deterministicFindings` hashes: findings of these kinds, and checks
@@ -108,6 +111,7 @@ export function buildReceipt(input: ReceiptInput): Receipt {
 		commitSha: input.commitSha,
 		baseSha: input.baseSha,
 		verdict: decision.verdict,
+		assurance: decision.assurance,
 		decideVersion: decision.version,
 		config: { ...config, sha256: sha256Hex(canonicalJson(config)) },
 		overrides: overridesSection(input.overrides, decision),

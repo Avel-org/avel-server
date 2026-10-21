@@ -57,6 +57,16 @@ function add(a: TokenSplit, b: TokenSplit): TokenSplit {
 	};
 }
 
+/** a less b, field by field, never below zero. */
+function less(a: TokenSplit, b: TokenSplit): TokenSplit {
+	return {
+		tokensIn: Math.max(0, a.tokensIn - b.tokensIn),
+		tokensOut: Math.max(0, a.tokensOut - b.tokensOut),
+		cacheReadTokens: Math.max(0, a.cacheReadTokens - b.cacheReadTokens),
+		cacheWriteTokens: Math.max(0, a.cacheWriteTokens - b.cacheWriteTokens),
+	};
+}
+
 function isZero(s: TokenSplit): boolean {
 	return (
 		s.tokensIn === 0 &&
@@ -86,7 +96,12 @@ function merge(into: TokenSplit, usage: StreamUsage | null | undefined) {
 }
 
 export class UsageCounter {
-	private current: { id: string; split: TokenSplit } | null = null;
+	private current: {
+		id: string;
+		split: TokenSplit;
+		/** What takeStreaming already counted of this message. */
+		taken: TokenSplit;
+	} | null = null;
 	private readonly counted = new Set<string>();
 	private total: TokenSplit = ZERO;
 
@@ -95,11 +110,29 @@ export class UsageCounter {
 		return this.total;
 	}
 
+	/**
+	 * Takes the counts so far of the message still streaming, less what was
+	 * taken of it before; zero when none is. Counted now: its message_stop
+	 * then counts only what came after.
+	 */
+	takeStreaming(): TokenSplit {
+		const c = this.current;
+		if (!c || this.counted.has(c.id)) return ZERO;
+		const part = less(c.split, c.taken);
+		c.taken = c.split;
+		this.total = add(this.total, part);
+		return part;
+	}
+
 	/** One stream event; a split to count when a message ends, else null. */
 	onEvent(event: UsageStreamEvent): TokenSplit | null {
 		if (event.type === "message_start") {
 			const e = event as Extract<UsageStreamEvent, { type: "message_start" }>;
-			this.current = { id: e.message.id, split: merge(ZERO, e.message.usage) };
+			this.current = {
+				id: e.message.id,
+				split: merge(ZERO, e.message.usage),
+				taken: ZERO,
+			};
 			return null;
 		}
 		if (event.type === "message_delta" && this.current) {
@@ -108,7 +141,8 @@ export class UsageCounter {
 			return null;
 		}
 		if (event.type === "message_stop" && this.current) {
-			const { id, split } = this.current;
+			const { id, taken } = this.current;
+			const split = less(this.current.split, taken);
 			this.current = null;
 			if (this.counted.has(id)) return null;
 			this.counted.add(id);

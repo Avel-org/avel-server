@@ -144,5 +144,76 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				{ harness: h, rooms, roomSources: localSources(sources) },
 			);
 		});
+
+		it("counts the queued message and the one still streaming when the operator halts mid-message (runner H1)", async () => {
+			const rooms = worktreeRooms(path.join(base, "rooms-halt"));
+			const { logger } = captureLogger();
+			let streaming!: () => void;
+			const midMessage = new Promise<void>((r) => {
+				streaming = r;
+			});
+			const script: QueryFn = async function* (params) {
+				const signal = params.options?.abortController?.signal;
+				yield* message("m1", 1000, 200);
+				yield ev({
+					type: "message_start",
+					message: { id: "m2", usage: { input_tokens: 500, output_tokens: 1 } },
+				});
+				yield ev({ type: "message_delta", usage: { output_tokens: 80 } });
+				streaming();
+				await new Promise<void>((resolve) =>
+					signal?.addEventListener("abort", () => resolve()),
+				);
+				throw new Error("aborted");
+			};
+			const h = new AgentSdkHarness({
+				model: "claude-sonnet-5-5",
+				apiKey: "sk-test",
+				configDir: path.join(base, "config"),
+				ids: sequentialIds(),
+				logger,
+				maxBudgetUsd: 2,
+				maxTurns: 40,
+				hostEnv: {},
+				query: script,
+			});
+			await withApi(
+				async (api) => {
+					await api.signIn();
+					h.bindAgentApi(async (req) => api.app.fetch(req));
+					const m = await activeMission(api.tx, seedIds(api.ns));
+					await api.tx
+						.update(mission)
+						.set({ templateVersion: commit })
+						.where(eq(mission.id, m.missionId));
+					const id = await queued(api.tx, m);
+					expect((await start(api, id)).status).toBe(200);
+					await midMessage;
+					const res = await api.call(`/api/dispatches/${id}/halt`, {
+						method: "POST",
+					});
+					expect(res.status).toBe(200);
+					await h.settled(id);
+
+					const d = await row(api.tx, id);
+					expect(d).toMatchObject({
+						status: "halted",
+						haltReason: "operator",
+						tokensIn: 1500,
+						tokensOut: 280,
+						tokensUsed: 1780,
+					});
+					// 1500 in at $2 and 280 out at $10 per million tokens.
+					expect(Number(d.spendUsd)).toBeCloseTo(0.0058, 6);
+					const [report] = await reportsOf(api.tx, id);
+					expect(report).toMatchObject({
+						filedBy: "system",
+						actualTokens: 1780,
+					});
+					expect(await h.has(id)).toBe(false);
+				},
+				{ harness: h, rooms, roomSources: localSources(sources) },
+			);
+		});
 	},
 );

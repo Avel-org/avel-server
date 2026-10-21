@@ -63,9 +63,48 @@ export type Harness = {
 	has: (dispatchId: string) => Promise<boolean>;
 	/** The session's next event, or null when it has none now. */
 	next: (dispatchId: string) => Promise<HarnessEvent | null>;
+	/**
+	 * Takes the usage the session has reported that the runner has not read
+	 * yet: its queued usage events, and the counts so far of a message still
+	 * streaming. Zero for no session. Taken, so nothing a close counted is
+	 * left for a later read to count again; a close that rolls back gives it
+	 * back with restoreUsage.
+	 */
+	takeUsage: (dispatchId: string) => Promise<TokenSplit>;
+	/** Puts taken usage back at the front of the queue. Nothing for no session. */
+	restoreUsage: (dispatchId: string, split: TokenSplit) => Promise<void>;
 	/** Stops the session. Stopping one that does not exist does nothing. */
 	stop: (dispatchId: string) => Promise<void>;
 };
+
+/** The usage events' splits, summed. */
+export function sumUsage(events: readonly HarnessEvent[]): TokenSplit {
+	const sum: TokenSplit = {
+		tokensIn: 0,
+		tokensOut: 0,
+		cacheReadTokens: 0,
+		cacheWriteTokens: 0,
+	};
+	for (const e of events) {
+		if (e.kind !== "usage") continue;
+		sum.tokensIn += e.split.tokensIn;
+		sum.tokensOut += e.split.tokensOut;
+		sum.cacheReadTokens += e.split.cacheReadTokens;
+		sum.cacheWriteTokens += e.split.cacheWriteTokens;
+	}
+	return sum;
+}
+
+/** Removes every usage event from `events`, in place, and returns their sum. */
+export function takeQueuedUsage(
+	events: HarnessEvent[] | undefined,
+): TokenSplit {
+	if (!events) return sumUsage([]);
+	const taken = sumUsage(events);
+	const rest = events.filter((e) => e.kind !== "usage");
+	events.splice(0, events.length, ...rest);
+	return taken;
+}
 
 /** The FakeHarness's model id. src/lib/prices.ts prices it at zero. */
 export const FAKE_HARNESS_MODEL = "fake-harness";
@@ -154,6 +193,19 @@ export class FakeHarness implements Harness {
 
 	async next(dispatchId: string): Promise<HarnessEvent | null> {
 		return this.sessions.get(dispatchId)?.events.shift() ?? null;
+	}
+
+	async takeUsage(dispatchId: string): Promise<TokenSplit> {
+		return takeQueuedUsage(this.sessions.get(dispatchId)?.events);
+	}
+
+	async restoreUsage(dispatchId: string, split: TokenSplit): Promise<void> {
+		this.sessions.get(dispatchId)?.events.unshift({ kind: "usage", split });
+	}
+
+	/** The usage still queued, summed, without taking it. For tests. */
+	queuedUsage(dispatchId: string): TokenSplit {
+		return sumUsage(this.sessions.get(dispatchId)?.events ?? []);
 	}
 
 	async stop(dispatchId: string): Promise<void> {

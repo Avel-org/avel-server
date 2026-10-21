@@ -164,6 +164,13 @@ export const canonSession = pgTable(
 		// sweepStuckCanonTurns finds it stuck. The wire's turn is "canon"
 		// exactly while it is set.
 		turnStartedAt: at("turn_started_at"),
+		// The last turn that began running: its operator message's seq and the
+		// SHA-256 of its prompt, set together, before the model runs. A claim
+		// for the session's current turn means a run of it already started, so
+		// it is never run again (runCanonTurn) and the sweep ends it. A later
+		// operator message is a new turn, so an older claim needs no clearing.
+		turnPromptSeq: integer("turn_prompt_seq"),
+		turnPromptSha256: text("turn_prompt_sha256"),
 		// The open request's Idempotency-Key, scoped to the intake, and the
 		// hash of its body; set together or not at all, as on dispatch.
 		idempotencyKey: text("idempotency_key"),
@@ -240,6 +247,18 @@ export const canonSession = pgTable(
 		check(
 			"canon_session_no_spend_ceiling",
 			sql`${t.haltReason} is null or ${t.haltReason} <> 'spend_ceiling'`,
+		),
+		check(
+			"canon_session_turn_prompt_complete",
+			sql`(${t.turnPromptSeq} is null) = (${t.turnPromptSha256} is null)`,
+		),
+		check(
+			"canon_session_turn_prompt_seq_positive",
+			sql`${t.turnPromptSeq} is null or ${t.turnPromptSeq} > 0`,
+		),
+		check(
+			"canon_session_turn_prompt_sha256_hex",
+			sql`${t.turnPromptSha256} is null or ${t.turnPromptSha256} ~ '^[0-9a-f]{64}$'`,
 		),
 		check(
 			"canon_session_idempotency_complete",
