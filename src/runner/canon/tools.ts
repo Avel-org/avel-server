@@ -11,7 +11,11 @@ import {
 } from "../../db/schema";
 import { stamp, touch } from "../../db/schema/columns";
 import { type Tx, withClientScope } from "../../db/tx";
-import { briefSourceIssues, withChunkIds } from "../../lib/brief-sources";
+import {
+	briefSourceIssues,
+	carryConfirmations,
+	withChunkIds,
+} from "../../lib/brief-sources";
 import { askOperatorInput } from "../../lib/canon";
 import type { Clock } from "../../lib/clock";
 import type { IdGenerator } from "../../lib/ids";
@@ -127,7 +131,11 @@ export function canonTools(ctx: CanonToolContext): DraftToolCall {
 	/** The intake, locked, when it is still a draft; otherwise a refusal. */
 	async function draftIntake(tx: Tx) {
 		const [row] = await tx
-			.select({ status: intake.status, openQuestions: intake.openQuestions })
+			.select({
+				status: intake.status,
+				openQuestions: intake.openQuestions,
+				proposedBrief: intake.proposedBrief,
+			})
 			.from(intake)
 			.where(eq(intake.id, ctx.session.intakeId))
 			.for("update");
@@ -220,17 +228,20 @@ export function canonTools(ctx: CanonToolContext): DraftToolCall {
 				}
 				return inTurn(async (tx) => {
 					const row = await draftIntake(tx);
+					// Canon cannot confirm a passage; an unchanged item keeps the
+					// operator's confirmation.
+					const stored = carryConfirmations(row.proposedBrief, brief);
 					// The derived_* fields come from reading the repository; never these.
 					await tx
 						.update(intake)
 						.set({
-							proposedBrief: brief,
+							proposedBrief: stored,
 							draftedByCanonSessionId: ctx.session.id,
 							...touch(ctx.clock),
 						})
 						.where(eq(intake.id, ctx.session.intakeId));
 					const issues: CheckIssue[] = checkIntake({
-						proposedBrief: brief,
+						proposedBrief: stored,
 						openQuestions: row.openQuestions,
 					});
 					await logActivity(tx, ctx, {
