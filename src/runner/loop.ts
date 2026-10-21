@@ -1,3 +1,8 @@
+import {
+	type BlobSweepDeps,
+	type BlobSweepResult,
+	sweepOrphanBlobs,
+} from "../db/blob-sweep";
 import type { Logger } from "../lib/logger";
 import { type CanonDeps, canonTick } from "./canon";
 import { type RunnerDeps, type SweepResult, sweep, tick } from "./runner";
@@ -92,6 +97,31 @@ export function startCanonLoop(
 		const results = await doTick(deps);
 		if (results.length > 0) logger.info({ results }, "canon turns ran");
 	});
+}
+
+/**
+ * The orphan blob sweep's loop (src/db/blob-sweep.ts): sweeps once at
+ * startup, then every `intervalMs`. The timer does not hold the process
+ * open. `sweep` is sweepOrphanBlobs; tests pass their own.
+ */
+export function startBlobSweepLoop(
+	deps: BlobSweepDeps,
+	options: LoopOptions & {
+		sweep?: (d: BlobSweepDeps) => Promise<BlobSweepResult>;
+	},
+): StopLoop {
+	const { logger } = options;
+	const doSweep = options.sweep ?? sweepOrphanBlobs;
+	const once = async () => {
+		const result = await doSweep(deps);
+		if (result.removed.length > 0 || result.temps > 0) {
+			logger.info(
+				{ removed: result.removed.length, temps: result.temps },
+				"orphan blobs swept",
+			);
+		}
+	};
+	return startLoop("blob sweep", { ...options, unref: true }, once, once);
 }
 
 /**

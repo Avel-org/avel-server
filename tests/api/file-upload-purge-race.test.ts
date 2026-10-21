@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../../src/app";
 import { createAuth } from "../../src/auth";
 import { signInRecorder } from "../../src/auth/sign-in-activity";
+import { sweepOrphanBlobs } from "../../src/db/blob-sweep";
 import { dispatchByTokenSha256 } from "../../src/db/dispatch";
 import * as schema from "../../src/db/schema";
 import { client, engagement, intake } from "../../src/db/schema";
@@ -36,16 +37,19 @@ import { gated } from "./race-support";
 // named by the bytes' hash, so a second upload of a file's bytes shares the
 // first one's key. The purge removes the bytes unless another row still
 // names the key, and an uncommitted upload's row is invisible to it. Both
-// take the key's advisory lock (lockKey in src/routes/files.ts), so a purge
-// that arrives while the upload is uncommitted waits, then sees the new row
-// and keeps the bytes. Two committed transactions, so this file gets a
-// throwaway database, as tests/api/file-purge-race.test.ts does.
+// take the key's advisory lock (lockBlobKey in src/db/blob-lock.ts), so a
+// purge that arrives while the upload is uncommitted waits, then sees the
+// new row and keeps the bytes. The orphan sweep (src/db/blob-sweep.ts)
+// takes the same lock and decides the same way. Two committed transactions,
+// so this file gets a throwaway database, as tests/api/file-purge-race.test.ts
+// does.
 
 const url = process.env.DATABASE_URL;
 const scratch = `avel_upload_purge_race_${process.pid}`;
 const BUDGET_MS = 60_000;
 const clock = fixedClock("2026-10-05T12:00:00.000Z");
 const BYTES = "# Brief\n";
+const HOUR = 60 * 60 * 1000;
 
 function withDatabase(base: string, name: string) {
 	const u = new URL(base);
@@ -94,7 +98,8 @@ describe.skipIf(!url)(
 			? postgres(url, { max: 1, onnotice: () => {} })
 			: undefined;
 		const files = tempDir("upload-purge-race");
-		const blobs = memoryBlobs();
+		// Written at the test's clock, so the sweep below can be hours later.
+		const blobs = memoryBlobs(clock);
 		let conn: ReturnType<typeof postgres> | undefined;
 		let db: Db;
 		let first: ReturnType<typeof gated>;
@@ -236,6 +241,48 @@ describe.skipIf(!url)(
 				expect(read.status, await read.clone().text()).toBe(200);
 				expect(await read.text()).toBe(BYTES);
 				expect(blobs.keys()).toHaveLength(1);
+				expect(outcome).toBe("waits");
+			},
+			BUDGET_MS,
+		);
+
+		it(
+			"the orphan sweep waits on an upload in flight that names old orphaned bytes, then keeps them",
+			async () => {
+				const { clientId, intakeId } = await seedIntake();
+				// Bytes no row names, written at the clock: hours old to the sweep.
+				const { key } = await blobs.put(
+					`clients/${clientId}`,
+					new TextEncoder().encode(BYTES),
+				);
+
+				// The upload of the same bytes has put them (a no-op: they exist)
+				// and holds its commit.
+				const gate = first.holdNext();
+				const uploading = upload(callFirst, intakeId, "c.md");
+				await gate.reached;
+				const sweeping = sweepOrphanBlobs({
+					db: () => db,
+					clock: { now: () => new Date(clock.now().getTime() + 2 * HOUR) },
+					blobs,
+					logger: captureLogger().logger,
+				});
+				const outcome = await waitsOrSettles(
+					admin as NonNullable<typeof admin>,
+					scratch,
+					sweeping,
+				).finally(() => gate.release());
+
+				const uploaded = await uploading;
+				expect(uploaded.status, await uploaded.clone().text()).toBe(201);
+				const fileId = ((await uploaded.json()) as { data: { id: string } })
+					.data.id;
+				expect((await sweeping).removed).not.toContain(key);
+				const read = await callSecond(
+					`/api/intakes/${intakeId}/files/${fileId}/content`,
+				);
+				expect(read.status, await read.clone().text()).toBe(200);
+				expect(await read.text()).toBe(BYTES);
 				expect(outcome).toBe("waits");
 			},
 			BUDGET_MS,

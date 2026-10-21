@@ -1,6 +1,15 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import {
+	mkdir,
+	readdir,
+	readFile,
+	rename,
+	rm,
+	stat,
+	writeFile,
+} from "node:fs/promises";
 import path from "node:path";
+import { type Clock, systemClock } from "../lib/clock";
 import type { IdGenerator } from "../lib/ids";
 
 /**
@@ -24,7 +33,20 @@ export type BlobStore = {
 	get(key: string): Promise<Uint8Array | null>;
 	/** Hard-deletes the bytes. A key that holds nothing is not an error. */
 	remove(key: string): Promise<void>;
+	/**
+	 * Every key the store holds, by key, with when its bytes were written. A
+	 * put of bytes already stored writes nothing, so it does not move this.
+	 * The orphan sweep (src/db/blob-sweep.ts) reads it.
+	 */
+	list(): Promise<BlobEntry[]>;
+	/**
+	 * Removes the temporary files of puts that died before their rename,
+	 * written before `before`. Answers how many.
+	 */
+	removeStaleTemps(before: Date): Promise<number>;
 };
+
+export type BlobEntry = { key: string; writtenAt: Date };
 
 export type BlobPrefix = "general" | `clients/${string}`;
 
@@ -105,26 +127,84 @@ export function localDiskBlobs(root: string, ids: IdGenerator): BlobStore {
 		async remove(key) {
 			await rm(pathOf(key), { force: true });
 		},
+		async list() {
+			const entries: BlobEntry[] = [];
+			for (const file of await filesUnder(root)) {
+				const key = file.split(path.sep).join("/");
+				if (!KEY.test(key)) continue;
+				const { mtime } = await stat(path.join(root, file));
+				entries.push({ key, writtenAt: mtime });
+			}
+			return entries.sort((a, b) => (a.key < b.key ? -1 : 1));
+		},
+		async removeStaleTemps(before) {
+			let removed = 0;
+			for (const file of await filesUnder(root)) {
+				if (!file.endsWith(".tmp")) continue;
+				const full = path.join(root, file);
+				const { mtime } = await stat(full);
+				if (mtime < before) {
+					await rm(full, { force: true });
+					removed += 1;
+				}
+			}
+			return removed;
+		},
 	};
 }
 
-/** Bytes in memory: unit tests, and API tests that do not look at the disk. */
-export function memoryBlobs(): BlobStore & { keys(): string[] } {
-	const blobs = new Map<string, Uint8Array>();
+/** Every file under `root`, as a path relative to it, sorted; none when it does not exist yet. */
+async function filesUnder(root: string): Promise<string[]> {
+	try {
+		const entries = await readdir(root, {
+			recursive: true,
+			withFileTypes: true,
+		});
+		return entries
+			.filter((e) => e.isFile())
+			.map((e) => path.relative(root, path.join(e.parentPath, e.name)))
+			.sort();
+	} catch (e) {
+		if ((e as NodeJS.ErrnoException).code === "ENOENT") return [];
+		throw e;
+	}
+}
+
+/**
+ * Bytes in memory: unit tests, and API tests that do not look at the disk.
+ * `clock` stamps each put's writtenAt; it has no temporary files.
+ */
+export function memoryBlobs(
+	clock: Clock = systemClock,
+): BlobStore & { keys(): string[] } {
+	const blobs = new Map<string, { bytes: Uint8Array; writtenAt: Date }>();
 	return {
 		async put(prefix, bytes) {
 			const { sha256, key } = keyFor(prefix, bytes);
-			if (!blobs.has(key)) blobs.set(key, new Uint8Array(bytes));
+			if (!blobs.has(key)) {
+				blobs.set(key, {
+					bytes: new Uint8Array(bytes),
+					writtenAt: clock.now(),
+				});
+			}
 			return { sha256, key };
 		},
 		async get(key) {
 			parseBlobKey(key);
-			const bytes = blobs.get(key);
-			return bytes ? verified(key, bytes) : null;
+			const blob = blobs.get(key);
+			return blob ? verified(key, blob.bytes) : null;
 		},
 		async remove(key) {
 			parseBlobKey(key);
 			blobs.delete(key);
+		},
+		async list() {
+			return [...blobs.entries()]
+				.map(([key, b]) => ({ key, writtenAt: b.writtenAt }))
+				.sort((a, b) => (a.key < b.key ? -1 : 1));
+		},
+		async removeStaleTemps() {
+			return 0;
 		},
 		keys: () => [...blobs.keys()].sort(),
 	};

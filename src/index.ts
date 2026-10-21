@@ -8,6 +8,7 @@ import { createAuth } from "./auth";
 import { authConfigFromEnv } from "./auth/config";
 import { previewAuthConfig, previewConfigFromEnv } from "./auth/preview";
 import { signInRecorder } from "./auth/sign-in-activity";
+import { ORPHAN_SWEEP_INTERVAL_MS } from "./db/blob-sweep";
 import { sweepStuckCanonTurns } from "./db/canon";
 import { closeDb, getDb, useDatabaseUrl } from "./db/client";
 import { dispatchByTokenSha256 } from "./db/dispatch";
@@ -34,7 +35,12 @@ import { worktreeRooms } from "./rooms/provider";
 import { localSources } from "./rooms/sources";
 import { DEFAULT_UPLOAD_MAX_BYTES } from "./routes/files";
 import { DEFAULT_PRICE_BOOK } from "./runner/budget";
-import { intervalFromEnv, type StopLoop, startCanonLoop } from "./runner/loop";
+import {
+	intervalFromEnv,
+	type StopLoop,
+	startBlobSweepLoop,
+	startCanonLoop,
+} from "./runner/loop";
 import { harnessFromEnv, shutdown, startRealRunner } from "./runner/wiring";
 
 // Node does not read .env on its own; drizzle.config.ts and the seed do the
@@ -132,6 +138,7 @@ const rooms = worktreeRooms(roomsRoot);
 // in production behind the same interface (src/gateways/blob.ts).
 const blobRoot =
 	process.env.AVEL_BLOB_DIR || path.join(path.dirname(roomsRoot), "blobs");
+const blobs = localDiskBlobs(blobRoot, randomIds);
 const uploadMaxBytes = Number(
 	process.env.AVEL_UPLOAD_MAX_BYTES || DEFAULT_UPLOAD_MAX_BYTES,
 );
@@ -178,7 +185,7 @@ const app = createApp({
 	rooms,
 	roomSources,
 	drive: {
-		blobs: localDiskBlobs(blobRoot, randomIds),
+		blobs,
 		maxBytes: uploadMaxBytes,
 	},
 });
@@ -214,12 +221,20 @@ stops.push(
 			clock: systemClock,
 			ids: randomIds,
 			prices: DEFAULT_PRICE_BOOK,
-			blobs: localDiskBlobs(blobRoot, randomIds),
+			blobs,
 			model: canonModel,
 			logger,
 			sweepStuckTurns: sweepStuckCanonTurns,
 		},
 		{ intervalMs: canonIntervalMs, logger },
+	),
+);
+
+// Bytes an upload wrote before its commit failed (src/db/blob-sweep.ts).
+stops.push(
+	startBlobSweepLoop(
+		{ db: getDb, clock: systemClock, blobs, logger },
+		{ intervalMs: ORPHAN_SWEEP_INTERVAL_MS, logger },
 	),
 );
 

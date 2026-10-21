@@ -7,6 +7,7 @@ import { AgentSdkCanonModel } from "../../src/runner/canon/sdk-model";
 import { FakeHarness } from "../../src/runner/harness";
 import {
 	intervalFromEnv,
+	startBlobSweepLoop,
 	startCanonLoop,
 	startRunnerLoop,
 } from "../../src/runner/loop";
@@ -204,6 +205,48 @@ describe("startCanonLoop", () => {
 		await stop();
 		await vi.advanceTimersByTimeAsync(9000);
 		expect(ticks).toBe(3);
+	});
+});
+
+describe("startBlobSweepLoop", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	const sweepDeps = {} as Parameters<typeof startBlobSweepLoop>[0];
+
+	it("sweeps at startup and every interval, logs only a sweep that removed something, and does not hold the process open", async () => {
+		const { logger, lines } = captureLogger();
+		const results = [
+			{ removed: [], kept: 2, temps: 0 },
+			{ removed: ["general/a"], kept: 0, temps: 1 },
+		];
+		let sweeps = 0;
+		const interval = vi.spyOn(globalThis, "setInterval");
+		const stop = startBlobSweepLoop(sweepDeps, {
+			intervalMs: 1000,
+			logger,
+			sweep: async () => {
+				sweeps += 1;
+				return results[sweeps - 1] ?? { removed: [], kept: 0, temps: 0 };
+			},
+		});
+		const timer = interval.mock.results[0]?.value as NodeJS.Timeout;
+		interval.mockRestore();
+		expect(timer.hasRef()).toBe(false);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(sweeps).toBe(1);
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(sweeps).toBe(2);
+		expect(lines.filter((l) => l.msg === "orphan blobs swept")).toMatchObject([
+			{ removed: 1, temps: 1 },
+		]);
+		await stop();
+		await vi.advanceTimersByTimeAsync(5000);
+		expect(sweeps).toBe(2);
 	});
 });
 
