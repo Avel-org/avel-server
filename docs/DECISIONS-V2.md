@@ -989,6 +989,7 @@ J decided this on 2026-10-21, after the first live Canon turn returned no citati
 - **Option 3, built: a cited reply.** Instructions version 3 asks Canon to answer with each requirement and the passage behind it, so the chat reply carries API citations too.
 - **Rejected for now.** A second, tool-free citing call after the draft (it costs a call, and its citations land on a message, not the brief). Reading citations from every top-level text block of the turn (Canon's working talk rarely cites).
 - **Measured, one live run.** 6 of 6 brief items carried sources inside the notes, and 3 of 3 reply citations resolved to the notes (`COST-LOG.md`). One run is a sample of one.
+- **The operator confirms each source** (J, the same day). A source is the model's claim that a passage supports an item, so approval waits until the operator has confirmed or rejected every one. Rejected: judging support with `spec-judgment` at the gate (a model call that advises, and comes after approval), and leaving it unspecified. Confirmation is per source, not per item, and an edit to an item's text clears it, because the passage was confirmed for other words.
 
 ---
 

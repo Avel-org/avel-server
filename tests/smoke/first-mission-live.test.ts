@@ -300,8 +300,14 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 						(await (await h.call(`/api/intakes/${canonIntakeId}`)).json()) as {
 							data: {
 								proposedBrief: {
-									requirements: Array<{ id: string; sources?: string[] }>;
-									acceptanceCriteria: Array<{ id: string; sources?: string[] }>;
+									requirements: Array<{
+										id: string;
+										sources?: Array<{ chunkId: string }>;
+									}>;
+									acceptanceCriteria: Array<{
+										id: string;
+										sources?: Array<{ chunkId: string }>;
+									}>;
 								} | null;
 							};
 						}
@@ -315,7 +321,9 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 						.filter((i) => (i.sources ?? []).length === 0)
 						.map((i) => i.id);
 					const foreign = items.flatMap((i) =>
-						(i.sources ?? []).filter((c) => !c.startsWith(`${notesSha}:`)),
+						(i.sources ?? [])
+							.map((c) => c.chunkId)
+							.filter((c) => !c.startsWith(`${notesSha}:`)),
 					);
 					const [cs] = await h.tx
 						.select()

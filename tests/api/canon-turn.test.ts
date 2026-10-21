@@ -395,7 +395,16 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 					{ ...brief.requirements[0], sources: [sourceFor(booking)] },
 				],
 				acceptanceCriteria: [
-					{ ...brief.acceptanceCriteria[0], sources: [booking.chunkId] },
+					{
+						...brief.acceptanceCriteria[0],
+						// Canon cannot confirm a passage, even by writing one.
+						sources: [
+							{
+								chunkId: booking.chunkId,
+								confirmed: { by: s.userId, at: clock.now().toISOString() },
+							},
+						],
+					},
 				],
 			};
 			s.model.script(s.a.sessionId, [
@@ -425,8 +434,67 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 				await tx.select().from(intake).where(eq(intake.id, s.a.intakeId)),
 			);
 			expect(row.proposedBrief).toMatchObject({
-				requirements: [{ id: "R1", sources: [booking.chunkId] }],
-				acceptanceCriteria: [{ id: "AC1", sources: [booking.chunkId] }],
+				requirements: [
+					{
+						id: "R1",
+						sources: [{ chunkId: booking.chunkId, confirmed: null }],
+					},
+				],
+				acceptanceCriteria: [
+					{
+						id: "AC1",
+						sources: [{ chunkId: booking.chunkId, confirmed: null }],
+					},
+				],
+			});
+		});
+	});
+
+	it("keeps the operator's confirmation when Canon redrafts an item unchanged", async () => {
+		await asApp(async (tx) => {
+			const s = await seed(tx);
+			const [booking] = s.chunksOf(s.a);
+			if (!booking) throw new Error("no chunk");
+			const confirmed = { by: s.userId, at: clock.now().toISOString() };
+			const item = (text: string, c: typeof confirmed | null) => ({
+				id: "R1",
+				text,
+				sources: [{ chunkId: booking.chunkId, confirmed: c }],
+			});
+			await tx
+				.update(intake)
+				.set({
+					proposedBrief: {
+						...brief,
+						requirements: [item("A client books a slot", confirmed)],
+					},
+				})
+				.where(eq(intake.id, s.a.intakeId));
+			s.model.script(s.a.sessionId, [
+				{
+					tool: "draft_brief",
+					input: {
+						brief: {
+							...brief,
+							requirements: [item("A client books a slot", null)],
+							acceptanceCriteria: [
+								{
+									...brief.acceptanceCriteria[0],
+									sources: [sourceFor(booking)],
+								},
+							],
+						},
+					},
+				},
+				{ reply: "Redrafted.", citations: [] },
+			]);
+			await runCanonTurn(s.deps, inClient(s.a.scope), s.a.sessionId);
+			const kept = one(
+				await tx.select().from(intake).where(eq(intake.id, s.a.intakeId)),
+			);
+			expect(kept.proposedBrief).toMatchObject({
+				requirements: [{ sources: [{ confirmed }] }],
+				acceptanceCriteria: [{ sources: [{ confirmed: null }] }],
 			});
 		});
 	});

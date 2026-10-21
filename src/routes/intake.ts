@@ -25,7 +25,13 @@ import {
 import { live, stamp, touch } from "../db/schema/columns";
 import { type Executor, type Tx, withTx } from "../db/tx";
 import type { RepoSource } from "../gateways/repo-source";
-import { briefSourceIssues, inFiles } from "../lib/brief-sources";
+import {
+	applyDecisions,
+	briefSourceIssues,
+	carryConfirmations,
+	inFiles,
+	unconfirmedIssues,
+} from "../lib/brief-sources";
 import { checkIntake } from "../lib/intake-check";
 import { lowConfidenceIssues } from "../lib/repo-read/conventions";
 import { readRepo } from "../lib/repo-read/index";
@@ -366,13 +372,25 @@ export function intakeRoutes(deps: RouteDeps & { repos: RepoSource }) {
 					throw wrongState(current, "revised");
 				}
 				await requireKnownSources(tx, current.id, body.proposedBrief);
+				// Only the review route confirms a source: what the body says is
+				// replaced by what is stored, and an edited item loses it.
+				const changes =
+					body.proposedBrief === undefined
+						? body
+						: {
+								...body,
+								proposedBrief: carryConfirmations(
+									current.proposedBrief,
+									body.proposedBrief,
+								),
+							};
 				// The source can run to 100k characters, so the log names the
 				// fields that changed rather than copying them.
 				return transition(
 					tx,
 					ctx,
 					current,
-					{ ...body, status: "draft" },
+					{ ...changes, status: "draft" },
 					"intake.updated",
 					{
 						fields: Object.keys(body).sort(),
@@ -433,6 +451,24 @@ export function intakeRoutes(deps: RouteDeps & { repos: RepoSource }) {
 									path: ["canonQuestions", q.id],
 									message: q.header,
 								})),
+							},
+						},
+					);
+				}
+				// A source is a claim that a passage supports its item, and only
+				// the operator's confirmation stands behind it (J, 2026-10-21).
+				const unconfirmed = unconfirmedIssues(current.proposedBrief, [
+					"proposedBrief",
+				]);
+				if (unconfirmed.length > 0) {
+					throw new ApiError(
+						"PRECONDITION_FAILED",
+						"The brief cites passages no operator has confirmed",
+						{
+							details: {
+								reason: "brief_sources_unconfirmed",
+								engagementId: current.engagementId,
+								issues: unconfirmed,
 							},
 						},
 					);
@@ -611,6 +647,45 @@ export function intakeRoutes(deps: RouteDeps & { repos: RepoSource }) {
 						commitSha: read.commitSha,
 						cut: read.cut,
 						confidence: read.conventions.confidence,
+					},
+				);
+			});
+			return { status: 200, body: ok(await wireOf(deps.db(), row)) };
+		},
+
+		reviewSources: async ({ params, body }, ctx) => {
+			const operator = operatorOf(ctx);
+			const row = await withTx(deps.db(), async (tx) => {
+				const current = await lockIntake(tx, params.id);
+				if (current.status !== "draft" && current.status !== "proposed") {
+					throw wrongState(current, "reviewed");
+				}
+				const { brief, issues } = applyDecisions(
+					current.proposedBrief,
+					body.decisions,
+					{ by: operator.id, at: deps.clock.now().toISOString() },
+				);
+				if (issues.length > 0) {
+					throw new ApiError(
+						"VALIDATION_FAILED",
+						"A decision names a source the brief does not cite",
+						{ details: { body: issues } },
+					);
+				}
+				const count = (d: "confirm" | "reject") =>
+					body.decisions.filter((x) => x.decision === d).length;
+				// Status stays: reviewing sources is not revising the brief.
+				return transition(
+					tx,
+					ctx,
+					current,
+					{ proposedBrief: brief, status: current.status },
+					"intake.updated",
+					{
+						fields: ["proposedBrief.sources"],
+						from: current.status,
+						confirmed: count("confirm"),
+						rejected: count("reject"),
 					},
 				);
 			});
