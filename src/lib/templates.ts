@@ -16,8 +16,12 @@ export const TEMPLATE_REPOS = [
 /** Where template-booking's dev manifest says its cover is. */
 const DEV_BOOKING_COVER = ".avel/cover.png";
 
-/** template-booking's head in the dev fixture. Made up; it only has to be 40 hex. */
-export const DEV_BOOKING_SHA = "b00c1e9b00c1e9b00c1e9b00c1e9b00c1e9b00c1";
+/**
+ * template-booking's head in the dev fixture: the commit
+ * src/db/seed/dev-template.ts builds, the same on every machine, so a room
+ * can open on it. `pnpm dev:sources` puts that clone under AVEL_SOURCES_DIR.
+ */
+export const DEV_BOOKING_SHA = "3c34369fd2c403ec35f1d24760ff183a840842e2";
 
 /**
  * What dev reads when no template credential is configured, so the page
