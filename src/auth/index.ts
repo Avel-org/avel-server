@@ -54,8 +54,8 @@ export type AuthDeps = {
 	ids: IdGenerator;
 	logger: Logger;
 	/**
-	 * Writes the auth.signed_in ActivityLog row. Called before Better Auth
-	 * inserts the session; if it throws, no session is created.
+	 * Writes the auth.signed_in ActivityLog row. Called after Better Auth
+	 * commits the session; if it throws, that session is deleted.
 	 */
 	recordSignIn: (entry: { userId: string; requestId: string }) => Promise<void>;
 	plugins?: BetterAuthPlugin[];
@@ -123,9 +123,7 @@ export function createAuth(deps: AuthDeps) {
 				}
 			}),
 		},
-		disabledPaths: deps.config.signInDisabled
-			? [...DISABLED_PATHS, "/sign-in/social", "/callback/github"]
-			: DISABLED_PATHS,
+		disabledPaths: DISABLED_PATHS,
 		user: {
 			// Set from GitHub's profile by mapProfileToUser. Better Auth drops
 			// `input: false` fields from a provider profile too, so these are
@@ -166,7 +164,7 @@ export function createAuth(deps: AuthDeps) {
 			},
 			session: {
 				create: {
-					before: async (session, endpoint) => {
+					before: async (session) => {
 						const ctx = await instance.$context;
 						const owner = await ctx.internalAdapter.findUserById(
 							session.userId,
@@ -181,19 +179,35 @@ export function createAuth(deps: AuthDeps) {
 							);
 							return false;
 						}
-						// auth.signed_in is a documented exception to "the log row shares
-						// the mutation's transaction": Better Auth owns the session insert
-						// and we cannot join its transaction. Written first, failing
-						// closed: if the log insert fails, this throws and no session is
-						// created. The remaining gap is a log row for a session whose own
-						// insert then failed.
-						await deps.recordSignIn({
-							userId: session.userId,
-							requestId:
-								endpoint?.request?.headers.get(REQUEST_ID_HEADER) ??
-								endpoint?.headers?.get(REQUEST_ID_HEADER) ??
-								UNAVAILABLE_REQUEST_ID,
-						});
+					},
+					// auth.signed_in is a documented exception to "the log row shares
+					// the mutation's transaction": Better Auth owns the session insert
+					// and we cannot join its transaction. Written after it commits, so
+					// a session insert that fails leaves no log row. If the log insert
+					// fails, the session is deleted and the error goes on, so the
+					// callback fails and its cookie is never sent. The remaining gap is
+					// a session row whose delete also failed, with no cookie anywhere.
+					after: async (session, endpoint) => {
+						try {
+							await deps.recordSignIn({
+								userId: session.userId,
+								requestId:
+									endpoint?.request?.headers.get(REQUEST_ID_HEADER) ??
+									endpoint?.headers?.get(REQUEST_ID_HEADER) ??
+									UNAVAILABLE_REQUEST_ID,
+							});
+						} catch (err) {
+							const ctx = await instance.$context;
+							await ctx.internalAdapter
+								.deleteSession(session.token)
+								.catch((deleteErr: unknown) =>
+									deps.logger.error(
+										{ err: deleteErr, userId: session.userId },
+										"sign-in log failed and its session could not be deleted",
+									),
+								);
+							throw err;
+						}
 					},
 				},
 			},

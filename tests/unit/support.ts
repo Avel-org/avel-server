@@ -78,12 +78,10 @@ export function buildApp(
 		clock?: Clock;
 		ids?: IdGenerator;
 		operators?: string[];
-		/** Dev preview on. */
-		preview?: boolean;
-		/** Preview started without GitHub credentials: sign-in endpoints off. */
-		signInDisabled?: boolean;
 		/** Replaces the fake auth.signed_in recorder, for example with one that throws. */
 		recordSignIn?: (entry: SignIn) => Promise<void>;
+		/** Makes every insert into this Better Auth model throw, inside a transaction too. */
+		failInserts?: string;
 	} = {},
 ) {
 	const signIns: SignIn[] = [];
@@ -94,13 +92,12 @@ export function buildApp(
 		account: [],
 		verification: [],
 	} as Record<string, Array<Record<string, unknown>>>;
-	const config = {
-		...testAuthConfig(options.operators ?? [String(OPERATOR.id)]),
-		...(options.signInDisabled ? { signInDisabled: true as const } : {}),
-	};
+	const config = testAuthConfig(options.operators ?? [String(OPERATOR.id)]);
 	const auth = createAuth({
 		config,
-		database: memoryAdapter(memory),
+		database: options.failInserts
+			? failingInserts(memoryAdapter(memory), options.failInserts)
+			: memoryAdapter(memory),
 		ids: sequentialIds(),
 		logger,
 		recordSignIn:
@@ -119,7 +116,6 @@ export function buildApp(
 			throw new Error("unit tests have no database; use tests/api");
 		},
 		webOrigins: config.webOrigins,
-		preview: options.preview ?? false,
 		repos: noRepos,
 		templates: noTemplates,
 		dispatchByToken: noDispatches,
@@ -131,6 +127,27 @@ export function buildApp(
 		drive: { blobs: memoryBlobs(), maxBytes: DEFAULT_UPLOAD_MAX_BYTES },
 	});
 	return { app, auth, memory, logs: lines, signIns };
+}
+
+type MemoryAdapter = ReturnType<typeof memoryAdapter>;
+type Adapter = ReturnType<MemoryAdapter>;
+
+/** An adapter whose inserts into `model` throw, as a failed database insert would. */
+function failingInserts(factory: MemoryAdapter, model: string): MemoryAdapter {
+	const failing = <A extends Pick<Adapter, "create">>(adapter: A): A => ({
+		...adapter,
+		create: (async (args) => {
+			if (args.model === model) throw new Error(`${model} insert failed`);
+			return adapter.create(args);
+		}) as A["create"],
+	});
+	return (options) => {
+		const adapter = factory(options);
+		return {
+			...failing(adapter),
+			transaction: (cb) => adapter.transaction((trx) => cb(failing(trx))),
+		};
+	};
 }
 
 type Profile = typeof OPERATOR;

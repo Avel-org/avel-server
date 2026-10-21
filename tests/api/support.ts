@@ -125,8 +125,6 @@ export async function withApi(
 	options: {
 		ids?: IdGenerator;
 		operators?: string[];
-		/** Dev preview on. */
-		preview?: boolean;
 		/** Run on the counting connection, recording every statement in `statements`. */
 		countStatements?: boolean;
 		/** Where read-repo gets repositories. Default: none, and a read fails loudly. */
@@ -214,7 +212,6 @@ async function runApi(
 			auth,
 			db: () => tx,
 			webOrigins: config.webOrigins,
-			preview: options.preview ?? false,
 			repos: options.repos ?? noRepos,
 			templates: options.templates ?? noTemplates,
 			dispatchByToken: options.dispatchByToken ?? dispatchByTokenSha256,

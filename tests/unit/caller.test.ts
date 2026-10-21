@@ -85,7 +85,6 @@ function build(
 		found?: DispatchTokenMatch;
 		runner?: string | null;
 		session?: boolean;
-		preview?: boolean;
 	} = {},
 ) {
 	const looked: string[] = [];
@@ -104,7 +103,6 @@ function build(
 		"/api/*",
 		resolveCaller({
 			auth,
-			preview: options.preview ?? false,
 			db: () => ({}) as Executor,
 			contract: test,
 			dispatchByToken: lookup,
@@ -281,15 +279,6 @@ describe("resolveCaller: no bearer", () => {
 			await call("/api/clients", { authorization: `Basic ${TOKEN}` }),
 		).toMatchObject({ status: 401, code: "UNAUTHENTICATED" });
 		expect(looked).toEqual([]);
-	});
-
-	it("sets no caller on a dev-preview read with no session", async () => {
-		const { call } = build({ preview: true });
-		expect(await call("/api/clients")).toEqual({
-			status: 200,
-			caller: null,
-			code: undefined,
-		});
 	});
 
 	it("ignores a bearer on a public path", async () => {

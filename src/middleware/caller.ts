@@ -46,12 +46,11 @@ export type SystemCaller = { kind: "system" };
 /** Who a request is from (DATA-CONTRACTS-V2.md, Dispatch: three callers, one middleware). */
 export type Caller = OperatorCaller | AgentCaller | SystemCaller;
 
-/** Unset on public paths and on a dev-preview read with no session. */
+/** Unset on public paths. */
 export type CallerVariables = AuthVariables & { caller?: Caller };
 
 export type CallerDeps = {
 	auth: Auth;
-	preview: boolean;
 	db: () => Executor;
 	contract: AppRouter;
 	dispatchByToken: DispatchTokenLookup;
@@ -64,8 +63,8 @@ const BEARER = /^Bearer\s+(\S+)\s*$/i;
 /**
  * Resolves every /api/* request to a caller.
  *
- * - No bearer: requireOperator, unchanged (401 before 404, the allowlist,
- *   dev preview), and an operator caller when it set one.
+ * - No bearer: requireOperator, unchanged (401 before 404, the allowlist),
+ *   and an operator caller.
  * - `Bearer avl_run_…`: the runner when it matches the configured
  *   credential, else 401 UNAUTHENTICATED. The runner reaches only routes
  *   declaring `system: true`; any other answers 403 FORBIDDEN.
@@ -80,7 +79,7 @@ const BEARER = /^Bearer\s+(\S+)\s*$/i;
 export function resolveCaller(
 	deps: CallerDeps,
 ): MiddlewareHandler<{ Variables: CallerVariables }> {
-	const operatorGate = requireOperator(deps.auth, { preview: deps.preview });
+	const operatorGate = requireOperator(deps.auth);
 	const routeAt = routeMatcher(deps.contract);
 	return async (ctx, next) => {
 		if (isPublicPath(ctx.req.path)) return next();

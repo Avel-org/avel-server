@@ -167,7 +167,7 @@ export const preconditionDetails = z
 		missionId: z.string().uuid().optional(),
 		/** The dispatch the precondition was about, where there is one. */
 		dispatchId: z.string().uuid().optional(),
-		/** roster_entry_not_found, roster_entry_inactive, agent_identity_missing, estimate_missing: the entries at fault, in roster order. */
+		/** roster_entry_not_found, roster_entry_inactive, agent_identity_missing, estimate_missing, template_not_rosterable: the entries at fault, in roster order. */
 		rosterEntryIds: z.array(z.string().uuid()).optional(),
 		/** model_price_unknown: the model with no price. */
 		model: z.string().optional(),

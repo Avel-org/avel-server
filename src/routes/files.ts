@@ -31,8 +31,7 @@ import {
  * The Drive's byte routes (DATA-CONTRACTS-V2, *File*). Bytes are not
  * envelopes, so these sit outside the ts-rest contract, the way the template
  * cover does. Operator only: an agent token or the runner never reaches them
- * (src/middleware/caller.ts refuses a route the contract does not declare),
- * and a dev-preview read without a session is refused here.
+ * (src/middleware/caller.ts refuses a route the contract does not declare).
  *
  *   POST   /api/intakes/:intakeId/files?name=<name>      raw body; 201
  *   GET    /api/intakes/:intakeId/files/:fileId/content  the bytes, as an attachment

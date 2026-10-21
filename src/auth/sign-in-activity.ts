@@ -5,8 +5,8 @@ import type { IdGenerator } from "../lib/ids";
 
 /**
  * The production recordSignIn: one auth.signed_in row, in its own
- * transaction. Better Auth writes the session in a separate one; see the
- * session.create hook in src/auth/index.ts for what that leaves open.
+ * transaction, written after Better Auth commits the session in another.
+ * See the session.create hook in src/auth/index.ts for what that leaves open.
  */
 export function signInRecorder(deps: {
 	db: () => Executor;
