@@ -28,6 +28,7 @@ const EXPECTED_TABLES = [
 	"canon_message",
 	"canon_question",
 	"canon_session",
+	"canon_step",
 	"client",
 	"client_memory",
 	"completion_report",

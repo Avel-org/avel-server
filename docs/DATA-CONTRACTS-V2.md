@@ -929,12 +929,18 @@ intake_files           intake_id FK → Intake · file_id FK → File — source
 
 #### CanonSession
 
-One briefing conversation on one Intake. It carries the bounds a dispatch carried for Canon: a budget, ceilings, frozen versions and attribution.
+One conversation with Canon. It carries the bounds a dispatch carried for Canon: a budget, ceilings, frozen versions and attribution. *2026-10-20 (J, Canon chat):* a session is `open` scope, with no client, engagement or intake, or `client` scope, with its client and optionally an engagement of that client and a draft intake of that engagement. Only a session on an intake briefs it.
 
 ```
-id · intake_id         FK → Intake, NOT NULL
-engagement_id          FK → Engagement, NOT NULL — added when built: (intake_id, engagement_id) → intake and (engagement_id, client_id) → engagement, so the session's client is the intake's
-client_id              FK → Client, NOT NULL — server-set; the RLS key
+id · scope            'open' | 'client' (2026-10-20). CHECK: open ⇔ client_id, engagement_id and intake_id all null; client ⇒ client_id set; an intake needs its engagement
+intake_id?             FK → Intake — nullable since 2026-10-20
+engagement_id?         FK → Engagement — added when built: (intake_id, engagement_id) → intake and (engagement_id, client_id) → engagement, so the session's client is the intake's. Nullable since 2026-10-20
+client_id?             FK → Client — server-set; the RLS key. Null exactly for an open session; the policy is client_id IS NOT DISTINCT FROM the transaction's scope
+scope_key              generated: coalesce(client_id, the zero uuid). The children's composite foreign keys match on (id, scope_key), because a composite key with a NULL in it is never checked
+mode                   'ask' | 'fetch' | 'draft' — the default; each message records its own. CHECK: draft needs an intake
+title? · title_set_by? 'canon' | 'operator', set together; at most 120 characters. Canon never renames a session the operator named
+archived_at?           hidden from the default list, still searchable. CHECK: never while open; archiving an open session closes it first
+last_activity_at       the list's sort: set at open, reopen and each message
 status                 'open' | 'closed' | 'halted'
 halt_reason?           'token_hard_ceiling' | 'spend_ceiling' | 'operator'
 agent_identity_version_id   FK → AgentIdentityVersion — Canon's identity, frozen at open
@@ -947,11 +953,29 @@ opened_at · closed_at?
 timestamps             no deleted_at: a session is evidence
 ```
 
+**Reopen** (2026-10-20): a closed session, or one halted by the operator, goes back to `open`, with `closed_at`, `halt_reason` and `archived_at` cleared and the history in the `canon_session.reopened` activity row. A `token_hard_ceiling` halt is final (`canon_session_final`). Reopening refuses `canon_session_open` while the intake has another open session.
+
 **Activity payloads for Canon's tables hold ids, hashes, statuses and counts only** (2026-10-19). `activity_log` is not under row-level security, so client text such as content, questions or answers never goes in a payload.
 
 **No bearer token.** Canon's tools run in process and close over the session id. The server derives the intake, the client and the session from the session row.
 
 **Canon is its own actor in the activity log** (decided by J 2026-10-19). ActivityLog names an agent only through `actor_roster_entry_id`, and Canon has no RosterEntry. So `actor_kind` gains `'canon'`, and `actor_canon_session_id` (FK → CanonSession) is set exactly when `actor_kind = 'canon'` (CHECK). On the wire, the entry carries `actorCanonSessionId`, and the resolved actor carries `canonSessionId` with `display` set to "Canon". Canon never reuses `system`, which means the runner.
+
+#### CanonStep
+
+`[built]` 2026-10-20. One step of a turn, written as the turn runs, read after a seq as messages are: `GET /api/canon-sessions/:id/steps`. The wire is `runStep` (`src/contract/shared/run-step.ts`), the shape dispatch steps will use too. Append-only, with the same triggers as CanonMessage; under row-level security on `client_id`, as the session is.
+
+```
+id · canon_session_id  FK → CanonSession; (canon_session_id, scope_key) → canon_session
+client_id?             the session's; null in an open session
+turn                   the seq of the operator message that started the turn
+seq                    per session, from 1; unique with the session
+kind                   'reasoning_summary' | 'tool_call' | 'tool_result' | 'text' | 'error' — reasoning is the API's summary, never raw
+label                  1 to 80 characters
+detail                 jsonb object; a tool_result names its call by detail.callSeq
+started_at · ended_at? · tokens_in? · tokens_out?   tokens are approximate: usage arrives per model message
+created_at
+```
 
 #### CanonMessage
 

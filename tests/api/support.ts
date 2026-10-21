@@ -246,9 +246,14 @@ async function runApi(
 				return cookie;
 			},
 			operatorId: async () => {
-				const [operator] = await tx.select({ id: user.id }).from(user);
-				if (!operator) throw new Error("no operator: call signIn first");
-				return operator.id;
+				// This harness's operator, by GitHub id: tests also seed other users
+				// (seedTenants), and an unfiltered read returned whichever came first.
+				const [row] = await tx
+					.select({ id: user.id })
+					.from(user)
+					.where(eq(user.githubId, String(operator.id)));
+				if (!row) throw new Error("no operator: call signIn first");
+				return row.id;
 			},
 			call: async (path, init = {}) =>
 				app.request(path, {

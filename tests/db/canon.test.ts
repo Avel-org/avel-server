@@ -49,6 +49,8 @@ function messageValues(
 		clientId: t.clientId,
 		seq: 1,
 		role: "canon",
+		mode: "draft",
+		parts: [],
 		contentMd: "Reading the brief.",
 		citations: [],
 		createdAt: clock.now(),

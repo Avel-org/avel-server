@@ -52,6 +52,7 @@ export * from "./shared/envelope";
 export * from "./shared/errors";
 export * from "./shared/pagination";
 export * from "./shared/repo-url";
+export * from "./shared/run-step";
 export * from "./shared/skill-tiers";
 export * from "./shared/status";
 export * from "./skill";

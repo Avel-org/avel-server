@@ -72,10 +72,16 @@ export function sessionValues(
 ): typeof canonSession.$inferInsert {
 	return {
 		id: randomUUID(),
+		scope: "client",
 		intakeId: t.intakeId,
 		engagementId: t.engagementId,
 		clientId: t.clientId,
 		status: "open",
+		mode: "draft",
+		title: null,
+		titleSetBy: null,
+		archivedAt: null,
+		lastActivityAt: clock.now(),
 		haltReason: null,
 		agentIdentityVersionId: identityVersionId,
 		model: "claude-sonnet-5-5",

@@ -141,6 +141,9 @@ export const PRECONDITION_REASONS = [
 	"canon_session_open",
 	"canon_session_not_open",
 	"canon_turn_running",
+	// Canon chat (2026-10-20): a mode the session cannot run, and a halt that cannot be undone.
+	"canon_mode_unavailable",
+	"canon_session_final",
 	"canon_question_not_open",
 	"client_memory_not_proposed",
 	"client_memory_removed",

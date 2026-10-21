@@ -15,18 +15,21 @@ import {
 import {
 	type CanonCitation,
 	type CanonMessage,
+	type CanonMode,
 	type CanonQuestion,
 	type CanonSession,
+	type CanonSessionListItem,
 	type ClientMemory,
 	canonContract,
 	ok,
 	type PreconditionReason,
+	type RunStep,
 } from "../contract";
 import { logActivity } from "../db/activity";
 import {
 	type ClientId,
+	canonSessionScope,
 	clientIdOfCanonQuestion,
-	clientIdOfCanonSession,
 	clientIdOfClient,
 	clientIdOfClientMemory,
 	clientIdOfIntake,
@@ -37,6 +40,7 @@ import {
 	canonMessage,
 	canonQuestion,
 	canonSession,
+	canonStep,
 	client,
 	clientMemory,
 	engagement,
@@ -45,8 +49,16 @@ import {
 	intakeFiles,
 	user,
 } from "../db/schema";
-import { live, stamp } from "../db/schema/columns";
-import { type Executor, type Tx, withClientScope, withTx } from "../db/tx";
+import { live, stamp, touch } from "../db/schema/columns";
+import {
+	type CanonScope,
+	type Executor,
+	type Tx,
+	withCanonScope,
+	withClientScope,
+	withOpenScope,
+	withTx,
+} from "../db/tx";
 import { checkCanonAnswer } from "../lib/canon-answer";
 import { requestSha256 } from "../lib/canonical";
 import { priceFor } from "../lib/prices";
@@ -56,7 +68,9 @@ import type { Harness } from "../runner/harness";
 import { activityActor } from "./activity";
 import {
 	after,
+	containsPattern,
 	decodeCursor,
+	encodeCursor,
 	notFound,
 	operatorOf,
 	type RequestContext,
@@ -119,6 +133,16 @@ async function clientScope(db: Executor, clientId: string): Promise<ClientId> {
 		.where(and(eq(client.id, clientId), live(client)));
 	const scope = row ? await clientIdOfClient(db, clientId) : null;
 	if (!scope) throw notFound("client", clientId);
+	return scope;
+}
+
+/** The session's scope (a client's, or open), or 404. */
+async function sessionScopeOr404(
+	db: Executor,
+	id: string,
+): Promise<CanonScope> {
+	const scope = await canonSessionScope(db, id);
+	if (!scope) throw notFound("canon session", id);
 	return scope;
 }
 
@@ -197,12 +221,16 @@ type ResolvedFile = { fileId: string; fileName: string; purged: boolean };
  */
 async function resolveChunks(
 	tx: Tx,
-	intakeId: string,
+	intakeId: string | null,
 	chunkIds: readonly string[],
 ): Promise<Map<string, ResolvedFile>> {
 	const shas = [...new Set(chunkIds.map((c) => c.split(":")[0] ?? ""))];
 	const resolved = new Map<string, ResolvedFile>();
 	if (shas.length === 0) return resolved;
+	// A session with no intake has no files, so the turn gave it no passages.
+	if (intakeId === null) {
+		throw new Error("a session with no intake cites a chunk");
+	}
 	const rows = await tx
 		.select({
 			id: file.id,
@@ -286,7 +314,13 @@ async function sessionWires(
 	);
 	return rows.map((r) => ({
 		id: r.id,
+		scope: r.scope,
+		clientId: r.clientId,
+		engagementId: r.engagementId,
 		intakeId: r.intakeId,
+		title: r.title,
+		titleSetBy: r.titleSetBy,
+		mode: r.mode,
 		status: r.status,
 		haltReason: wireHaltReason(r),
 		model: r.model,
@@ -301,6 +335,8 @@ async function sessionWires(
 		openedBy: operatorActor(r.id, r.openedBy, logins.get(r.openedBy) ?? null),
 		openedAt: r.openedAt.toISOString(),
 		closedAt: r.closedAt?.toISOString() ?? null,
+		archivedAt: r.archivedAt?.toISOString() ?? null,
+		lastActivityAt: r.lastActivityAt.toISOString(),
 	}));
 }
 
@@ -314,7 +350,7 @@ type MessageRow = typeof canonMessage.$inferSelect;
 
 async function messageWires(
 	tx: Tx,
-	intakeId: string,
+	intakeId: string | null,
 	rows: readonly MessageRow[],
 ): Promise<CanonMessage[]> {
 	const resolved = await resolveChunks(
@@ -326,6 +362,7 @@ async function messageWires(
 		id: r.id,
 		seq: r.seq,
 		role: r.role,
+		mode: r.mode,
 		contentMd: r.contentMd,
 		citations: r.citations.map(
 			(c): CanonCitation => ({
@@ -335,8 +372,70 @@ async function messageWires(
 				quote: c.quote,
 			}),
 		),
+		parts: r.parts,
 		createdAt: r.createdAt.toISOString(),
 	}));
+}
+
+/** One row of canon_session_index(), as postgres-js returns it. */
+type IndexRow = {
+	id: string;
+	scope: CanonSession["scope"];
+	client_id: string | null;
+	engagement_id: string | null;
+	intake_id: string | null;
+	title: string | null;
+	mode: CanonMode;
+	status: CanonSession["status"];
+	halt_reason: SessionRow["haltReason"];
+	archived_at: Date | string | null;
+	last_activity_at: Date | string;
+	opened_at: Date | string;
+	turn_started_at: Date | string | null;
+};
+
+/** A raw timestamp, whichever form the driver handed back. */
+function asDate(v: Date | string): Date {
+	return v instanceof Date ? v : new Date(v);
+}
+
+function listItemOf(r: IndexRow): CanonSessionListItem {
+	if (r.halt_reason === "spend_ceiling") {
+		throw new Error(`canon_session ${r.id}: halted at a spend ceiling`);
+	}
+	return {
+		id: r.id,
+		scope: r.scope,
+		clientId: r.client_id,
+		engagementId: r.engagement_id,
+		intakeId: r.intake_id,
+		title: r.title,
+		mode: r.mode,
+		status: r.status,
+		haltReason: r.halt_reason,
+		turn: r.turn_started_at === null ? "idle" : "canon",
+		openedAt: asDate(r.opened_at).toISOString(),
+		archivedAt:
+			r.archived_at === null ? null : asDate(r.archived_at).toISOString(),
+		lastActivityAt: asDate(r.last_activity_at).toISOString(),
+	};
+}
+
+type StepRow = typeof canonStep.$inferSelect;
+
+function stepWire(r: StepRow): RunStep {
+	return {
+		id: r.id,
+		seq: r.seq,
+		turn: r.turn,
+		kind: r.kind,
+		label: r.label,
+		detail: r.detail,
+		startedAt: r.startedAt.toISOString(),
+		endedAt: r.endedAt?.toISOString() ?? null,
+		tokensIn: r.tokensIn,
+		tokensOut: r.tokensOut,
+	};
 }
 
 type QuestionRow = typeof canonQuestion.$inferSelect;
@@ -446,6 +545,154 @@ async function lockedMemory(tx: Tx, id: string) {
 
 export function canonRoutes(deps: CanonDeps) {
 	const sha = (text: string) => requestSha256({ contentMd: text });
+
+	/** The estimate and ceilings: omitted ones follow the estimate, as on a dispatch. */
+	const ceilingsOf = (body: {
+		estimatedTokens?: number;
+		tokenSoftCeiling?: number;
+		tokenHardCeiling?: number;
+	}) => {
+		const estimate = body.estimatedTokens ?? CANON_DEFAULT_ESTIMATE;
+		const soft = body.tokenSoftCeiling ?? Math.ceil(estimate * 1.5);
+		const hard = body.tokenHardCeiling ?? Math.max(estimate * 3, soft);
+		if (soft < estimate || hard < soft) {
+			throw new ApiError(
+				"VALIDATION_FAILED",
+				"The ceilings do not fit the estimate",
+				{
+					details: {
+						body: [
+							{
+								path: [
+									soft < estimate ? "tokenSoftCeiling" : "tokenHardCeiling",
+								],
+								message:
+									soft < estimate
+										? "The soft ceiling must be at least the estimate"
+										: "The hard ceiling must be at least the soft ceiling",
+							},
+						],
+					},
+				},
+			);
+		}
+		return { estimate, soft, hard };
+	};
+
+	/**
+	 * Inserts an open session in the transaction's scope, with Canon's
+	 * current identity and the model's price frozen, and logs it. The caller
+	 * checks the intake; the database holds one open session per intake.
+	 */
+	const insertSession = async (
+		s: Tx,
+		ctx: RequestContext,
+		o: {
+			place: {
+				scope: "open" | "client";
+				clientId: ClientId | null;
+				engagementId: string | null;
+				intakeId: string | null;
+			};
+			mode: CanonMode;
+			limits: { estimate: number; soft: number; hard: number };
+			idempotency: { key: string; hash: string } | null;
+		},
+	) => {
+		const operator = operatorOf(ctx);
+		if (o.place.intakeId) {
+			const [openOne] = await s
+				.select({ id: canonSession.id })
+				.from(canonSession)
+				.where(
+					and(
+						eq(canonSession.intakeId, o.place.intakeId),
+						eq(canonSession.status, "open"),
+					),
+				);
+			if (openOne) {
+				throw refuse(
+					"canon_session_open",
+					"This intake already has an open Canon session",
+				);
+			}
+		}
+		const [template] = await s
+			.select({ id: agentTemplate.id })
+			.from(agentTemplate)
+			.where(
+				and(eq(agentTemplate.slug, CANON_TEMPLATE_SLUG), live(agentTemplate)),
+			);
+		const identity = template ? await currentIdentity(s, template.id) : null;
+		if (!identity) {
+			throw refuse(
+				"agent_identity_missing",
+				"Canon has no identity to open a session with",
+			);
+		}
+		const model = deps.harness.model;
+		const table = tableFor(deps.prices, deps.prices.current);
+		if (!table || !priceFor(model, table)) {
+			throw new ApiError("PRECONDITION_FAILED", `No price for ${model}`, {
+				details: { reason: "model_price_unknown", model },
+			});
+		}
+		const now = deps.clock.now();
+		const [row] = await s
+			.insert(canonSession)
+			.values({
+				id: deps.ids.next(),
+				...o.place,
+				status: "open",
+				mode: o.mode,
+				title: null,
+				titleSetBy: null,
+				archivedAt: null,
+				lastActivityAt: now,
+				haltReason: null,
+				agentIdentityVersionId: identity.id,
+				model,
+				priceVersion: deps.prices.current,
+				harnessVersion: deps.harness.version,
+				estimatedTokens: o.limits.estimate,
+				tokenSoftCeiling: o.limits.soft,
+				tokenHardCeiling: o.limits.hard,
+				tokensUsed: 0,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheReadTokens: 0,
+				cacheWriteTokens: 0,
+				spendUsd: "0",
+				openedBy: operator.id,
+				openedAt: now,
+				closedAt: null,
+				turnStartedAt: null,
+				idempotencyKey: o.idempotency?.key ?? null,
+				requestSha256: o.idempotency?.hash ?? null,
+				...stamp(deps.clock),
+			})
+			.returning();
+		if (!row) throw new Error("canon_session insert returned no row");
+		await logActivity(s, deps, {
+			actorKind: "operator",
+			actorUserId: operator.id,
+			action: "canon_session.opened",
+			entityType: "canon_session",
+			entityId: row.id,
+			engagementId: o.place.engagementId,
+			requestId: ctx.requestId,
+			payload: {
+				sessionId: row.id,
+				scope: o.place.scope,
+				intakeId: o.place.intakeId,
+				mode: o.mode,
+				estimatedTokens: o.limits.estimate,
+				tokenSoftCeiling: o.limits.soft,
+				tokenHardCeiling: o.limits.hard,
+			},
+		});
+		return row;
+	};
 
 	/** Answer, acknowledge or dismiss: open questions only, decided once. */
 	const decide = async (
@@ -574,35 +821,12 @@ export function canonRoutes(deps: CanonDeps) {
 
 	return tsr.platformContext<RequestContext>().router(canonContract, {
 		openSession: async ({ params, headers, body }, ctx) => {
-			const operator = operatorOf(ctx);
+			operatorOf(ctx);
 			const db = deps.db();
 			const { clientId, engagementId } = await intakeScope(db, params.id);
 			const key = headers["idempotency-key"];
 			const hash = requestSha256(body);
-			const estimate = body.estimatedTokens ?? CANON_DEFAULT_ESTIMATE;
-			const soft = body.tokenSoftCeiling ?? Math.ceil(estimate * 1.5);
-			const hard = body.tokenHardCeiling ?? Math.max(estimate * 3, soft);
-			if (soft < estimate || hard < soft) {
-				throw new ApiError(
-					"VALIDATION_FAILED",
-					"The ceilings do not fit the estimate",
-					{
-						details: {
-							body: [
-								{
-									path: [
-										soft < estimate ? "tokenSoftCeiling" : "tokenHardCeiling",
-									],
-									message:
-										soft < estimate
-											? "The soft ceiling must be at least the estimate"
-											: "The hard ceiling must be at least the soft ceiling",
-								},
-							],
-						},
-					},
-				);
-			}
+			const limits = ceilingsOf(body);
 			const result = await withTx(db, (tx) =>
 				withClientScope(tx, clientId, async (s) => {
 					// One writer per intake: an open and a replay of it run in turn.
@@ -638,92 +862,16 @@ export function canonRoutes(deps: CanonDeps) {
 							"Canon briefs a draft intake only",
 						);
 					}
-					const [openOne] = await s
-						.select({ id: canonSession.id })
-						.from(canonSession)
-						.where(
-							and(
-								eq(canonSession.intakeId, params.id),
-								eq(canonSession.status, "open"),
-							),
-						);
-					if (openOne) {
-						throw refuse(
-							"canon_session_open",
-							"This intake already has an open Canon session",
-						);
-					}
-					const [template] = await s
-						.select({ id: agentTemplate.id })
-						.from(agentTemplate)
-						.where(
-							and(
-								eq(agentTemplate.slug, CANON_TEMPLATE_SLUG),
-								live(agentTemplate),
-							),
-						);
-					const identity = template
-						? await currentIdentity(s, template.id)
-						: null;
-					if (!identity) {
-						throw refuse(
-							"agent_identity_missing",
-							"Canon has no identity to open a session with",
-						);
-					}
-					const model = deps.harness.model;
-					const table = tableFor(deps.prices, deps.prices.current);
-					if (!table || !priceFor(model, table)) {
-						throw new ApiError("PRECONDITION_FAILED", `No price for ${model}`, {
-							details: { reason: "model_price_unknown", model },
-						});
-					}
-					const now = deps.clock.now();
-					const values = {
-						id: deps.ids.next(),
-						intakeId: params.id,
-						engagementId,
-						clientId,
-						status: "open" as const,
-						haltReason: null,
-						agentIdentityVersionId: identity.id,
-						model,
-						priceVersion: deps.prices.current,
-						harnessVersion: deps.harness.version,
-						estimatedTokens: estimate,
-						tokenSoftCeiling: soft,
-						tokenHardCeiling: hard,
-						tokensUsed: 0,
-						tokensIn: 0,
-						tokensOut: 0,
-						cacheReadTokens: 0,
-						cacheWriteTokens: 0,
-						spendUsd: "0",
-						openedBy: operator.id,
-						openedAt: now,
-						closedAt: null,
-						turnStartedAt: null,
-						idempotencyKey: key ?? null,
-						requestSha256: key ? hash : null,
-						...stamp(deps.clock),
-					};
-					const [row] = await s.insert(canonSession).values(values).returning();
-					if (!row) throw new Error("canon_session insert returned no row");
-					await logActivity(s, deps, {
-						actorKind: "operator",
-						actorUserId: operator.id,
-						action: "canon_session.opened",
-						entityType: "canon_session",
-						entityId: row.id,
-						engagementId,
-						requestId: ctx.requestId,
-						payload: {
-							sessionId: row.id,
+					const row = await insertSession(s, ctx, {
+						place: {
+							scope: "client",
+							clientId,
+							engagementId,
 							intakeId: params.id,
-							estimatedTokens: estimate,
-							tokenSoftCeiling: soft,
-							tokenHardCeiling: hard,
 						},
+						mode: "draft",
+						limits,
+						idempotency: key ? { key, hash } : null,
 					});
 					return { replayed: false, wire: await oneSessionWire(s, row) };
 				}),
@@ -733,6 +881,392 @@ export function canonRoutes(deps: CanonDeps) {
 				return { status: 200, body: ok(result.wire) };
 			}
 			return { status: 201, body: ok(result.wire) };
+		},
+
+		createSession: async ({ body }, ctx) => {
+			operatorOf(ctx);
+			const db = deps.db();
+			const limits = ceilingsOf(body);
+			if (body.scope === "open") {
+				const wire = await withTx(db, (tx) =>
+					withOpenScope(tx, async (s) =>
+						oneSessionWire(
+							s,
+							await insertSession(s, ctx, {
+								place: {
+									scope: "open",
+									clientId: null,
+									engagementId: null,
+									intakeId: null,
+								},
+								mode: body.mode ?? "ask",
+								limits,
+								idempotency: null,
+							}),
+						),
+					),
+				);
+				return { status: 201, body: ok(wire) };
+			}
+			// The engagement must be the client's, and the intake the
+			// engagement's: each is checked against the one above it, all live.
+			const clientId = await clientScope(db, body.clientId);
+			let engagementId: string | null = null;
+			if (body.intakeId) {
+				const found = await intakeScope(db, body.intakeId);
+				if (
+					found.clientId !== clientId ||
+					(body.engagementId && body.engagementId !== found.engagementId)
+				) {
+					throw notFound("intake", body.intakeId);
+				}
+				engagementId = found.engagementId;
+			} else if (body.engagementId) {
+				const [eng] = await db
+					.select({ id: engagement.id })
+					.from(engagement)
+					.where(
+						and(
+							eq(engagement.id, body.engagementId),
+							eq(engagement.clientId, clientId),
+							live(engagement),
+						),
+					);
+				if (!eng) throw notFound("engagement", body.engagementId);
+				engagementId = eng.id;
+			}
+			const intakeId = body.intakeId ?? null;
+			const mode = body.mode ?? (intakeId ? "draft" : "ask");
+			if (mode === "draft" && !intakeId) {
+				throw refuse(
+					"canon_mode_unavailable",
+					"Draft mode needs an intake to draft",
+				);
+			}
+			const wire = await withTx(db, (tx) =>
+				withClientScope(tx, clientId, async (s) => {
+					if (intakeId) {
+						const [locked] = await s
+							.select({ status: intake.status })
+							.from(intake)
+							.where(eq(intake.id, intakeId))
+							.for("update");
+						if (!locked) throw notFound("intake", intakeId);
+						if (locked.status !== "draft") {
+							throw refuse(
+								"intake_not_draft",
+								"Canon briefs a draft intake only",
+							);
+						}
+					}
+					return oneSessionWire(
+						s,
+						await insertSession(s, ctx, {
+							place: { scope: "client", clientId, engagementId, intakeId },
+							mode,
+							limits,
+							idempotency: null,
+						}),
+					);
+				}),
+			);
+			return { status: 201, body: ok(wire) };
+		},
+
+		listAllSessions: async ({ query }) => {
+			const db = deps.db();
+			// Across clients, which no scope can read: the one summary function
+			// (drizzle/0042), filtered and paged here.
+			const index = sql`canon_session_index()`;
+			const filters: SQL[] = [
+				query.archived
+					? sql`archived_at is not null`
+					: sql`archived_at is null`,
+			];
+			if (query.scope) filters.push(sql`scope = ${query.scope}`);
+			if (query.clientId) filters.push(sql`client_id = ${query.clientId}`);
+			if (query.status) {
+				filters.push(
+					sql`status in (${sql.join(
+						query.status.map((st) => sql`${st}`),
+						sql`, `,
+					)})`,
+				);
+			}
+			if (query.q) {
+				filters.push(sql`title ilike ${containsPattern(query.q)}`);
+			}
+			const where = sql.join(filters, sql` and `);
+			const cursor = query.cursor ? decodeCursor(query.cursor) : null;
+			const page = cursor
+				? sql`and (last_activity_at, id) < (${cursor.createdAt.toISOString()}::timestamptz, ${cursor.id}::uuid)`
+				: sql``;
+			const rows = await db.execute<IndexRow>(
+				sql`select id, scope, client_id, engagement_id, intake_id, title, mode, status, halt_reason, archived_at, last_activity_at, opened_at, turn_started_at
+					from ${index} where ${where} ${page}
+					order by last_activity_at desc, id desc limit ${query.limit + 1}`,
+			);
+			const [counted] = await db.execute<{ n: number }>(
+				sql`select count(*)::int as n from ${index} where ${where}`,
+			);
+			const items = rows.slice(0, query.limit);
+			const last = items.at(-1);
+			const nextCursor =
+				rows.length > query.limit && last
+					? encodeCursor({
+							createdAt: asDate(last.last_activity_at),
+							id: last.id,
+						})
+					: null;
+			return {
+				status: 200,
+				body: {
+					success: true as const,
+					data: items.map(listItemOf),
+					meta: { nextCursor, total: counted?.n ?? 0 },
+				},
+			};
+		},
+
+		updateSession: async ({ params, body }, ctx) => {
+			const operator = operatorOf(ctx);
+			const db = deps.db();
+			const scope = await sessionScopeOr404(db, params.id);
+			const wire = await withTx(db, (tx) =>
+				withCanonScope(tx, scope, async (s) => {
+					const row = await lockedSession(s, params.id);
+					const set: Partial<typeof canonSession.$inferInsert> = {};
+					if (body.mode !== undefined && body.mode !== row.mode) {
+						if (row.status !== "open") {
+							throw refuse(
+								"canon_session_not_open",
+								"Only an open session's mode changes",
+							);
+						}
+						if (body.mode === "draft" && row.intakeId === null) {
+							throw refuse(
+								"canon_mode_unavailable",
+								"Draft mode needs an intake to draft",
+							);
+						}
+						set.mode = body.mode;
+					}
+					const renamed =
+						body.title !== undefined &&
+						(body.title !== row.title || row.titleSetBy !== "operator");
+					if (renamed) {
+						set.title = body.title;
+						set.titleSetBy = "operator";
+					}
+					if (Object.keys(set).length === 0) return oneSessionWire(s, row);
+					const [updated] = await s
+						.update(canonSession)
+						.set({ ...set, ...touch(deps.clock) })
+						.where(eq(canonSession.id, params.id))
+						.returning();
+					if (!updated)
+						throw new Error(`canon_session ${params.id}: no row updated`);
+					if (renamed) {
+						await logActivity(s, deps, {
+							actorKind: "operator",
+							actorUserId: operator.id,
+							action: "canon_session.renamed",
+							entityType: "canon_session",
+							entityId: params.id,
+							engagementId: row.engagementId,
+							requestId: ctx.requestId,
+							// The title is client text: never in the log.
+							payload: { sessionId: params.id, hadTitle: row.title !== null },
+						});
+					}
+					return oneSessionWire(s, updated);
+				}),
+			);
+			return { status: 200, body: ok(wire) };
+		},
+
+		reopenSession: async ({ params }, ctx) => {
+			const operator = operatorOf(ctx);
+			const db = deps.db();
+			const scope = await sessionScopeOr404(db, params.id);
+			const wire = await withTx(db, (tx) =>
+				withCanonScope(tx, scope, async (s) => {
+					const row = await lockedSession(s, params.id);
+					if (row.status === "open") {
+						throw refuse("canon_session_open", "This session is already open");
+					}
+					if (row.status === "halted" && row.haltReason !== "operator") {
+						throw refuse(
+							"canon_session_final",
+							"A session halted at its token ceiling stays halted",
+						);
+					}
+					if (row.intakeId) {
+						const [other] = await s
+							.select({ id: canonSession.id })
+							.from(canonSession)
+							.where(
+								and(
+									eq(canonSession.intakeId, row.intakeId),
+									eq(canonSession.status, "open"),
+								),
+							);
+						if (other) {
+							throw refuse(
+								"canon_session_open",
+								"This intake already has an open Canon session",
+							);
+						}
+					}
+					const now = deps.clock.now();
+					const [updated] = await s
+						.update(canonSession)
+						.set({
+							status: "open",
+							haltReason: null,
+							closedAt: null,
+							archivedAt: null,
+							lastActivityAt: now,
+							updatedAt: now,
+						})
+						.where(eq(canonSession.id, params.id))
+						.returning();
+					if (!updated)
+						throw new Error(`canon_session ${params.id}: no row updated`);
+					await logActivity(s, deps, {
+						actorKind: "operator",
+						actorUserId: operator.id,
+						action: "canon_session.reopened",
+						entityType: "canon_session",
+						entityId: params.id,
+						engagementId: row.engagementId,
+						requestId: ctx.requestId,
+						payload: {
+							sessionId: params.id,
+							from: row.status,
+							haltReason: row.haltReason,
+							closedAt: row.closedAt?.toISOString() ?? null,
+							wasArchived: row.archivedAt !== null,
+						},
+					});
+					return oneSessionWire(s, updated);
+				}),
+			);
+			return { status: 200, body: ok(wire) };
+		},
+
+		archiveSession: async ({ params }, ctx) => {
+			const operator = operatorOf(ctx);
+			const db = deps.db();
+			const scope = await sessionScopeOr404(db, params.id);
+			const wire = await withTx(db, (tx) =>
+				withCanonScope(tx, scope, async (s) => {
+					const row = await lockedSession(s, params.id);
+					if (row.archivedAt !== null) return oneSessionWire(s, row);
+					if (row.turnStartedAt !== null) {
+						throw refuse(
+							"canon_turn_running",
+							"Canon is still replying; halt it instead",
+						);
+					}
+					const now = deps.clock.now();
+					const closing = row.status === "open";
+					const [updated] = await s
+						.update(canonSession)
+						.set({
+							...(closing ? { status: "closed" as const, closedAt: now } : {}),
+							archivedAt: now,
+							updatedAt: now,
+						})
+						.where(eq(canonSession.id, params.id))
+						.returning();
+					if (!updated)
+						throw new Error(`canon_session ${params.id}: no row updated`);
+					const actor = {
+						actorKind: "operator" as const,
+						actorUserId: operator.id,
+						entityType: "canon_session" as const,
+						entityId: params.id,
+						engagementId: row.engagementId,
+						requestId: ctx.requestId,
+					};
+					if (closing) {
+						await logActivity(s, deps, {
+							...actor,
+							action: "canon_session.closed",
+							payload: { sessionId: params.id, intakeId: row.intakeId },
+						});
+					}
+					await logActivity(s, deps, {
+						...actor,
+						action: "canon_session.archived",
+						payload: { sessionId: params.id, closed: closing },
+					});
+					return oneSessionWire(s, updated);
+				}),
+			);
+			return { status: 200, body: ok(wire) };
+		},
+
+		unarchiveSession: async ({ params }, ctx) => {
+			const operator = operatorOf(ctx);
+			const db = deps.db();
+			const scope = await sessionScopeOr404(db, params.id);
+			const wire = await withTx(db, (tx) =>
+				withCanonScope(tx, scope, async (s) => {
+					const row = await lockedSession(s, params.id);
+					if (row.archivedAt === null) return oneSessionWire(s, row);
+					const [updated] = await s
+						.update(canonSession)
+						.set({ archivedAt: null, ...touch(deps.clock) })
+						.where(eq(canonSession.id, params.id))
+						.returning();
+					if (!updated)
+						throw new Error(`canon_session ${params.id}: no row updated`);
+					await logActivity(s, deps, {
+						actorKind: "operator",
+						actorUserId: operator.id,
+						action: "canon_session.unarchived",
+						entityType: "canon_session",
+						entityId: params.id,
+						engagementId: row.engagementId,
+						requestId: ctx.requestId,
+						payload: { sessionId: params.id },
+					});
+					return oneSessionWire(s, updated);
+				}),
+			);
+			return { status: 200, body: ok(wire) };
+		},
+
+		listSteps: async ({ params, query }) => {
+			const db = deps.db();
+			const scope = await sessionScopeOr404(db, params.id);
+			return withCanonScope(db, scope, async (s) => {
+				const rows = await s
+					.select()
+					.from(canonStep)
+					.where(
+						and(
+							eq(canonStep.canonSessionId, params.id),
+							gt(canonStep.seq, query.afterSeq),
+						),
+					)
+					.orderBy(asc(canonStep.seq))
+					.limit(query.limit);
+				const [last] = await s
+					.select({ seq: max(canonStep.seq) })
+					.from(canonStep)
+					.where(eq(canonStep.canonSessionId, params.id));
+				return {
+					status: 200,
+					body: {
+						success: true as const,
+						data: rows.map(stepWire),
+						meta: { lastSeq: last?.seq ?? 0 },
+					},
+				};
+			});
 		},
 
 		listSessions: async ({ params, query }) => {
@@ -764,12 +1298,8 @@ export function canonRoutes(deps: CanonDeps) {
 
 		getSession: async ({ params }) => {
 			const db = deps.db();
-			const scope = await scopeOr404(
-				clientIdOfCanonSession(db, params.id),
-				"canon session",
-				params.id,
-			);
-			return withClientScope(db, scope, async (s) => {
+			const scope = await sessionScopeOr404(db, params.id);
+			return withCanonScope(db, scope, async (s) => {
 				const [row] = await s
 					.select()
 					.from(canonSession)
@@ -782,13 +1312,9 @@ export function canonRoutes(deps: CanonDeps) {
 		closeSession: async ({ params }, ctx) => {
 			const operator = operatorOf(ctx);
 			const db = deps.db();
-			const scope = await scopeOr404(
-				clientIdOfCanonSession(db, params.id),
-				"canon session",
-				params.id,
-			);
+			const scope = await sessionScopeOr404(db, params.id);
 			const wire = await withTx(db, (tx) =>
-				withClientScope(tx, scope, async (s) => {
+				withCanonScope(tx, scope, async (s) => {
 					const row = await lockedSession(s, params.id);
 					if (row.status !== "open") {
 						throw refuse("canon_session_not_open", "This session is not open");
@@ -826,13 +1352,9 @@ export function canonRoutes(deps: CanonDeps) {
 		haltSession: async ({ params }, ctx) => {
 			const operator = operatorOf(ctx);
 			const db = deps.db();
-			const scope = await scopeOr404(
-				clientIdOfCanonSession(db, params.id),
-				"canon session",
-				params.id,
-			);
+			const scope = await sessionScopeOr404(db, params.id);
 			const wire = await withTx(db, (tx) =>
-				withClientScope(tx, scope, async (s) => {
+				withCanonScope(tx, scope, async (s) => {
 					const row = await lockedSession(s, params.id);
 					if (row.status !== "open") {
 						throw refuse("canon_session_not_open", "This session is not open");
@@ -874,12 +1396,8 @@ export function canonRoutes(deps: CanonDeps) {
 
 		listMessages: async ({ params, query }) => {
 			const db = deps.db();
-			const scope = await scopeOr404(
-				clientIdOfCanonSession(db, params.id),
-				"canon session",
-				params.id,
-			);
-			return withClientScope(db, scope, async (s) => {
+			const scope = await sessionScopeOr404(db, params.id);
+			return withCanonScope(db, scope, async (s) => {
 				const [session] = await s
 					.select({ intakeId: canonSession.intakeId })
 					.from(canonSession)
@@ -912,17 +1430,19 @@ export function canonRoutes(deps: CanonDeps) {
 		},
 
 		postMessage: async ({ params, headers, body }, ctx) => {
-			operatorOf(ctx);
+			const operator = operatorOf(ctx);
 			const db = deps.db();
-			const scope = await scopeOr404(
-				clientIdOfCanonSession(db, params.id),
-				"canon session",
-				params.id,
-			);
+			const scope = await sessionScopeOr404(db, params.id);
 			const key = headers["idempotency-key"];
-			const hash = sha(body.contentMd);
+			// A body without a mode hashes as it did before modes existed, so an
+			// earlier key still replays.
+			const hash = requestSha256(
+				body.mode === undefined
+					? { contentMd: body.contentMd }
+					: { contentMd: body.contentMd, mode: body.mode },
+			);
 			const result = await withTx(db, (tx) =>
-				withClientScope(tx, scope, async (s) => {
+				withCanonScope(tx, scope, async (s) => {
 					const session = await lockedSession(s, params.id);
 					if (key) {
 						const [prior] = await s
@@ -948,12 +1468,27 @@ export function canonRoutes(deps: CanonDeps) {
 					if (session.status !== "open") {
 						throw refuse("canon_session_not_open", "This session is not open");
 					}
+					const mode = body.mode ?? session.mode;
+					if (mode === "draft" && session.intakeId === null) {
+						throw refuse(
+							"canon_mode_unavailable",
+							"Draft mode needs an intake to draft",
+						);
+					}
+					// Fetch's read tools are the next slice of this round; until they
+					// exist, a fetch turn would answer without the data it was asked for.
+					if (mode === "fetch") {
+						throw refuse(
+							"canon_mode_unavailable",
+							"Fetch mode is not built yet",
+						);
+					}
 					const now = deps.clock.now();
 					// The turn starts here, or not at all: one statement decides, so
 					// two posts cannot both start one.
 					const started = await s
 						.update(canonSession)
-						.set({ turnStartedAt: now, updatedAt: now })
+						.set({ turnStartedAt: now, lastActivityAt: now, updatedAt: now })
 						.where(
 							and(
 								eq(canonSession.id, params.id),
@@ -977,14 +1512,32 @@ export function canonRoutes(deps: CanonDeps) {
 							clientId: session.clientId,
 							seq: (last?.seq ?? 0) + 1,
 							role: "operator",
+							mode,
 							contentMd: body.contentMd,
 							citations: [],
+							parts: [],
 							idempotencyKey: key ?? null,
 							requestSha256: key ? hash : null,
 							createdAt: now,
 						})
 						.returning();
 					if (!row) throw new Error("canon_message insert returned no row");
+					await logActivity(s, deps, {
+						actorKind: "operator",
+						actorUserId: operator.id,
+						action: "canon_message.posted",
+						entityType: "canon_session",
+						entityId: params.id,
+						engagementId: session.engagementId,
+						requestId: ctx.requestId,
+						// Never the text: ids, the seq and the mode only.
+						payload: {
+							sessionId: params.id,
+							messageId: row.id,
+							seq: row.seq,
+							mode,
+						},
+					});
 					const [wire] = await messageWires(s, session.intakeId, [row]);
 					return { replayed: false, wire };
 				}),

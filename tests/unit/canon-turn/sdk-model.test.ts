@@ -7,9 +7,10 @@ import type {
 import { describe, expect, it } from "vitest";
 import { silentLogger } from "../../../src/lib/logger";
 import { buildCanonPrompt } from "../../../src/runner/canon";
-import type {
-	CanonModelEvent,
-	CanonToolName,
+import {
+	CANON_TOOL_NAMES,
+	type CanonModelEvent,
+	type CanonToolName,
 } from "../../../src/runner/canon/model";
 import {
 	AgentSdkCanonModel,
@@ -52,6 +53,7 @@ async function drain(model: AgentSdkCanonModel, calls: CanonToolName[] = []) {
 		sessionId: "s1",
 		model: "claude-sonnet-5-5",
 		prompt: built.prompt,
+		tools: CANON_TOOL_NAMES,
 		callTool: async (name) => {
 			calls.push(name);
 			return { text: "ok" };

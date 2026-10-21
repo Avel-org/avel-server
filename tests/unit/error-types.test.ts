@@ -121,6 +121,8 @@ describe("the error envelope is a discriminated union on code", () => {
 			"canon_session_open",
 			"canon_session_not_open",
 			"canon_turn_running",
+			"canon_mode_unavailable",
+			"canon_session_final",
 			"canon_question_not_open",
 			"client_memory_not_proposed",
 			"client_memory_removed",

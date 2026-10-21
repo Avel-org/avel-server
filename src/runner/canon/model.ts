@@ -37,6 +37,12 @@ export type CanonModelRun = {
 	/** The session's frozen model id. */
 	model: string;
 	prompt: CanonPrompt;
+	/**
+	 * The tools this turn's mode allows, and the only ones the model is
+	 * offered (J, 2026-10-20: the server enforces each mode's tools). Empty
+	 * in ask mode. callTool refuses any other name too.
+	 */
+	tools: readonly CanonToolName[];
 	callTool: CanonToolCall;
 	/** Aborted when the turn stops the model, as at the hard ceiling. */
 	signal: AbortSignal;

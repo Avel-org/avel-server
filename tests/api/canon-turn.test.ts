@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { eq, or } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeDb } from "../../src/db/client";
+import type { ClientId } from "../../src/db/client-id";
 import {
 	activityLog,
 	agentTemplate,
@@ -14,7 +15,12 @@ import {
 	intakeFiles,
 } from "../../src/db/schema";
 import { stamp } from "../../src/db/schema/columns";
-import { type Tx, withClientScope, withTx } from "../../src/db/tx";
+import {
+	type CanonScope,
+	type Tx,
+	withClientScope,
+	withTx,
+} from "../../src/db/tx";
 import { blobPrefix, memoryBlobs } from "../../src/gateways/blob";
 import { sourceFor, splitKnowledge } from "../../src/lib/canon";
 import { randomIds } from "../../src/lib/ids";
@@ -51,6 +57,11 @@ const MEMORY = {
 	Meridian: "Meridian salons open at nine.",
 	Halcyon: "Halcyon secret memory.",
 };
+
+const inClient = (clientId: ClientId): CanonScope => ({
+	kind: "client",
+	clientId,
+});
 
 describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 	let app: ReturnType<typeof connectAsApp>;
@@ -124,6 +135,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 					clientId: t.clientId,
 					seq: 1,
 					role: "operator",
+					mode: "draft",
+					parts: [],
 					contentMd: `Brief ${name}, please.`,
 					citations: [],
 					createdAt: clock.now(),
@@ -232,7 +245,11 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 				},
 				{ tool: "ask_operator", input: question([chunk.chunkId]) },
 			]);
-			const result = await runCanonTurn(s.deps, s.a.scope, s.a.sessionId);
+			const result = await runCanonTurn(
+				s.deps,
+				inClient(s.a.scope),
+				s.a.sessionId,
+			);
 			expect(result.outcome).toBe("ended");
 			expect(result.promptSha256).toMatch(/^[0-9a-f]{64}$/);
 			expect(s.model.toolCalls[0]?.result.isError).toBeFalsy();
@@ -291,7 +308,11 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 					citations: [{ source: sourceFor(booking), cited_text: booking.text }],
 				},
 			]);
-			const result = await runCanonTurn(s.deps, s.a.scope, s.a.sessionId);
+			const result = await runCanonTurn(
+				s.deps,
+				inClient(s.a.scope),
+				s.a.sessionId,
+			);
 			expect(result.outcome).toBe("replied");
 			const [first, second] = s.model.toolCalls;
 			expect(first?.result).toMatchObject({
@@ -356,7 +377,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 					},
 				},
 			]);
-			await runCanonTurn(s.deps, s.a.scope, s.a.sessionId);
+			await runCanonTurn(s.deps, inClient(s.a.scope), s.a.sessionId);
 			expect(s.model.toolCalls[0]?.result).toMatchObject({ isError: true });
 
 			await tx
@@ -372,7 +393,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 			s.model.script(s.a.sessionId, [
 				{ tool: "draft_brief", input: { brief } },
 			]);
-			await runCanonTurn(s.deps, s.a.scope, s.a.sessionId);
+			await runCanonTurn(s.deps, inClient(s.a.scope), s.a.sessionId);
 			expect(s.model.toolCalls[1]?.result).toMatchObject({ isError: true });
 			const row = one(
 				await tx.select().from(intake).where(eq(intake.id, s.a.intakeId)),
@@ -410,7 +431,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 					input: { agents: [{ ...agent, agentTemplateId: randomUUID() }] },
 				},
 			]);
-			await runCanonTurn(s.deps, s.a.scope, s.a.sessionId);
+			await runCanonTurn(s.deps, inClient(s.a.scope), s.a.sessionId);
 			expect(s.model.toolCalls.map((c) => Boolean(c.result.isError))).toEqual([
 				false,
 				false,
@@ -479,7 +500,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 					{ reply: "Booking.", citations: [citation] },
 				]);
 				expect(
-					(await runCanonTurn(s.deps, s.a.scope, s.a.sessionId)).outcome,
+					(await runCanonTurn(s.deps, inClient(s.a.scope), s.a.sessionId))
+						.outcome,
 				).toBe("failed");
 				expect(await messagesOf(tx, s.a)).toHaveLength(1);
 				expect((await sessionRow(tx, s.a)).turnStartedAt).toBeNull();
@@ -503,7 +525,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 				{ reply: "Never stored." },
 			]);
 			expect(
-				(await runCanonTurn(s.deps, s.a.scope, s.a.sessionId)).outcome,
+				(await runCanonTurn(s.deps, inClient(s.a.scope), s.a.sessionId))
+					.outcome,
 			).toBe("halted");
 			const session = await sessionRow(tx, s.a);
 			expect(session).toMatchObject({
@@ -560,7 +583,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 			const s = await seed(tx);
 			s.model.script(s.a.sessionId, [{ fail: "the model went away" }]);
 			expect(
-				(await runCanonTurn(s.deps, s.a.scope, s.a.sessionId)).outcome,
+				(await runCanonTurn(s.deps, inClient(s.a.scope), s.a.sessionId))
+					.outcome,
 			).toBe("failed");
 			expect(await sessionRow(tx, s.a)).toMatchObject({
 				status: "open",
@@ -577,7 +601,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 			s.model.script(s.a.sessionId, [
 				{ tool: "ask_operator", input: question([theirs.chunkId]) },
 			]);
-			await runCanonTurn(s.deps, s.a.scope, s.a.sessionId);
+			await runCanonTurn(s.deps, inClient(s.a.scope), s.a.sessionId);
 			const prompt = JSON.stringify(s.model.prompts[0]);
 			expect(prompt).toContain("Clients book a slot.");
 			expect(prompt).toContain(MEMORY.Meridian);
@@ -587,7 +611,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 			// Another client's scope cannot see the session at all.
 			s.model.script(s.a.sessionId, [{ reply: "Leaked." }]);
 			expect(
-				(await runCanonTurn(s.deps, s.b.scope, s.a.sessionId)).outcome,
+				(await runCanonTurn(s.deps, inClient(s.b.scope), s.a.sessionId))
+					.outcome,
 			).toBe("skipped");
 			expect(s.model.prompts).toHaveLength(1);
 		});
@@ -610,7 +635,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 					citations: [{ source: sourceFor(booking), cited_text: booking.text }],
 				},
 			]);
-			await runCanonTurn(s.deps, s.a.scope, s.a.sessionId);
+			await runCanonTurn(s.deps, inClient(s.a.scope), s.a.sessionId);
 			const rows = await activityOf(tx, s.a.sessionId);
 			expect(rows.map((r) => r.action).sort()).toEqual([
 				"canon_question.asked",
@@ -690,9 +715,9 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 					},
 				},
 			};
-			expect((await runCanonTurn(deps, s.a.scope, s.a.sessionId)).outcome).toBe(
-				"skipped",
-			);
+			expect(
+				(await runCanonTurn(deps, inClient(s.a.scope), s.a.sessionId)).outcome,
+			).toBe("skipped");
 			expect(await messagesOf(tx, s.a)).toHaveLength(1);
 		});
 	});
@@ -737,7 +762,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 				storageKey: null,
 			});
 			s.model.script(s.a.sessionId, []);
-			await runCanonTurn(s.deps, s.a.scope, s.a.sessionId);
+			await runCanonTurn(s.deps, inClient(s.a.scope), s.a.sessionId);
 			const prompt = JSON.stringify(s.model.prompts[0]);
 			expect(prompt).toContain("notes.txt body text");
 			for (const gone of ["photo.png", "deleted.md", "purged.md"]) {
@@ -760,7 +785,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 				}),
 			);
 			s.model.script(s.a.sessionId, []);
-			await runCanonTurn(s.deps, s.a.scope, s.a.sessionId);
+			await runCanonTurn(s.deps, inClient(s.a.scope), s.a.sessionId);
 			const prompt = JSON.stringify(s.model.prompts[0]);
 			expect(prompt).toContain(MEMORY.Meridian);
 			expect(prompt).not.toContain("Halcyon");
@@ -785,6 +810,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 						clientId: s.a.clientId,
 						seq: 2,
 						role: "canon",
+						mode: "draft",
+						parts: [],
 						contentMd: "Earlier answer.",
 						citations: [],
 						createdAt: clock.now(),
@@ -795,6 +822,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 						clientId: s.a.clientId,
 						seq: 3,
 						role: "operator",
+						mode: "draft",
+						parts: [],
 						contentMd: "One more thing.",
 						citations: [],
 						createdAt: clock.now(),
@@ -817,7 +846,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 			expect(await messagesOf(tx, s.b)).toHaveLength(1);
 			// A session whose turn is already over is not run again.
 			expect(
-				(await runCanonTurn(s.deps, s.a.scope, s.a.sessionId)).outcome,
+				(await runCanonTurn(s.deps, inClient(s.a.scope), s.a.sessionId))
+					.outcome,
 			).toBe("skipped");
 		});
 	});

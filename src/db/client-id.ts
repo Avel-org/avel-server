@@ -1,6 +1,6 @@
 import { eq, inArray, type SQL, sql } from "drizzle-orm";
-import { client, engagement, intake } from "./schema";
-import type { Executor } from "./tx";
+import { canonSession, client, engagement, intake } from "./schema";
+import { type CanonScope, type Executor, withOpenScope } from "./tx";
 
 declare const clientIdBrand: unique symbol;
 
@@ -101,4 +101,25 @@ export function clientIdOfCanonQuestion(db: Executor, questionId: string) {
 /** A client memory's client; null when there is no such memory. */
 export function clientIdOfClientMemory(db: Executor, memoryId: string) {
 	return definerLookup(db, sql.raw("client_memory_client_id"), memoryId);
+}
+
+/**
+ * A Canon session's scope, or null when there is no such session. A
+ * client's session is found by the lookup above; an open one has no client,
+ * so it is the one an unscoped read can see (drizzle/0042), and only an
+ * unscoped read sees it.
+ */
+export async function canonSessionScope(
+	db: Executor,
+	sessionId: string,
+): Promise<CanonScope | null> {
+	const clientId = await clientIdOfCanonSession(db, sessionId);
+	if (clientId) return { kind: "client", clientId };
+	const [row] = await withOpenScope(db, (tx) =>
+		tx
+			.select({ id: canonSession.id })
+			.from(canonSession)
+			.where(eq(canonSession.id, sessionId)),
+	);
+	return row ? { kind: "open" } : null;
 }

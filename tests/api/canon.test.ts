@@ -107,6 +107,8 @@ async function canonReplies(
 			clientId: t.clientId,
 			seq,
 			role: "canon",
+			mode: "draft",
+			parts: [],
 			contentMd: "Here is what the brief says.",
 			citations,
 			createdAt: clock.now(),
@@ -778,6 +780,9 @@ describe.skipIf(!process.env.DATABASE_URL)("Canon's routes", () => {
 				"proposed",
 				"kept",
 				"removed",
+				// A session's scope and mode: fixed values, never client text.
+				"client",
+				"draft",
 			]);
 			const leaves = (v: unknown): unknown[] =>
 				v !== null && typeof v === "object"

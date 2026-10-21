@@ -28,6 +28,9 @@ const LOOKUPS = [
 	"client_memory_client_id",
 ] as const;
 
+/** Every SECURITY DEFINER function: the lookups, and the session list's summaries (drizzle/0042, J 2026-10-20). */
+const DEFINERS = [...LOOKUPS, "canon_session_index"] as const;
+
 describe.skipIf(!process.env.DATABASE_URL)(
 	"client lookups for Canon ids",
 	() => {
@@ -138,10 +141,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					has_function_privilege('public', p.oid, 'EXECUTE') as "byPublic",
 					has_function_privilege('avel_app', p.oid, 'EXECUTE') as "byApp"
 				from pg_proc p where p.proname in (${sql.join(
-					LOOKUPS.map((l) => sql`${l}`),
+					DEFINERS.map((l) => sql`${l}`),
 					sql`, `,
 				)}) order by p.proname`);
-				expect(rows.map((r) => r.proname)).toEqual([...LOOKUPS].sort());
+				expect(rows.map((r) => r.proname)).toEqual([...DEFINERS].sort());
 				for (const r of rows) {
 					expect(r, r.proname).toMatchObject({
 						definer: true,
@@ -158,7 +161,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					join pg_namespace n on n.oid = p.pronamespace
 					where n.nspname = 'public' and p.prosecdef`),
 				);
-				expect(count).toBe(LOOKUPS.length);
+				expect(count).toBe(DEFINERS.length);
 			});
 		});
 	},

@@ -912,6 +912,32 @@ J decided the first group below on 2026-10-15 to 2026-10-19, before the first mi
   - Open for J: a prior finding has no executable check (`Finding.rule` is free text). It needs either a structured check on Finding or a separate table of checks, and either one is a schema and contract change. Deferred until after the first mission, since mission one has no prior findings.
 - **"Canon cannot draft the plan until it runs as a dispatch"** (*Decided 2026-10-10: the mission planner*) loses its reason. Whether Canon drafts the plan's modules is open. For the first mission, the operator writes the plan.
 
+## Decided 2026-10-20: Canon chat
+
+J decided these on 2026-10-20, relayed by FE Main, after BE Main listed what they conflicted with in the 2026-10-19 build. Shapes are in `DATA-CONTRACTS-V2.md` (*CanonSession*, *CanonStep*).
+
+### Decided by J
+
+- **Two scopes.** An open session has no client and lives on Home; a client session lives on the client and intake pages. One open session per intake, and no limit on open sessions.
+- **Lifecycle.** A closed session can be reopened. Archive is separate: hidden from the default list, searchable, and reopenable. Only an operator halt can be reopened; a `token_hard_ceiling` halt is final. Archiving an open session closes it and archives it in one action.
+- **Modes.** `ask`, `fetch` and `draft`, enforced by the server; `act` comes with module 14. Ask in an open session reads no client data. Fetch reads only the operational allowlist (clients, engagements, intake metadata, missions, dispatches, spend, activity, gate results and findings), never file bytes, client memory or another session's messages, and never connections, repo policies or credentials (*Canon reads clients, read-only*).
+- **Client fetch over the operational tables is filtered in code, with tests**, not by row-level security, which those tables do not have. `[attestation]`.
+- **A fourth SECURITY DEFINER function** for the session list, returning summaries only.
+- **Steps and text chunks are written to Postgres as a turn runs**, and the FE polls them about once a second. No AI SDK and no Redis; an SSE endpoint can come later.
+
+### Proposed by BE Main, accepted by J
+
+- **Row-level security on the open scope:** `client_id IS NOT DISTINCT FROM` the transaction's scope, so an open row is visible only unscoped. Not the Drive's general-row form, which would show every open session inside every client's scope. Children match the session on a generated `scope_key`.
+- **Steps are insert-only.** A tool call and its result are two rows; the reply is inserted once, as a message, when the turn ends.
+- **Reopen history lives in the activity log**, not in a column.
+
+### Decided by BE Main while building
+
+- **The session list returns a summary item**, not the full session: the definer function discloses no tokens, spend, messages or questions.
+- **`POST /api/canon-sessions` takes no Idempotency-Key.** An open session is unlimited and a retry makes a second one; a session on an intake is held to one open by the database.
+- **A fetch post refuses `canon_mode_unavailable` until fetch's read tools exist**, so no turn answers without the data it was asked for.
+- **A turn's mode is its operator message's mode**, and only draft, on a client session with an intake, gets tools. The model is offered only that mode's tools, and its PreToolUse hook denies any other.
+
 ## Decided 2026-10-20: the spend ceiling is optional
 
 J decided this on 2026-10-20, relayed by FE Main and confirmed by J to BE Main the same day.

@@ -7,7 +7,12 @@ import {
 	clientIdsOfIntakes,
 } from "./client-id";
 import { canonQuestion, canonSession, client } from "./schema";
-import { type Executor, withClientScope } from "./tx";
+import {
+	type CanonScope,
+	type Executor,
+	withCanonScope,
+	withClientScope,
+} from "./tx";
 
 /**
  * The intake's open Canon questions, oldest first. An Intake with any cannot
@@ -72,9 +77,28 @@ export async function openCanonSessionIds(
 					),
 				),
 		);
-		for (const r of rows) open.set(r.intakeId, r.id);
+		for (const r of rows) if (r.intakeId) open.set(r.intakeId, r.id);
 	}
 	return open;
+}
+
+/**
+ * Every scope a Canon session can live in, in a stable order: the open
+ * scope first, then each client by id. canon_session is under row-level
+ * security, so anything that reads sessions across clients reads them
+ * scope by scope.
+ */
+export async function canonScopes(db: Executor): Promise<CanonScope[]> {
+	const clients = await db
+		.select({ id: client.id })
+		.from(client)
+		.orderBy(asc(client.id));
+	const scopes: CanonScope[] = [{ kind: "open" }];
+	for (const { id } of clients) {
+		const clientId = await clientIdOfClient(db, id);
+		if (clientId) scopes.push({ kind: "client", clientId });
+	}
+	return scopes;
 }
 
 /** How long a turn may run before the sweep calls it stuck. A [hypothesis]. */
@@ -85,8 +109,8 @@ export const CANON_TURN_MAX_MS = 10 * 60 * 1000;
  * than `maxMs` ago (a crash mid-reply, a lost harness) gets its
  * turn_started_at cleared, so the operator can post again. The session
  * stays open; nothing else changes. canon_session is under row-level
- * security, so this runs once per client, each in that client's own scope,
- * in client id order. Returns the sessions it cleared, for the caller's log.
+ * security, so this runs once per scope (canonScopes), the open scope
+ * first, then each client in id order. Returns the sessions it cleared, for the caller's log.
  * The harness tick runs it (BE-Worker); there is no activity action for it.
  */
 export async function sweepStuckCanonTurns(
@@ -95,15 +119,9 @@ export async function sweepStuckCanonTurns(
 	maxMs: number = CANON_TURN_MAX_MS,
 ): Promise<string[]> {
 	const cutoff = new Date(clock.now().getTime() - maxMs);
-	const clients = await db
-		.select({ id: client.id })
-		.from(client)
-		.orderBy(asc(client.id));
 	const cleared: string[] = [];
-	for (const { id } of clients) {
-		const scope = await clientIdOfClient(db, id);
-		if (!scope) continue;
-		const rows = await withClientScope(db, scope, (tx) =>
+	for (const scope of await canonScopes(db)) {
+		const rows = await withCanonScope(db, scope, (tx) =>
 			tx
 				.update(canonSession)
 				.set({ turnStartedAt: null, updatedAt: clock.now() })

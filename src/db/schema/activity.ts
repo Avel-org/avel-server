@@ -101,6 +101,11 @@ export const activityAction = pgEnum("activity_action", [
 	"client_memory.written",
 	"intake.drafted_by_canon",
 	"mission.spend_ceiling_set",
+	"canon_session.reopened",
+	"canon_session.archived",
+	"canon_session.unarchived",
+	"canon_session.renamed",
+	"canon_message.posted",
 ]);
 
 export const activityEntityType = pgEnum("activity_entity_type", [

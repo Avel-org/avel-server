@@ -1,4 +1,7 @@
 import { eq, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/postgres-js";
+import { migrate } from "drizzle-orm/postgres-js/migrator";
+import postgres from "postgres";
 import { afterAll, describe, expect, it } from "vitest";
 import { closeDb } from "../../src/db/client";
 import { agentIdentityVersion, agentTemplate, user } from "../../src/db/schema";
@@ -230,14 +233,35 @@ describe.skipIf(!process.env.DATABASE_URL)("agent_identity_version", () => {
 		});
 	});
 
+	// CASCADE: dispatch references this table (drizzle/0026), and a plain
+	// TRUNCATE is refused for that before the trigger can run. CASCADE takes
+	// an exclusive lock on every table that references it, down the chain to
+	// the Canon tables, so on the shared test database it deadlocked with
+	// other files' inserts. It runs on a database of its own.
 	it("refuses TRUNCATE", async () => {
-		await inRollback(async (tx) => {
-			// CASCADE: dispatch references this table (drizzle/0026), and a
-			// plain TRUNCATE is refused for that before the trigger can run.
-			const err = await refusal(tx, (t) =>
-				t.execute(sql`truncate agent_identity_version cascade`),
+		const base = process.env.DATABASE_URL as string;
+		const scratch = `avel_truncate_${process.pid}`;
+		const admin = postgres(base, { max: 1, onnotice: () => {} });
+		const u = new URL(base);
+		u.pathname = `/${scratch}`;
+		await admin.unsafe(`drop database if exists ${scratch} with (force)`);
+		await admin.unsafe(`create database ${scratch}`);
+		const conn = postgres(u.toString(), { max: 1, onnotice: () => {} });
+		try {
+			await migrate(drizzle(conn), { migrationsFolder: "drizzle" });
+			const err = await conn`truncate agent_identity_version cascade`.then(
+				() => null,
+				(e: Error) => e,
 			);
-			expect(err.message).toMatch(/append-only/);
-		});
-	});
+			// Its own trigger, by name: CASCADE also reaches tables whose append-only
+			// triggers would refuse with the same words, and passed this test without it.
+			expect(err?.message).toBe(
+				"agent_identity_version is append-only: TRUNCATE refused",
+			);
+		} finally {
+			await conn.end();
+			await admin.unsafe(`drop database if exists ${scratch} with (force)`);
+			await admin.end();
+		}
+	}, 60_000);
 });

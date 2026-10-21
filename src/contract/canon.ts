@@ -4,6 +4,11 @@ import { activityActor } from "./activity";
 import { successEnvelope } from "./shared/envelope";
 import { pageMeta, pageQuery } from "./shared/pagination";
 import { oneOrMany } from "./shared/query";
+import {
+	RUN_STEP_KINDS,
+	runStepsEnvelope,
+	runStepsQuery,
+} from "./shared/run-step";
 
 const c = initContract();
 const uuid = z.string().uuid();
@@ -28,6 +33,31 @@ export const CANON_QUESTION_STATUSES = [
 export const CLIENT_MEMORY_STATUSES = ["proposed", "kept", "removed"] as const;
 
 /**
+ * Where a session lives (J, 2026-10-20). An open session has no client,
+ * engagement or intake, and reads no client's data; a client session
+ * carries its client and, optionally, an engagement and an intake.
+ */
+export const CANON_SCOPES = ["open", "client"] as const;
+
+/**
+ * What a message asks of Canon, and so which tools the turn gets: ask reads
+ * only what is in the prompt, fetch reads the command center's own data,
+ * draft writes the intake's brief, questions and roster. "act" comes with
+ * module 14.
+ */
+export const CANON_MODES = ["ask", "fetch", "draft"] as const;
+
+/** Who named the session. Canon never renames one the operator named. */
+export const CANON_TITLE_SOURCES = ["canon", "operator"] as const;
+
+/**
+ * One step of a turn, as the run trace shows it. reasoning_summary is the
+ * summary the API returns, never raw reasoning. text is a chunk of the
+ * reply as it is written; the reply itself is stored once, as a message.
+ */
+export const CANON_STEP_KINDS = RUN_STEP_KINDS;
+
+/**
  * Why a session halted, as the wire shows it. The database enum also holds
  * spend_ceiling, which nothing writes for Canon and a CHECK refuses.
  */
@@ -37,6 +67,12 @@ export const canonSessionStatus = z.enum(CANON_SESSION_STATUSES);
 export const canonMessageRole = z.enum(CANON_MESSAGE_ROLES);
 export const canonQuestionStatus = z.enum(CANON_QUESTION_STATUSES);
 export const clientMemoryStatus = z.enum(CLIENT_MEMORY_STATUSES);
+export const canonScope = z.enum(CANON_SCOPES);
+export const canonMode = z.enum(CANON_MODES);
+export const canonTitleSource = z.enum(CANON_TITLE_SOURCES);
+export const canonStepKind = z.enum(CANON_STEP_KINDS);
+
+export type CanonMode = z.infer<typeof canonMode>;
 
 /** The Idempotency-Key header, optional here: without one, a retry is a new request. */
 export const optionalIdempotencyHeaders = z.object({
@@ -66,9 +102,50 @@ export const canonCitation = chunkSource.extend({
 
 export type CanonCitation = z.infer<typeof canonCitation>;
 
+const partValue = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+
+/**
+ * One structured piece of a message, rendered as a card or a table. Fetch
+ * mode writes these from the command center's rows; contentMd stays the
+ * plain-text rendering beside them.
+ */
+export const canonPart = z.discriminatedUnion("type", [
+	z.object({ type: z.literal("text"), md: z.string() }).strict(),
+	z
+		.object({
+			type: z.literal("entity"),
+			/** An entity type the activity log knows, such as "mission". */
+			entityType: z.string().min(1).max(64),
+			id: uuid,
+			fields: z.record(z.string(), partValue),
+		})
+		.strict(),
+	z
+		.object({
+			type: z.literal("table"),
+			columns: z
+				.array(z.object({ key: z.string(), label: z.string() }).strict())
+				.max(20),
+			rows: z.array(z.record(z.string(), partValue)).max(200),
+		})
+		.strict(),
+]);
+
+export type CanonPart = z.infer<typeof canonPart>;
+
 export const canonSession = z.object({
 	id: uuid,
-	intakeId: uuid,
+	scope: canonScope,
+	/** Null exactly when scope is open. */
+	clientId: uuid.nullable(),
+	engagementId: uuid.nullable(),
+	/** Set for a session that briefs one intake; draft mode needs one. */
+	intakeId: uuid.nullable(),
+	/** Null until Canon names it after the first exchange, or the operator does. */
+	title: z.string().nullable(),
+	titleSetBy: canonTitleSource.nullable(),
+	/** The default mode; each message records the mode it was sent in. */
+	mode: canonMode,
 	status: canonSessionStatus,
 	/** Set exactly when status is halted. */
 	haltReason: z.enum(CANON_HALT_REASONS).nullable(),
@@ -87,18 +164,49 @@ export const canonSession = z.object({
 	openedBy: activityActor,
 	openedAt: iso,
 	closedAt: iso.nullable(),
+	/** Set while archived: hidden from the default list. Never while open. */
+	archivedAt: iso.nullable(),
+	/** The list's sort: the latest open, reopen or message. */
+	lastActivityAt: iso,
 });
 
 export type CanonSession = z.infer<typeof canonSession>;
+
+/**
+ * One row of the session list, which crosses clients. A summary only: the
+ * list reads it through one SECURITY DEFINER function (drizzle/0042), and
+ * GET /api/canon-sessions/:id serves the rest.
+ */
+export const canonSessionListItem = canonSession.pick({
+	id: true,
+	scope: true,
+	clientId: true,
+	engagementId: true,
+	intakeId: true,
+	title: true,
+	mode: true,
+	status: true,
+	haltReason: true,
+	turn: true,
+	openedAt: true,
+	archivedAt: true,
+	lastActivityAt: true,
+});
+
+export type CanonSessionListItem = z.infer<typeof canonSessionListItem>;
 
 export const canonMessage = z.object({
 	id: uuid,
 	/** The order, from 1; never the timestamp. */
 	seq: z.number().int().positive(),
 	role: canonMessageRole,
+	/** The mode it was sent in; for Canon, the mode its turn ran in. */
+	mode: canonMode,
 	contentMd: z.string(),
 	/** What Canon's text rests on; empty for the operator. */
 	citations: z.array(canonCitation),
+	/** Cards and tables beside contentMd; empty for the operator. */
+	parts: z.array(canonPart),
 	createdAt: iso,
 });
 
@@ -167,7 +275,67 @@ export const openCanonSessionBody = z
 	})
 	.strict();
 
-export const postCanonMessageBody = z.object({ contentMd }).strict();
+/** mode defaults to the session's. */
+export const postCanonMessageBody = z
+	.object({ contentMd, mode: canonMode.optional() })
+	.strict();
+
+const ceilings = {
+	estimatedTokens: z.number().int().positive().max(10_000_000).optional(),
+	tokenSoftCeiling: z.number().int().positive().max(10_000_000).optional(),
+	tokenHardCeiling: z.number().int().positive().max(10_000_000).optional(),
+};
+
+/**
+ * An open session reads no client's data, so it has no ids and no draft
+ * mode. A client session names its client, and optionally an engagement of
+ * that client and a draft intake of that engagement; mode defaults to draft
+ * with an intake, ask without. Omitted ceilings follow the estimate.
+ */
+export const createCanonSessionBody = z.discriminatedUnion("scope", [
+	z
+		.object({
+			scope: z.literal("open"),
+			mode: z.enum(["ask", "fetch"]).optional(),
+			...ceilings,
+		})
+		.strict(),
+	z
+		.object({
+			scope: z.literal("client"),
+			clientId: uuid,
+			engagementId: uuid.optional(),
+			intakeId: uuid.optional(),
+			mode: canonMode.optional(),
+			...ceilings,
+		})
+		.strict(),
+]);
+
+/** Any subset, at least one. A title the operator sets is never renamed by Canon. */
+export const updateCanonSessionBody = z
+	.object({
+		title: z.string().trim().min(1).max(120),
+		mode: canonMode,
+	})
+	.partial()
+	.strict()
+	.refine((b) => Object.keys(b).length > 0, {
+		message: "Give at least one field to change",
+	});
+
+export const listCanonSessionsQuery = pageQuery.extend({
+	scope: canonScope.optional(),
+	clientId: uuid.optional(),
+	status: oneOrMany(canonSessionStatus).optional(),
+	/** false (the default) hides archived sessions; true shows only them. */
+	archived: z
+		.enum(["true", "false"])
+		.default("false")
+		.transform((v) => v === "true"),
+	/** Matched against the title, case-insensitively. */
+	q: z.string().trim().min(1).max(200).optional(),
+});
 
 export const answerCanonQuestionBody = z
 	.object({
@@ -212,6 +380,65 @@ export const canonContract = c.router({
 			200: successEnvelope(canonSession),
 		},
 		summary: "Open a Canon session on a draft intake: one open at a time",
+	},
+	createSession: {
+		method: "POST",
+		path: "/api/canon-sessions",
+		body: createCanonSessionBody,
+		responses: { 201: successEnvelope(canonSession) },
+		summary:
+			"Open a session: open scope (no client), or a client's, optionally on an engagement and a draft intake",
+	},
+	listAllSessions: {
+		method: "GET",
+		path: "/api/canon-sessions",
+		query: listCanonSessionsQuery,
+		responses: { 200: listEnvelope(canonSessionListItem) },
+		summary:
+			"Every Canon session, open and client, newest activity first; archived only when asked",
+	},
+	updateSession: {
+		method: "PATCH",
+		path: "/api/canon-sessions/:id",
+		pathParams: byId,
+		body: updateCanonSessionBody,
+		responses: { 200: successEnvelope(canonSession) },
+		summary:
+			"Rename a session, or change its default mode while open (draft needs an intake: canon_mode_unavailable)",
+	},
+	reopenSession: {
+		method: "POST",
+		path: "/api/canon-sessions/:id/reopen",
+		pathParams: byId,
+		body: c.noBody(),
+		responses: { 200: successEnvelope(canonSession) },
+		summary:
+			"Closed, or halted by the operator, back to open, archive cleared. A token-ceiling halt is final (canon_session_final)",
+	},
+	archiveSession: {
+		method: "POST",
+		path: "/api/canon-sessions/:id/archive",
+		pathParams: byId,
+		body: c.noBody(),
+		responses: { 200: successEnvelope(canonSession) },
+		summary: "Archive a session, closing it first when open",
+	},
+	unarchiveSession: {
+		method: "POST",
+		path: "/api/canon-sessions/:id/unarchive",
+		pathParams: byId,
+		body: c.noBody(),
+		responses: { 200: successEnvelope(canonSession) },
+		summary:
+			"Show an archived session in the default list again; it stays closed",
+	},
+	listSteps: {
+		method: "GET",
+		path: "/api/canon-sessions/:id/steps",
+		pathParams: byId,
+		query: runStepsQuery,
+		responses: { 200: runStepsEnvelope },
+		summary: "The session's steps in seq order, written as each turn runs",
 	},
 	listSessions: {
 		method: "GET",

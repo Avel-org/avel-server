@@ -67,3 +67,47 @@ export function withClientScope<T>(
 		return result;
 	});
 }
+
+/**
+ * Runs `fn` in one transaction scoped to no client: the scope an open Canon
+ * session's rows live in (drizzle/0042). The Canon policies show a row with
+ * no client only here, so inside a client's scope this refuses rather than
+ * read nothing.
+ */
+export function withOpenScope<T>(
+	db: Executor,
+	fn: (tx: Tx) => Promise<T>,
+): Promise<T> {
+	return db.transaction(async (tx) => {
+		const [outer] = await tx.execute<{ scope: string | null }>(
+			sql`select current_setting('avel.client_id', true) as scope`,
+		);
+		if ((outer?.scope ?? "") !== "") {
+			throw new Error(
+				"withOpenScope: this transaction is already scoped to a client",
+			);
+		}
+		return fn(tx);
+	});
+}
+
+/** Where a Canon session's rows live: one client's scope, or the open one. */
+export type CanonScope =
+	| { kind: "client"; clientId: ClientId }
+	| { kind: "open" };
+
+/** withClientScope or withOpenScope, as the session's scope says. */
+export function withCanonScope<T>(
+	db: Executor,
+	scope: CanonScope,
+	fn: (tx: Tx) => Promise<T>,
+): Promise<T> {
+	return scope.kind === "client"
+		? withClientScope(db, scope.clientId, fn)
+		: withOpenScope(db, fn);
+}
+
+/** The value a Canon row's client_id takes in this scope. */
+export function scopeClientId(scope: CanonScope): ClientId | null {
+	return scope.kind === "client" ? scope.clientId : null;
+}

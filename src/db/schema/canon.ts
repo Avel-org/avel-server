@@ -19,8 +19,13 @@ import {
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import {
 	CANON_MESSAGE_ROLES,
+	CANON_MODES,
 	CANON_QUESTION_STATUSES,
+	CANON_SCOPES,
 	CANON_SESSION_STATUSES,
+	CANON_STEP_KINDS,
+	CANON_TITLE_SOURCES,
+	type CanonPart,
 	CLIENT_MEMORY_STATUSES,
 } from "../../contract/canon";
 import { client, engagement } from "./agency";
@@ -54,6 +59,26 @@ export const clientMemoryStatus = pgEnum(
 	"client_memory_status",
 	CLIENT_MEMORY_STATUSES,
 );
+export const canonScope = pgEnum("canon_scope", CANON_SCOPES);
+export const canonMode = pgEnum("canon_mode", CANON_MODES);
+export const canonTitleSource = pgEnum(
+	"canon_title_source",
+	CANON_TITLE_SOURCES,
+);
+export const canonStepKind = pgEnum("canon_step_kind", CANON_STEP_KINDS);
+
+/**
+ * client_id, or the zero uuid for an open session's rows: a NOT NULL key the
+ * children's composite foreign keys can match on. A composite key with a
+ * NULL in it is not checked at all (MATCH SIMPLE), so client_id alone would
+ * let an open row hang off a client's session.
+ */
+const scopeKey = () =>
+	uuid("scope_key")
+		.notNull()
+		.generatedAlwaysAs(
+			sql`coalesce(client_id, '00000000-0000-0000-0000-000000000000'::uuid)`,
+		);
 
 /**
  * What Canon's text rests on, as stored: the chunk (`<file sha256>:<first
@@ -96,16 +121,22 @@ export const canonSession = pgTable(
 	"canon_session",
 	{
 		...id,
-		intakeId: uuid("intake_id")
-			.notNull()
-			.references((): AnyPgColumn => intake.id),
-		engagementId: uuid("engagement_id")
-			.notNull()
-			.references(() => engagement.id),
-		clientId: uuid("client_id")
-			.notNull()
-			.references(() => client.id),
+		// open: all three null. client: client_id set, and an engagement and
+		// an intake optionally (J, 2026-10-20). A CHECK holds the shapes.
+		scope: canonScope("scope").notNull(),
+		intakeId: uuid("intake_id").references((): AnyPgColumn => intake.id),
+		engagementId: uuid("engagement_id").references(() => engagement.id),
+		clientId: uuid("client_id").references(() => client.id),
+		scopeKey: scopeKey(),
 		status: canonSessionStatus("status").notNull(),
+		/** The default mode; every message records its own. */
+		mode: canonMode("mode").notNull(),
+		title: text("title"),
+		titleSetBy: canonTitleSource("title_set_by"),
+		/** Hidden from the default list, still searchable; never while open. */
+		archivedAt: at("archived_at"),
+		/** The list's sort: set at open, reopen, and each message. */
+		lastActivityAt: at("last_activity_at").notNull(),
 		haltReason: canonHaltReason("halt_reason"),
 		agentIdentityVersionId: uuid("agent_identity_version_id")
 			.notNull()
@@ -154,6 +185,9 @@ export const canonSession = pgTable(
 			.where(sql`idempotency_key is not null`),
 		// The targets of the children's composite foreign keys.
 		uniqueIndex("canon_session_id_client_id_uq").on(t.id, t.clientId),
+		// The target of the message and step foreign keys, open rows included.
+		uniqueIndex("canon_session_id_scope_key_uq").on(t.id, t.scopeKey),
+		index("canon_session_last_activity_idx").on(t.lastActivityAt, t.id),
 		// The target of intake_drafted_by_canon_session_fk.
 		uniqueIndex("canon_session_id_intake_id_uq").on(t.id, t.intakeId),
 		uniqueIndex("canon_session_id_intake_id_client_id_uq").on(
@@ -219,6 +253,32 @@ export const canonSession = pgTable(
 			"canon_session_closed_after_opened",
 			sql`${t.closedAt} is null or ${t.closedAt} >= ${t.openedAt}`,
 		),
+		check(
+			"canon_session_scope_shape",
+			sql`case ${t.scope} when 'open' then ${t.clientId} is null and ${t.engagementId} is null and ${t.intakeId} is null else ${t.clientId} is not null end`,
+		),
+		// The intake's foreign key carries its engagement, and a composite key
+		// with a NULL in it is not checked.
+		check(
+			"canon_session_intake_needs_engagement",
+			sql`${t.intakeId} is null or ${t.engagementId} is not null`,
+		),
+		check(
+			"canon_session_draft_needs_intake",
+			sql`${t.mode} <> 'draft' or ${t.intakeId} is not null`,
+		),
+		check(
+			"canon_session_title_set_together",
+			sql`(${t.title} is null) = (${t.titleSetBy} is null)`,
+		),
+		check(
+			"canon_session_title_length",
+			sql`${t.title} is null or char_length(btrim(${t.title})) between 1 and 120`,
+		),
+		check(
+			"canon_session_archived_not_open",
+			sql`${t.archivedAt} is null or ${t.status} <> 'open'`,
+		),
 	],
 );
 
@@ -234,13 +294,17 @@ export const canonMessage = pgTable(
 		canonSessionId: uuid("canon_session_id")
 			.notNull()
 			.references(() => canonSession.id),
-		clientId: uuid("client_id")
-			.notNull()
-			.references(() => client.id),
+		// The session's client; null in an open session.
+		clientId: uuid("client_id").references(() => client.id),
+		scopeKey: scopeKey(),
 		seq: integer("seq").notNull(),
 		role: canonMessageRole("role").notNull(),
+		/** The mode it was sent in, or the turn ran in for Canon's reply. */
+		mode: canonMode("mode").notNull(),
 		contentMd: text("content_md").notNull(),
 		citations: jsonb("citations").$type<Citation[]>().notNull(),
+		/** Cards and tables beside contentMd; empty for the operator. */
+		parts: jsonb("parts").$type<CanonPart[]>().notNull(),
 		// An operator's post's Idempotency-Key, scoped to the session, and the
 		// hash of its body. Canon's own messages carry none.
 		idempotencyKey: text("idempotency_key"),
@@ -266,17 +330,78 @@ export const canonMessage = pgTable(
 		),
 		index("canon_message_client_id_idx").on(t.clientId),
 		foreignKey({
-			name: "canon_message_session_client_fk",
-			columns: [t.canonSessionId, t.clientId],
-			foreignColumns: [canonSession.id, canonSession.clientId],
+			name: "canon_message_session_scope_fk",
+			columns: [t.canonSessionId, t.scopeKey],
+			foreignColumns: [canonSession.id, canonSession.scopeKey],
 		}),
 		check(
 			"canon_message_citations_array",
 			sql`jsonb_typeof(${t.citations}) = 'array'`,
 		),
+		check("canon_message_parts_array", sql`jsonb_typeof(${t.parts}) = 'array'`),
+		check(
+			"canon_message_operator_has_no_parts",
+			sql`${t.role} <> 'operator' or ${t.parts} = '[]'::jsonb`,
+		),
 		check(
 			"canon_message_operator_cites_nothing",
 			sql`${t.role} <> 'operator' or ${t.citations} = '[]'::jsonb`,
+		),
+	],
+);
+
+/**
+ * One step of a turn, written as the turn runs so the operator can watch it
+ * (J, 2026-10-20: polled after a seq, as messages are). Append-only, as
+ * messages are: a tool call and its result are two rows, never one updated.
+ * turn is the seq of the operator message that started the turn.
+ */
+export const canonStep = pgTable(
+	"canon_step",
+	{
+		...id,
+		canonSessionId: uuid("canon_session_id")
+			.notNull()
+			.references(() => canonSession.id),
+		clientId: uuid("client_id").references(() => client.id),
+		scopeKey: scopeKey(),
+		turn: integer("turn").notNull(),
+		seq: integer("seq").notNull(),
+		kind: canonStepKind("kind").notNull(),
+		/** Short and human, for the trace's row. */
+		label: text("label").notNull(),
+		detail: jsonb("detail").$type<Record<string, unknown>>().notNull(),
+		startedAt: at("started_at").notNull(),
+		endedAt: at("ended_at"),
+		tokensIn: integer("tokens_in"),
+		tokensOut: integer("tokens_out"),
+		createdAt: at("created_at").notNull(),
+	},
+	(t) => [
+		uniqueIndex("canon_step_session_seq_uq").on(t.canonSessionId, t.seq),
+		index("canon_step_client_id_idx").on(t.clientId),
+		foreignKey({
+			name: "canon_step_session_scope_fk",
+			columns: [t.canonSessionId, t.scopeKey],
+			foreignColumns: [canonSession.id, canonSession.scopeKey],
+		}),
+		check("canon_step_turn_positive", sql`${t.turn} >= 1`),
+		check("canon_step_seq_positive", sql`${t.seq} >= 1`),
+		check(
+			"canon_step_label_length",
+			sql`char_length(btrim(${t.label})) between 1 and 80`,
+		),
+		check(
+			"canon_step_detail_object",
+			sql`jsonb_typeof(${t.detail}) = 'object'`,
+		),
+		check(
+			"canon_step_ended_after_started",
+			sql`${t.endedAt} is null or ${t.endedAt} >= ${t.startedAt}`,
+		),
+		check(
+			"canon_step_tokens_nonnegative",
+			sql`(${t.tokensIn} is null or ${t.tokensIn} >= 0) and (${t.tokensOut} is null or ${t.tokensOut} >= 0)`,
 		),
 	],
 );
@@ -393,3 +518,5 @@ export const canonQuestionInsert = createInsertSchema(canonQuestion);
 export const canonQuestionSelect = createSelectSchema(canonQuestion);
 export const clientMemoryInsert = createInsertSchema(clientMemory);
 export const clientMemorySelect = createSelectSchema(clientMemory);
+export const canonStepInsert = createInsertSchema(canonStep);
+export const canonStepSelect = createSelectSchema(canonStep);

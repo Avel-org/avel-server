@@ -21,6 +21,7 @@ import {
 	type CanonModelEvent,
 	type CanonModelRun,
 	type CanonToolCall,
+	type CanonToolName,
 	type ToolResult,
 } from "./model";
 import type { CanonPrompt } from "./prompt";
@@ -51,17 +52,22 @@ export const CANON_TOOL_IDS = CANON_TOOL_NAMES.map(
 	(t) => `mcp__${SERVER}__${t}`,
 );
 
-export const denyNonCanon: HookCallback = async (input) => {
-	const name = "tool_name" in input ? String(input.tool_name) : "";
-	if (CANON_TOOL_IDS.includes(name)) return {};
-	return {
-		hookSpecificOutput: {
-			hookEventName: "PreToolUse",
-			permissionDecision: "deny",
-			permissionDecisionReason: `${name} is not one of Canon's tools`,
-		},
+/** A PreToolUse hook that denies every tool but these SDK ids. */
+export function denyNotIn(ids: readonly string[]): HookCallback {
+	return async (input) => {
+		const name = "tool_name" in input ? String(input.tool_name) : "";
+		if (ids.includes(name)) return {};
+		return {
+			hookSpecificOutput: {
+				hookEventName: "PreToolUse",
+				permissionDecision: "deny",
+				permissionDecisionReason: `${name} is not one of this turn's tools`,
+			},
+		};
 	};
-};
+}
+
+export const denyNonCanon: HookCallback = denyNotIn(CANON_TOOL_IDS);
 
 export type CanonQueryFn = (params: {
 	prompt: string | AsyncIterable<SDKUserMessage>;
@@ -87,7 +93,10 @@ function result(r: ToolResult) {
 	};
 }
 
-function canonServer(callTool: CanonToolCall) {
+function canonServer(
+	callTool: CanonToolCall,
+	allowed: readonly CanonToolName[],
+) {
 	return createSdkMcpServer({
 		name: SERVER,
 		version: "1",
@@ -116,7 +125,7 @@ function canonServer(callTool: CanonToolCall) {
 				recommendRosterInput.shape,
 				async (a) => result(await callTool("recommend_roster", a)),
 			),
-		],
+		].filter((t) => allowed.includes(t.name as CanonToolName)),
 	});
 }
 
@@ -171,17 +180,22 @@ export class AgentSdkCanonModel implements CanonModel {
 	/** The SDK options for one turn. Exported shape, for tests. */
 	turnOptions(input: CanonModelRun, abort: AbortController): Options {
 		const o = this.options;
+		const ids = input.tools.map((t) => `mcp__${SERVER}__${t}`);
 		return {
 			cwd: o.configDir,
 			model: input.model,
 			settingSources: [],
 			strictMcpConfig: true,
 			tools: [],
-			mcpServers: { [SERVER]: canonServer(input.callTool) },
-			allowedTools: [...CANON_TOOL_IDS],
+			// Only this turn's mode's tools: none at all in ask mode.
+			mcpServers:
+				input.tools.length > 0
+					? { [SERVER]: canonServer(input.callTool, input.tools) }
+					: {},
+			allowedTools: ids,
 			disallowedTools: ["Agent", "Task"],
 			permissionMode: "dontAsk",
-			hooks: { PreToolUse: [{ hooks: [denyNonCanon] }] },
+			hooks: { PreToolUse: [{ hooks: [denyNotIn(ids)] }] },
 			systemPrompt: input.prompt.system,
 			maxTurns: o.maxTurns,
 			maxBudgetUsd: o.maxBudgetUsd,
