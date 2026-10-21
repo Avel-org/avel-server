@@ -153,7 +153,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the runner", () => {
 		);
 	});
 
-	it("halts at the hard ceiling (token_hard_ceiling), drops the rest of the script, and kills the token", async () => {
+	it("halts at the hard ceiling (token_hard_ceiling), counts the rest of the queue (runner H1), and kills the token", async () => {
 		const harness = new FakeHarness();
 		const prices = pricedBook();
 		await withApi(
@@ -175,10 +175,11 @@ describe.skipIf(!process.env.DATABASE_URL)("the runner", () => {
 				expect(d).toMatchObject({
 					status: "halted",
 					haltReason: "token_hard_ceiling",
-					tokensUsed: 3000,
+					// 3000 reached the ceiling; the 5000 still queued was spent too.
+					tokensUsed: 8000,
 					softCeilingCrossed: true,
 				});
-				expect(r).toMatchObject({ actualTokens: 3000 });
+				expect(r).toMatchObject({ actualTokens: 8000 });
 				expect(harness.stopped).toEqual([run.id]);
 				await expectReportsMatchDispatches(h.tx, [m.missionId]);
 				expect(await missionStatus(h.tx, m.missionId)).toBe("active");

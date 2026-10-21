@@ -547,4 +547,59 @@ describe("AgentSdkHarness sessions", () => {
 		expect(await h.has(s.dispatchId)).toBe(false);
 		expect(await h.next(s.dispatchId)).toBeNull();
 	});
+
+	it("reads as pending its queued usage, the message still streaming and the result's totals, read only", async () => {
+		let release!: () => void;
+		const paused = new Promise<void>((r) => {
+			release = r;
+		});
+		let reached!: () => void;
+		const atPause = new Promise<void>((r) => {
+			reached = r;
+		});
+		const { h } = harness(async function* () {
+			yield* message("m1", 100, 40);
+			yield ev({
+				type: "message_start",
+				message: { id: "m2", usage: { input_tokens: 50, output_tokens: 1 } },
+			});
+			yield ev({ type: "message_delta", usage: { output_tokens: 7 } });
+			reached();
+			await paused;
+			yield ev({ type: "message_stop" });
+			yield resultMsg(200, 60);
+		});
+		h.bindAgentApi(recordingApi().api);
+		const s = session();
+		const none = {
+			tokensIn: 0,
+			tokensOut: 0,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0,
+		};
+		expect(await h.pendingUsage(s.dispatchId)).toEqual(none);
+		await h.start(s);
+		await atPause;
+		// m1 is queued; m2 is mid-stream at 50 in and 7 out.
+		expect(await h.pendingUsage(s.dispatchId)).toEqual({
+			...none,
+			tokensIn: 150,
+			tokensOut: 47,
+		});
+		expect(await h.pendingUsage(s.dispatchId)).toEqual({
+			...none,
+			tokensIn: 150,
+			tokensOut: 47,
+		});
+		release();
+		await h.settled(s.dispatchId);
+		// The result's totals exceed the streamed 150 and 47 by 50 and 13.
+		expect(await h.pendingUsage(s.dispatchId)).toEqual({
+			...none,
+			tokensIn: 200,
+			tokensOut: 60,
+		});
+		await h.stop(s.dispatchId);
+		expect(await h.pendingUsage(s.dispatchId)).toEqual(none);
+	});
 });
