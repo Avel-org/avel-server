@@ -38,6 +38,8 @@ Twelve links in three groups, per ruling 3 of `avel-web/design/AVEL-DESIGN.md` (
 | | Presets `/presets` | Account `/settings/account` |
 | | Playbooks `/playbooks` | |
 
+*Stale, recorded 2026-10-20, not yet reconciled:* this table no longer matches avel-web's sidebar (`avel-web/src/shell/nav.ts`), which also has twelve links. There the groups are Work, Library and Control; Presets is labelled Teams; Templates and Drive are links; Sources is not; Agents and Settings are parents of their links; and Playbooks is a section of Teams (ruling 51), not a link. Which rulings changed it, and whether this table follows nav.ts, is open for J.
+
 - **Agent templates** is read-only. Identity files are generated from roles, so the page shows each generated version and its hash.
 - Proposals, Findings, Roles and Templates are not in the sidebar. Decided 2026-10-06, except Templates:
   - **Proposals:** the top-bar inbox, and proposal cards in the Canon chat. They arrive with module 14, after the first mission; until then the Canon chat renders not-built.
@@ -82,8 +84,8 @@ Twelve links in three groups, per ruling 3 of `avel-web/design/AVEL-DESIGN.md` (
 /presets                           🖥   saved squads
 /presets/:id                       🖥   preset editor
 
-/playbooks                         🖥   process per mission type
-/playbooks/:missionType            🖥   playbook builder
+/presets?section=playbooks         🖥   process per mission type (avel-web ruling 51, 2026-10-20)
+/presets/playbooks/:missionType    🖥   playbook builder
 
 /settings/repositories             🖥   RepoPolicy
 /settings/connections              🖥   Connection lifecycle
@@ -226,9 +228,9 @@ Library management.
 
 **A badge never claims more enforcement than the running system provides.** A capability is enforced by its room; where no room is enforcing it, the badge says so. A badge that implies enforcement that isn't happening is the product lying about itself. See `SKILLS.md`.
 
-### `/playbooks/:missionType` 🖥
+### `/presets/playbooks/:missionType` 🖥
 
-The playbook builder, a page (avel-web ruling 35 amended, 2026-10-10). It writes through `playbooks.create` and `playbooks.update`, and its Versions tab reads `playbooks.versions`. An edit is refused while a mission of that type is active or halted.
+The playbook builder, a page (avel-web ruling 35 amended, 2026-10-10). *Moved 2026-10-20 (avel-web ruling 51, J's direction):* Playbooks is the second section of Teams (`/presets?section=playbooks`), so the builder sits under `/presets` and `/playbooks` no longer exists. It writes through `playbooks.create` and `playbooks.update`, and its Versions tab reads `playbooks.versions`. An edit is refused while a mission of that type is active or halted.
 
 
 Gates (`mandatory | warn` only) · `waves_applicable` · `deliverable` · `required_fields` · `default_preset_id`.
@@ -287,7 +289,7 @@ Then:
 8. `/catalog/*` — the loadout screen needs content to assemble
 9. `/missions/:id/roster` — the core interaction
 10. `/missions/:id/exports/*` — the pre-flight screen
-11. `/settings/*` · `/playbooks/*` · `/presets/*` · `/activity`
+11. `/settings/*` · `/presets/*` (Playbooks included, since 2026-10-20) · `/activity`
 
 **Everything is built against contract-derived mocks** until the export engine exists. That is the point of the contract being an artifact — and it means the frontend is not blocked, but also that no screen is verified against real data until a mission runs.
 
