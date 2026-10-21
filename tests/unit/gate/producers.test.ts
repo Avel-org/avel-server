@@ -48,15 +48,8 @@ describe("specCheckFindings", () => {
 	it("passes every requirement of a complete brief, on the qa gate", () => {
 		const fs = specCheckFindings(brief(), SHA);
 		expect(outcomes(fs)).toEqual(["spec-check:R1:pass", "spec-check:R2:pass"]);
-		expect(fs.every((f) => f.gate === "qa" && f.commitSha === SHA)).toBe(
-			true,
-		);
-		const d = decide(
-			fs,
-			[{ gate: "qa", policy: "mandatory" }],
-			[],
-			config,
-		);
+		expect(fs.every((f) => f.gate === "qa" && f.commitSha === SHA)).toBe(true);
+		const d = decide(fs, [{ gate: "qa", policy: "mandatory" }], [], config);
 		expect(d.verdict).toBe("pass");
 	});
 
