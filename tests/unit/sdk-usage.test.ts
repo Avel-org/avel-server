@@ -84,18 +84,20 @@ describe("UsageCounter", () => {
 		expect(c.countedTotal).toEqual(split(115, 55, 30, 4));
 	});
 
-	it("reads the message still streaming, read only, until its stop counts it", () => {
+	it("takes the message still streaming; its stop then counts only what came after", () => {
 		const c = new UsageCounter();
-		expect(c.streaming).toEqual(split(0, 0));
+		expect(c.takeStreaming()).toEqual(split(0, 0));
 		c.onEvent(start("m1", { input_tokens: 100, output_tokens: 1 }));
 		c.onEvent(delta(30));
-		expect(c.streaming).toEqual(split(100, 30));
-		expect(c.streaming).toEqual(split(100, 30));
-		expect(c.countedTotal).toEqual(split(0, 0));
-		expect(c.onEvent(stop)).toEqual(split(100, 30));
-		expect(c.streaming).toEqual(split(0, 0));
-		// A message already counted is never pending again.
+		expect(c.takeStreaming()).toEqual(split(100, 30));
+		expect(c.takeStreaming()).toEqual(split(0, 0));
+		expect(c.countedTotal).toEqual(split(100, 30));
+		c.onEvent(delta(45));
+		expect(c.onEvent(stop)).toEqual(split(0, 15));
+		expect(c.countedTotal).toEqual(split(100, 45));
+		expect(c.takeStreaming()).toEqual(split(0, 0));
+		// A message already counted is never taken again.
 		c.onEvent(start("m1", { input_tokens: 100, output_tokens: 1 }));
-		expect(c.streaming).toEqual(split(0, 0));
+		expect(c.takeStreaming()).toEqual(split(0, 0));
 	});
 });
