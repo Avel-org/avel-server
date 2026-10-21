@@ -3,6 +3,7 @@ import { matchesGlob, supportedGlob } from "../../../rooms/globs";
 import type { GateFinding } from "../types";
 
 export const FILE_EXISTS_SOURCE = "file_exists";
+export const BRIEF_CHECKS_GATE = "acceptance";
 
 /** The source of every check that needs a runner. Until one is installed, its not_run degrades. */
 export const RUNNER_SOURCE = "runner";
@@ -23,7 +24,7 @@ export function briefCheckFindings(
 	const paths = Object.keys(tree);
 	return checks.map((ck, i): GateFinding => {
 		const base = {
-			gate: "acceptance",
+			gate: BRIEF_CHECKS_GATE,
 			kind: "check",
 			commitSha,
 			// The index keeps two checks that share an id apart.

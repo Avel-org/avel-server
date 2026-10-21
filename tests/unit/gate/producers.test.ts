@@ -45,15 +45,15 @@ function brief(over: Partial<Brief> = {}): Brief {
 }
 
 describe("specCheckFindings", () => {
-	it("passes every requirement of a complete brief, on the alignment gate", () => {
+	it("passes every requirement of a complete brief, on the qa gate", () => {
 		const fs = specCheckFindings(brief(), SHA);
 		expect(outcomes(fs)).toEqual(["spec-check:R1:pass", "spec-check:R2:pass"]);
-		expect(fs.every((f) => f.gate === "alignment" && f.commitSha === SHA)).toBe(
+		expect(fs.every((f) => f.gate === "qa" && f.commitSha === SHA)).toBe(
 			true,
 		);
 		const d = decide(
 			fs,
-			[{ gate: "alignment", policy: "mandatory" }],
+			[{ gate: "qa", policy: "mandatory" }],
 			[],
 			config,
 		);

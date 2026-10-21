@@ -4,9 +4,11 @@ import type { GateFinding } from "../types";
 import { byId } from "./shared";
 
 export const SPEC_CHECK_SOURCE = "spec-check";
+/** qa, not alignment: alignment is client-contract conformance (J, 2026-10-21). */
+export const SPEC_CHECK_GATE = "qa";
 
 /**
- * The alignment gate's check on the brief. It reuses the plan check's issues
+ * The qa gate's check on the brief. It reuses the plan check's issues
  * (src/lib/plan-check.ts) rather than restating its rules, and keeps only
  * these:
  * - a requirement with no acceptance criterion (the brief rules' rule 4),
@@ -21,7 +23,7 @@ export function specCheckFindings(
 	commitSha: string,
 ): GateFinding[] {
 	const base = {
-		gate: "alignment",
+		gate: SPEC_CHECK_GATE,
 		kind: "check",
 		source: SPEC_CHECK_SOURCE,
 		commitSha,
