@@ -455,7 +455,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the runner", () => {
 		);
 	});
 
-	it("never touches a dispatch that stopped running between the sweep's read and its step", async () => {
+	it("never closes again a dispatch that stopped running between the sweep's read and its step", async () => {
 		const harness = new FakeHarness();
 		await withApi(
 			async (h) => {
@@ -468,8 +468,11 @@ describe.skipIf(!process.env.DATABASE_URL)("the runner", () => {
 					dispatchValues(m.agent, ids, "complete"),
 				);
 				const deps = runnerDeps(h, harness, DEFAULT_PRICE_BOOK, later(1000));
+				// Usage after the close is counted (runner H1's race), but the
+				// dispatch is never closed again or reported twice.
 				expect(await applyUsage(deps, id, tokensIn(10))).toBe(false);
-				expect((await row(h.tx, id)).tokensUsed).toBe(100);
+				expect((await row(h.tx, id)).tokensUsed).toBe(110);
+				expect(await reportsOf(h.tx, id)).toHaveLength(0);
 				expect(await sweep(deps)).toEqual({ halted: [], failed: [] });
 				const [d] = await h.tx
 					.select()

@@ -465,6 +465,9 @@ export async function closeBySystem(
 		throw new Error(`running dispatch ${d.id} froze nothing`);
 	}
 	const reportId = deps.ids.next();
+	// The report is a snapshot at the close: usage counted after it
+	// (applyUsage, countAfterClose) raises the dispatch's tokensUsed, never
+	// actualTokens, so tokensUsed may end above it.
 	await tx.insert(completionReport).values({
 		id: reportId,
 		rosterEntryId: d.rosterEntryId,
@@ -551,8 +554,9 @@ export async function haltRunningDispatches(
 
 /**
  * Writes one usage step's counts onto the dispatch, logs the first
- * soft-ceiling crossing as the system, and returns the row as counted.
- * Throws when the dispatch has no price table, which start refuses.
+ * soft-ceiling crossing as the system unless `logSoft` is false (a closed
+ * dispatch), and returns the row as counted. Throws when the dispatch has
+ * no price table, which start refuses.
  */
 async function writeUsage(
 	tx: Tx,
@@ -561,6 +565,7 @@ async function writeUsage(
 	d: DispatchRow,
 	split: TokenSplit,
 	requestId: string,
+	logSoft = true,
 ): Promise<{ d: DispatchRow; hardReached: boolean }> {
 	const version = d.priceVersion;
 	const table = version === null ? undefined : tableFor(deps.prices, version);
@@ -581,7 +586,7 @@ async function writeUsage(
 		.update(dispatch)
 		.set({ ...counts, ...touch(deps.clock) })
 		.where(eq(dispatch.id, d.id));
-	if (next.crossedSoftNow) {
+	if (logSoft && next.crossedSoftNow) {
 		await logActivity(tx, deps, {
 			...SYSTEM,
 			action: "dispatch.soft_ceiling_crossed",
@@ -608,7 +613,7 @@ const isZeroSplit = (s: TokenSplit) =>
 /**
  * Runner H1: counts, in the closing step's transaction, the usage the
  * harness reported for a running dispatch and the runner has not read yet
- * (Harness.pendingUsage): queued usage events, a message still streaming
+ * (Harness.takeUsage): queued usage events, a message still streaming
  * and the SDK's end-of-run totals. Without it, whatever closed the
  * dispatch (a halt, a ceiling, the wall clock, the agent's report) dropped
  * those tokens, since usage counts only on a running dispatch. The halt
@@ -623,8 +628,9 @@ export async function countPending(
 	d: DispatchRow,
 	requestId: string,
 ): Promise<{ d: DispatchRow; counted: boolean }> {
-	const split = await deps.harness.pendingUsage(d.id);
+	const split = await deps.harness.takeUsage(d.id);
 	if (isZeroSplit(split)) return { d, counted: false };
+	step.onRollback.push(() => deps.harness.restoreUsage(d.id, split));
 	const written = await writeUsage(step.tx, deps, m, d, split, requestId);
 	return { d: written.d, counted: true };
 }
@@ -720,6 +726,15 @@ async function lockRunning(
  * halts and so does every running dispatch on it (spend_ceiling); this
  * dispatch keeps token_hard_ceiling when it reached both at once.
  * Returns whether the dispatch is still running.
+ *
+ * Usage that arrives after the dispatch closed was still spent: the tick
+ * took the event off the harness's queue, and a close committed before
+ * this locked the dispatch, so the close's countPending could not see it.
+ * It is added to the closed dispatch's counts and spend, and so to the
+ * mission's, with no soft-ceiling log and no halt of the dispatch; the
+ * mission still halts at its ceiling. The report keeps what it filed at
+ * the close. A dispatch that never started has no price table and counts
+ * nothing.
  */
 export async function applyUsage(
 	deps: RunnerDeps,
@@ -728,7 +743,10 @@ export async function applyUsage(
 ): Promise<boolean> {
 	return inStep(deps, async (step) => {
 		const locked = await lockRunning(step.tx, dispatchId);
-		if (!locked) return false;
+		if (!locked) {
+			await countAfterClose(step, deps, dispatchId, split);
+			return false;
+		}
 		const { m } = locked;
 		const by = system(deps);
 		const { d, hardReached } = await writeUsage(
@@ -752,6 +770,23 @@ export async function applyUsage(
 		const ceilingReached = await haltAtCeiling(step, deps, m, by.requestId);
 		return !hardReached && !ceilingReached;
 	});
+}
+
+/** applyUsage's late count on a closed dispatch; nothing for one never started or gone. */
+async function countAfterClose(
+	step: Step,
+	deps: RunnerDeps,
+	dispatchId: string,
+	split: TokenSplit,
+): Promise<void> {
+	const missionId = await missionOf(step.tx, dispatchId);
+	if (!missionId) return;
+	const m = await lockMission(step.tx, missionId);
+	const d = await lockDispatch(step.tx, dispatchId);
+	if (!m || !d || d.status === "queued" || d.closedAt === null) return;
+	const requestId = deps.ids.next();
+	await writeUsage(step.tx, deps, m, d, split, requestId, false);
+	await haltAtCeiling(step, deps, m, requestId);
 }
 
 /** Closes one running dispatch as `end`, as the system, in its own step. */

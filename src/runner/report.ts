@@ -107,6 +107,9 @@ export async function fileAgentReport(
 			throw new Error(`running dispatch ${d.id} froze nothing`);
 		}
 		const reportId = deps.ids.next();
+		// The report is a snapshot at the close: usage counted after it
+		// (applyUsage) raises the dispatch's tokensUsed, never actualTokens,
+		// so tokensUsed may end above it.
 		await tx.insert(completionReport).values({
 			id: reportId,
 			rosterEntryId: d.rosterEntryId,
