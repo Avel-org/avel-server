@@ -76,16 +76,24 @@ describe("FakeHarness", () => {
 		expect(await h.next("d1")).toBeNull();
 	});
 
-	it("reads its queued usage as pending, read only, and none once stopped", async () => {
+	it("takes its queued usage, leaving its other events in order, and restores it at the front", async () => {
 		const h = new FakeHarness();
-		expect(await h.pendingUsage("d1")).toEqual(split(0));
-		h.script("d1", { steps: [split(1), split(2)], outcome: "complete" });
+		expect(await h.takeUsage("d1")).toEqual(split(0));
+		h.script("d1", {
+			steps: [split(1), split(2)],
+			outcome: "complete",
+			trace: [{ kind: "text", label: "Hi", detail: {} }],
+		});
 		await h.start(session("d1"));
-		expect(await h.pendingUsage("d1")).toEqual(split(3));
-		expect(await h.pendingUsage("d1")).toEqual(split(3));
-		await h.next("d1");
-		expect(await h.pendingUsage("d1")).toEqual(split(2));
+		expect(await h.takeUsage("d1")).toEqual(split(3));
+		expect(await h.takeUsage("d1")).toEqual(split(0));
+		await h.restoreUsage("d1", split(3));
+		expect(h.queuedUsage("d1")).toEqual(split(3));
+		expect(await h.next("d1")).toEqual({ kind: "usage", split: split(3) });
+		expect((await h.next("d1"))?.kind).toBe("step");
+		expect(await h.next("d1")).toEqual({ kind: "complete" });
 		await h.stop("d1");
-		expect(await h.pendingUsage("d1")).toEqual(split(0));
+		await h.restoreUsage("d1", split(3));
+		expect(await h.takeUsage("d1")).toEqual(split(0));
 	});
 });

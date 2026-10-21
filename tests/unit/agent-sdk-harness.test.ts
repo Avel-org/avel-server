@@ -533,7 +533,7 @@ describe("AgentSdkHarness sessions", () => {
 		expect(await h.next(s.dispatchId)).toBeNull();
 	});
 
-	it("reads as pending its queued usage, the message still streaming and the result's totals, read only", async () => {
+	it("takes its queued usage and the message still streaming, counts the rest of that message at its stop, and restores what it took", async () => {
 		let release!: () => void;
 		const paused = new Promise<void>((r) => {
 			release = r;
@@ -551,40 +551,33 @@ describe("AgentSdkHarness sessions", () => {
 			yield ev({ type: "message_delta", usage: { output_tokens: 7 } });
 			reached();
 			await paused;
+			yield ev({ type: "message_delta", usage: { output_tokens: 10 } });
 			yield ev({ type: "message_stop" });
-			yield resultMsg(200, 60);
+			yield resultMsg(150, 50);
 		});
 		h.bindAgentApi(recordingApi().api);
 		const s = session();
-		const none = {
-			tokensIn: 0,
-			tokensOut: 0,
+		const split = (tokensIn: number, tokensOut: number) => ({
+			tokensIn,
+			tokensOut,
 			cacheReadTokens: 0,
 			cacheWriteTokens: 0,
-		};
-		expect(await h.pendingUsage(s.dispatchId)).toEqual(none);
+		});
+		expect(await h.takeUsage(s.dispatchId)).toEqual(split(0, 0));
 		await h.start(s);
 		await atPause;
 		// m1 is queued; m2 is mid-stream at 50 in and 7 out.
-		expect(await h.pendingUsage(s.dispatchId)).toEqual({
-			...none,
-			tokensIn: 150,
-			tokensOut: 47,
-		});
-		expect(await h.pendingUsage(s.dispatchId)).toEqual({
-			...none,
-			tokensIn: 150,
-			tokensOut: 47,
-		});
+		expect(await h.takeUsage(s.dispatchId)).toEqual(split(150, 47));
+		expect(await h.takeUsage(s.dispatchId)).toEqual(split(0, 0));
+		await h.restoreUsage(s.dispatchId, split(150, 47));
 		release();
 		await h.settled(s.dispatchId);
-		// The result's totals exceed the streamed 150 and 47 by 50 and 13.
-		expect(await h.pendingUsage(s.dispatchId)).toEqual({
-			...none,
-			tokensIn: 200,
-			tokensOut: 60,
-		});
-		await h.stop(s.dispatchId);
-		expect(await h.pendingUsage(s.dispatchId)).toEqual(none);
+		// The restored 150 and 47, m2's last 3 out, and nothing more at the
+		// result: its totals equal what was counted.
+		expect(await drain(h, s.dispatchId)).toEqual([
+			{ kind: "usage", split: split(150, 47) },
+			{ kind: "usage", split: split(0, 3) },
+			{ kind: "fail" },
+		]);
 	});
 });

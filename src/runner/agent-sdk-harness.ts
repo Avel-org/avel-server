@@ -22,6 +22,7 @@ import {
 	type HarnessSession,
 	type HarnessStep,
 	sumUsage,
+	takeQueuedUsage,
 } from "./harness";
 import { SdkStepTrace } from "./sdk-steps";
 import {
@@ -432,10 +433,18 @@ export class AgentSdkHarness implements Harness {
 		return this.sessions.get(dispatchId)?.events.shift() ?? null;
 	}
 
-	async pendingUsage(dispatchId: string): Promise<TokenSplit> {
+	async takeUsage(dispatchId: string): Promise<TokenSplit> {
 		const r = this.sessions.get(dispatchId);
 		if (!r) return sumUsage([]);
-		return sumUsage([...r.events, { kind: "usage", split: r.usage.streaming }]);
+		const queued = takeQueuedUsage(r.events);
+		return sumUsage([
+			{ kind: "usage", split: queued },
+			{ kind: "usage", split: r.usage.takeStreaming() },
+		]);
+	}
+
+	async restoreUsage(dispatchId: string, split: TokenSplit): Promise<void> {
+		this.sessions.get(dispatchId)?.events.unshift({ kind: "usage", split });
 	}
 
 	async stop(dispatchId: string): Promise<void> {

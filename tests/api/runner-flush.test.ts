@@ -5,13 +5,23 @@ import { missionSpentUsd } from "../../src/db/dispatch";
 import { activityLog, mission } from "../../src/db/schema";
 import { fixedClock } from "../../src/lib/clock";
 import { FakeHarness } from "../../src/runner/harness";
-import { applyUsage, sweep, tick } from "../../src/runner/runner";
+import {
+	applyUsage,
+	countPending,
+	inStep,
+	lockDispatch,
+	lockMission,
+	sweep,
+	tick,
+} from "../../src/runner/runner";
 import { seedIds } from "./agent-fixtures";
 import {
 	activeMission,
 	expectReportsMatchDispatches,
 	expectSystemReport,
 	pricedBook,
+	queued,
+	reportsOf,
 	row,
 	runnerDeps,
 	started,
@@ -269,8 +279,15 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			);
 		});
 
-		it("counts nothing twice: a close that counted the queue leaves the runner nothing to add", async () => {
-			const harness = new FakeHarness();
+		it("counts the queue once: the close takes it, so nothing counted is left to read", async () => {
+			// A harness whose stop is slow to forget: the window between the
+			// close's commit and the session's stop, held open.
+			class SlowStop extends FakeHarness {
+				override async stop(dispatchId: string): Promise<void> {
+					this.stopped.push(dispatchId);
+				}
+			}
+			const harness = new SlowStop();
 			const prices = pricedBook();
 			await withApi(
 				async (h) => {
@@ -285,12 +302,159 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					);
 					const deps = runnerDeps(h, harness, prices, later(60));
 					await sweep(deps);
-					await tick(deps);
-					expect(await applyUsage(deps, run.id, tokensIn(100))).toBe(false);
+					expect(await harness.next(run.id)).toBeNull();
 					expect((await row(h.tx, run.id)).tokensUsed).toBe(100);
 				},
 				{ harness, prices },
 			);
+		});
+
+		it("puts the queue back when the close rolls back", async () => {
+			const harness = new FakeHarness();
+			const prices = pricedBook();
+			await withApi(
+				async (h) => {
+					await h.signIn();
+					const m = await activeMission(h.tx, seedIds(h.ns));
+					const run = await started(
+						h,
+						harness,
+						m,
+						{ steps: [tokensIn(100), tokensIn(20)], outcome: "until_stopped" },
+						ceilings,
+					);
+					const deps = runnerDeps(h, harness, prices, clock);
+					class Rollback extends Error {}
+					await expect(
+						inStep(deps, async (step) => {
+							const locked = await lockMission(step.tx, m.missionId);
+							const d = await lockDispatch(step.tx, run.id);
+							if (!locked || !d) throw new Error("gone");
+							await countPending(step, deps, locked, d, deps.ids.next());
+							throw new Rollback();
+						}),
+					).rejects.toBeInstanceOf(Rollback);
+					expect((await row(h.tx, run.id)).tokensUsed).toBe(0);
+					expect(harness.queuedUsage(run.id)).toEqual(tokensIn(120));
+				},
+				{ harness, prices },
+			);
+		});
+
+		describe("usage counted after the close (the tick's race)", () => {
+			// The tick took a usage event off the queue, and a close committed
+			// before its applyUsage locked the dispatch. That usage was spent.
+			async function takenThenClosed(
+				h: Parameters<Parameters<typeof withApi>[0]>[0],
+				harness: FakeHarness,
+				ceilingUsd = "100.00",
+			) {
+				const m = await activeMission(h.tx, seedIds(h.ns), ceilingUsd);
+				const run = await started(
+					h,
+					harness,
+					m,
+					{ steps: [tokensIn(400)], outcome: "until_stopped" },
+					ceilings,
+				);
+				const taken = await harness.next(run.id);
+				if (taken?.kind !== "usage") throw new Error("no usage queued");
+				const res = await h.call(`/api/dispatches/${run.id}/halt`, {
+					method: "POST",
+				});
+				expect(res.status).toBe(200);
+				return { m, run, split: taken.split };
+			}
+
+			it("adds it to the closed dispatch and the mission's spend; the report stays as filed", async () => {
+				const harness = new FakeHarness();
+				const prices = pricedBook();
+				await withApi(
+					async (h) => {
+						await h.signIn();
+						const { m, run, split } = await takenThenClosed(h, harness);
+						const deps = runnerDeps(h, harness, prices, clock);
+						expect(await applyUsage(deps, run.id, split)).toBe(false);
+						// Not expectSystemReport: the report is the snapshot at close.
+						const d = await row(h.tx, run.id);
+						const [r] = await reportsOf(h.tx, run.id);
+						if (!r) throw new Error("no report");
+						expect(d).toMatchObject({
+							status: "halted",
+							haltReason: "operator",
+							tokensUsed: 400,
+							spendUsd: "0.400000",
+						});
+						expect(r.actualTokens).toBe(0);
+						expect(await missionSpentUsd(h.tx, m.missionId)).toBeCloseTo(
+							0.4,
+							6,
+						);
+					},
+					{ harness, prices },
+				);
+			});
+
+			it("logs no soft-ceiling crossing on a closed dispatch", async () => {
+				const harness = new FakeHarness();
+				const prices = pricedBook();
+				await withApi(
+					async (h) => {
+						await h.signIn();
+						const { run } = await takenThenClosed(h, harness);
+						const deps = runnerDeps(h, harness, prices, clock);
+						await applyUsage(deps, run.id, tokensIn(2000));
+						expect((await row(h.tx, run.id)).tokensUsed).toBe(2000);
+						const crossed = await h.tx
+							.select()
+							.from(activityLog)
+							.where(
+								and(
+									eq(activityLog.entityId, run.id),
+									eq(activityLog.action, "dispatch.soft_ceiling_crossed"),
+								),
+							);
+						expect(crossed).toEqual([]);
+					},
+					{ harness, prices },
+				);
+			});
+
+			it("halts the mission when the late count reaches its ceiling", async () => {
+				const harness = new FakeHarness();
+				const prices = pricedBook();
+				await withApi(
+					async (h) => {
+						await h.signIn();
+						const { m, run } = await takenThenClosed(h, harness, "1.00");
+						const sibling = await started(h, harness, m, undefined, ceilings);
+						const deps = runnerDeps(h, harness, prices, clock);
+						expect(await applyUsage(deps, run.id, tokensIn(1000))).toBe(false);
+						expect(await missionStatus(h.tx, m.missionId)).toBe("halted");
+						expect((await row(h.tx, sibling.id)).haltReason).toBe(
+							"spend_ceiling",
+						);
+						await expectReportsMatchDispatches(h.tx, [m.missionId]);
+					},
+					{ harness, prices },
+				);
+			});
+
+			it("counts nothing on a dispatch that never started", async () => {
+				const harness = new FakeHarness();
+				const prices = pricedBook();
+				await withApi(
+					async (h) => {
+						await h.signIn();
+						const m = await activeMission(h.tx, seedIds(h.ns));
+						const id = await queued(h.tx, m);
+						const deps = runnerDeps(h, harness, prices, clock);
+						expect(await applyUsage(deps, id, tokensIn(100))).toBe(false);
+						expect((await row(h.tx, id)).tokensUsed).toBe(0);
+					},
+					{ harness, prices },
+				);
+			});
 		});
 	},
 );
