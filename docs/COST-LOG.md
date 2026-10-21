@@ -24,6 +24,9 @@ date · mission · slice · agent · model · in_tokens · out_tokens · usd · 
 2026-10-21 · first-mission-live · item-6 · canon+atlas · claude-sonnet-5-5 · ? · ? · ? · passed; numbers lost, vitest hid the output of a passing test. Expected near the run below; the Console's usage page holds the real figure
 2026-10-21 · first-mission-live · item-6 · canon · claude-sonnet-5-5 · 1230 · 2120 · 0.039871 · replied; 0 citations came back, so citations surviving the SDK is still unshown
 2026-10-21 · first-mission-live · item-6 · atlas · claude-sonnet-5-5 · 6 · 283 · 0.015916 · complete in 12 s; agent report, 1 file written; cache read 11375, cache write 2984; gate pass
+2026-10-21 · citation-probes · canon · probe · claude-sonnet-5-5 · ? · ? · 0.02 · 4 probes: API direct, SDK x2, SDK with a tool; the SDK carries citations both ways
+2026-10-21 · first-mission-live · item-6 · canon · claude-sonnet-5-5 · 1234 · 3205 · 0.069867 · replied; instructions v3; 3/3 citations resolve to the notes; 6/6 brief items sourced inside the notes
+2026-10-21 · first-mission-live · item-6 · atlas · claude-sonnet-5-5 · 6 · 283 · 0.023667 · complete in 8 s; agent report, 1 file written; gate pass
 
 ---
 

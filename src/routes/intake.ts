@@ -13,10 +13,19 @@ import {
 import { logActivity } from "../db/activity";
 import { openCanonQuestions, openCanonSessionIds } from "../db/canon";
 import { clientIdOfIntake } from "../db/client-id";
-import { client, connection, engagement, intake, mission } from "../db/schema";
+import {
+	client,
+	connection,
+	engagement,
+	file,
+	intake,
+	intakeFiles,
+	mission,
+} from "../db/schema";
 import { live, stamp, touch } from "../db/schema/columns";
 import { type Executor, type Tx, withTx } from "../db/tx";
 import type { RepoSource } from "../gateways/repo-source";
+import { briefSourceIssues, inFiles } from "../lib/brief-sources";
 import { checkIntake } from "../lib/intake-check";
 import { lowConfidenceIssues } from "../lib/repo-read/conventions";
 import { readRepo } from "../lib/repo-read/index";
@@ -31,6 +40,35 @@ import {
 } from "./shared";
 
 type Row = typeof intake.$inferSelect;
+
+/**
+ * Refuses a brief whose sources name no file of the intake: purged files
+ * count, since their rows and hashes stay. A new intake has no files yet, so
+ * on create every source is refused.
+ */
+async function requireKnownSources(
+	tx: Tx,
+	intakeId: string | null,
+	brief: Intake["proposedBrief"] | undefined,
+) {
+	const shas = new Set<string>();
+	if (intakeId !== null) {
+		const rows = await tx
+			.select({ sha256: file.sha256 })
+			.from(file)
+			.innerJoin(intakeFiles, eq(intakeFiles.fileId, file.id))
+			.where(eq(intakeFiles.intakeId, intakeId));
+		for (const r of rows) shas.add(r.sha256);
+	}
+	const issues = briefSourceIssues(brief, inFiles(shas), ["proposedBrief"]);
+	if (issues.length > 0) {
+		throw new ApiError(
+			"VALIDATION_FAILED",
+			"The brief cites passages of files this intake does not have",
+			{ details: { body: issues } },
+		);
+	}
+}
 
 /**
  * Database row (snake_case columns, Dates) to wire shape (camelCase, ISO
@@ -294,6 +332,7 @@ export function intakeRoutes(deps: RouteDeps & { repos: RepoSource }) {
 			const operator = operatorOf(ctx);
 			const row = await withTx(deps.db(), async (tx) => {
 				await requireActiveEngagement(tx, body.engagementId);
+				await requireKnownSources(tx, null, body.proposedBrief);
 				const values = {
 					id: deps.ids.next(),
 					engagementId: body.engagementId,
@@ -326,6 +365,7 @@ export function intakeRoutes(deps: RouteDeps & { repos: RepoSource }) {
 				if (current.status !== "draft" && current.status !== "proposed") {
 					throw wrongState(current, "revised");
 				}
+				await requireKnownSources(tx, current.id, body.proposedBrief);
 				// The source can run to 100k characters, so the log names the
 				// fields that changed rather than copying them.
 				return transition(
