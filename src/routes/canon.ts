@@ -1475,14 +1475,6 @@ export function canonRoutes(deps: CanonDeps) {
 							"Draft mode needs an intake to draft",
 						);
 					}
-					// Fetch's read tools are the next slice of this round; until they
-					// exist, a fetch turn would answer without the data it was asked for.
-					if (mode === "fetch") {
-						throw refuse(
-							"canon_mode_unavailable",
-							"Fetch mode is not built yet",
-						);
-					}
 					const now = deps.clock.now();
 					// The turn starts here, or not at all: one statement decides, so
 					// two posts cannot both start one.

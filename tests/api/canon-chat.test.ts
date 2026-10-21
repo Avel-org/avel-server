@@ -182,11 +182,9 @@ describe.skipIf(!process.env.DATABASE_URL)("Canon chat", () => {
 				parts: [],
 			});
 
-			// Draft in an open session, and fetch until its tools exist, refuse.
-			for (const mode of ["draft", "fetch"]) {
-				const refused = await post(s.id, { contentMd: "x", mode });
-				expect(reason(refused), mode).toBe("canon_mode_unavailable");
-			}
+			// Draft in an open session refuses: there is no intake to draft.
+			const refused = await post(s.id, { contentMd: "x", mode: "draft" });
+			expect(reason(refused)).toBe("canon_mode_unavailable");
 
 			const [logged] = await h.tx
 				.select({ payload: activityLog.payload })
@@ -228,8 +226,8 @@ describe.skipIf(!process.env.DATABASE_URL)("Canon chat", () => {
 		}, asApp);
 	});
 
-	it("gives a turn tools only in draft mode, on a client session with an intake", () => {
-		const onIntake = { clientId: "c", intakeId: "i" };
+	it("gives each mode its own tools, and name_session only while untitled", () => {
+		const onIntake = { clientId: "c", intakeId: "i", title: "T" };
 		expect(toolsFor("draft", onIntake)).toEqual([
 			"ask_operator",
 			"draft_brief",
@@ -237,9 +235,18 @@ describe.skipIf(!process.env.DATABASE_URL)("Canon chat", () => {
 			"recommend_roster",
 		]);
 		expect(toolsFor("ask", onIntake)).toEqual([]);
-		expect(toolsFor("fetch", onIntake)).toEqual([]);
-		expect(toolsFor("draft", { clientId: "c", intakeId: null })).toEqual([]);
-		expect(toolsFor("draft", { clientId: null, intakeId: null })).toEqual([]);
+		expect(toolsFor("fetch", onIntake)).toEqual(["fetch"]);
+		expect(toolsFor("draft", { ...onIntake, intakeId: null })).toEqual([]);
+		expect(
+			toolsFor("draft", { clientId: null, intakeId: null, title: "T" }),
+		).toEqual([]);
+		expect(toolsFor("ask", { ...onIntake, title: null })).toEqual([
+			"name_session",
+		]);
+		expect(toolsFor("fetch", { ...onIntake, title: null })).toEqual([
+			"fetch",
+			"name_session",
+		]);
 	});
 
 	it("renames and changes mode, and Canon's title never overwrites the operator's", async () => {

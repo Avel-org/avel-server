@@ -7,6 +7,7 @@ import {
 	query as sdkQuery,
 	tool,
 } from "@anthropic-ai/claude-agent-sdk";
+import { z } from "zod";
 import { askOperatorInput, type CanonCitation } from "../../lib/canon";
 import type { Logger } from "../../lib/logger";
 import { AGENT_SDK_VERSION, sdkEnv } from "../agent-sdk-harness";
@@ -15,6 +16,7 @@ import {
 	UsageCounter,
 	type UsageStreamEvent,
 } from "../sdk-usage";
+import { fetchInput } from "./fetch";
 import {
 	CANON_TOOL_NAMES,
 	type CanonModel,
@@ -125,6 +127,18 @@ function canonServer(
 				recommendRosterInput.shape,
 				async (a) => result(await callTool("recommend_roster", a)),
 			),
+			tool(
+				"fetch",
+				"Read the command center's own data: one entity (clients, engagements, intakes, missions, dispatches, spend, activity, gate_runs, findings), optionally one row by id, filtered by clientId, engagementId, missionId or status. Returns the rows as JSON; the operator sees them as a table or a card.",
+				fetchInput.shape,
+				async (a) => result(await callTool("fetch", a)),
+			),
+			tool(
+				"name_session",
+				"Name this conversation, once, in a few plain words. Only while it has no title.",
+				{ title: z.string() },
+				async (a) => result(await callTool("name_session", a)),
+			),
 		].filter((t) => allowed.includes(t.name as CanonToolName)),
 	});
 }
@@ -155,6 +169,23 @@ async function* oneMessage(prompt: CanonPrompt): AsyncIterable<SDKUserMessage> {
 			] as SDKUserMessage["message"]["content"],
 		},
 	};
+}
+
+/** A top-level text or thinking delta, as one model event; anything else null. */
+function streamDelta(m: SDKMessage): CanonModelEvent | null {
+	if (m.type !== "stream_event" || m.parent_tool_use_id !== null) return null;
+	const e = m.event as {
+		type?: string;
+		delta?: { type?: string; text?: string; thinking?: string };
+	};
+	if (e.type !== "content_block_delta" || !e.delta) return null;
+	if (e.delta.type === "text_delta" && e.delta.text) {
+		return { kind: "text", text: e.delta.text };
+	}
+	if (e.delta.type === "thinking_delta" && e.delta.thinking) {
+		return { kind: "reasoning", text: e.delta.thinking };
+	}
+	return null;
 }
 
 type TextBlock = {
@@ -226,6 +257,12 @@ export class AgentSdkCanonModel implements CanonModel {
 			if (m.type === "stream_event") {
 				const split = usage.onEvent(m.event as UsageStreamEvent);
 				if (split) yield { kind: "usage", split };
+				// Text and the reasoning summary as they stream, for the run
+				// trace. A summary only: the API returns no raw reasoning for
+				// these models. Whether the SDK passes thinking deltas through
+				// is a [hypothesis] until a live run.
+				const delta = streamDelta(m);
+				if (delta) yield delta;
 			} else if (m.type === "assistant" && m.parent_tool_use_id === null) {
 				for (const block of m.message.content as Array<{ type: string }>) {
 					if (block.type === "tool_use") blocks = [];

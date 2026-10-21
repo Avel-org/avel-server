@@ -1,5 +1,7 @@
 import { and, asc, eq, isNotNull, isNull, max } from "drizzle-orm";
-import type { CanonMode } from "../../contract";
+import { z } from "zod";
+import type { CanonMode, CanonPart } from "../../contract";
+import type { CanonStepKind } from "../../contract/canon";
 import { logActivity } from "../../db/activity";
 import { CANON_TURN_MAX_MS, canonScopes } from "../../db/canon";
 import { clientIdOfIntake } from "../../db/client-id";
@@ -7,6 +9,7 @@ import {
 	agentIdentityVersion,
 	canonMessage,
 	canonSession,
+	canonStep,
 	clientMemory,
 	file,
 	intakeFiles,
@@ -32,7 +35,13 @@ import type { IdGenerator } from "../../lib/ids";
 import type { Logger } from "../../lib/logger";
 import type { TokenSplit } from "../../lib/prices";
 import { addUsage, type PriceBook, tableFor } from "../budget";
-import { CANON_TOOL_NAMES, type CanonModel, type CanonToolName } from "./model";
+import { fetchData } from "./fetch";
+import {
+	type CanonModel,
+	type CanonToolName,
+	DRAFT_TOOL_NAMES,
+	type ToolResult,
+} from "./model";
 import { buildCanonPrompt } from "./prompt";
 import { canonTools } from "./tools";
 
@@ -350,6 +359,7 @@ async function storeReply(
 	mode: CanonMode,
 	text: string,
 	citations: Citation[],
+	parts: CanonPart[] = [],
 ): Promise<boolean> {
 	return withCanonScope(deps.db(), scope, async (tx) => {
 		const [s] = await tx
@@ -375,7 +385,7 @@ async function storeReply(
 			mode,
 			contentMd: text,
 			citations,
-			parts: [],
+			parts,
 			createdAt: deps.clock.now(),
 		});
 		await tx
@@ -392,30 +402,151 @@ async function storeReply(
 
 /**
  * Each mode's tools (J, 2026-10-20: the server enforces them). Ask reads
- * only what the prompt holds. Draft writes the intake's brief, questions,
- * memory and roster, so it needs a client session on an intake. Fetch's
- * read tools come with the next slice; until then a fetch post is refused
- * at the route, so no fetch turn reaches here.
+ * only what the prompt holds. Fetch reads the command center's own data.
+ * Draft writes the intake's brief, questions, memory and roster, so it
+ * needs a client session on an intake. Any mode may name a session that
+ * has no title yet.
  */
 export function toolsFor(
 	mode: CanonMode,
-	session: { clientId: string | null; intakeId: string | null },
+	session: {
+		clientId: string | null;
+		intakeId: string | null;
+		title: string | null;
+	},
 ): readonly CanonToolName[] {
-	if (mode !== "draft") return [];
-	if (session.clientId === null || session.intakeId === null) return [];
-	return CANON_TOOL_NAMES;
+	const naming: CanonToolName[] =
+		session.title === null ? ["name_session"] : [];
+	if (mode === "fetch") return ["fetch", ...naming];
+	if (
+		mode === "draft" &&
+		session.clientId !== null &&
+		session.intakeId !== null
+	) {
+		return [...DRAFT_TOOL_NAMES, ...naming];
+	}
+	return naming;
 }
 
-/** The callTool for a turn with no tools: every call is the tool's error. */
-const noTools = async (name: CanonToolName) => ({
+/** The answer to a tool this turn does not have. */
+const notHere = (name: CanonToolName): ToolResult => ({
 	text: `${name} is not available in this mode`,
 	isError: true,
 });
 
+/** A text step is written once this much has gathered, or at the turn's end. */
+export const TEXT_STEP_CHARS = 400;
+/** What a step's detail keeps of a tool's result for the trace. */
+const RESULT_DETAIL_CHARS = 2_000;
+/** At most this many cards and tables beside one reply. */
+const MAX_PARTS = 10;
+
+const nameSessionInput = z
+	.object({ title: z.string().trim().min(1).max(120) })
+	.strict();
+
+/**
+ * Writes one turn's steps, in order, while the turn is still the session's:
+ * a halted or swept session gets no more. Returns the step's seq, or null
+ * when the turn is over.
+ */
+function stepWriter(
+	deps: CanonDeps,
+	scope: CanonScope,
+	sessionId: string,
+	turn: number,
+) {
+	return async (step: {
+		kind: CanonStepKind;
+		label: string;
+		detail: Record<string, unknown>;
+		startedAt?: Date;
+	}): Promise<number | null> =>
+		withCanonScope(deps.db(), scope, async (tx) => {
+			const [s] = await tx
+				.select({
+					status: canonSession.status,
+					turnStartedAt: canonSession.turnStartedAt,
+				})
+				.from(canonSession)
+				.where(eq(canonSession.id, sessionId))
+				.for("update");
+			if (!s || s.status !== "open" || s.turnStartedAt === null) return null;
+			const [last] = await tx
+				.select({ seq: max(canonStep.seq) })
+				.from(canonStep)
+				.where(eq(canonStep.canonSessionId, sessionId));
+			const seq = (last?.seq ?? 0) + 1;
+			const now = deps.clock.now();
+			await tx.insert(canonStep).values({
+				id: deps.ids.next(),
+				canonSessionId: sessionId,
+				clientId: scopeClientId(scope),
+				turn,
+				seq,
+				kind: step.kind,
+				label: step.label.slice(0, 80),
+				detail: step.detail,
+				startedAt: step.startedAt ?? now,
+				endedAt: now,
+				tokensIn: null,
+				tokensOut: null,
+				createdAt: now,
+			});
+			return seq;
+		});
+}
+
+/** Names the session if it still has no title; never one the operator named. */
+async function nameSession(
+	deps: CanonDeps,
+	scope: CanonScope,
+	sessionId: string,
+	raw: unknown,
+): Promise<ToolResult> {
+	const parsed = nameSessionInput.safeParse(raw);
+	if (!parsed.success) {
+		return { text: "Give a title of 1 to 120 characters.", isError: true };
+	}
+	return withCanonScope(deps.db(), scope, async (tx) => {
+		const named = await tx
+			.update(canonSession)
+			.set({
+				title: parsed.data.title,
+				titleSetBy: "canon",
+				...touch(deps.clock),
+			})
+			.where(
+				and(
+					eq(canonSession.id, sessionId),
+					eq(canonSession.status, "open"),
+					isNull(canonSession.title),
+				),
+			)
+			.returning({ engagementId: canonSession.engagementId });
+		const [row] = named;
+		if (!row)
+			return { text: "The session already has a title.", isError: true };
+		await logActivity(tx, deps, {
+			actorKind: "canon",
+			actorCanonSessionId: sessionId,
+			action: "canon_session.renamed",
+			entityType: "canon_session",
+			entityId: sessionId,
+			engagementId: row.engagementId,
+			requestId: deps.ids.next(),
+			// The title is client text: never in the log.
+			payload: { sessionId, hadTitle: false },
+		});
+		return { text: "Named." };
+	});
+}
+
 /**
  * Runs one turn of the session, if it is open and mid-turn in this scope;
  * otherwise "skipped". A citation that names no passage of this turn's
- * knowledge, or misquotes one, fails the turn: no reply is stored.
+ * knowledge, or misquotes one, fails the turn: no reply is stored. Steps
+ * are written as the turn runs, for the operator to watch.
  */
 export async function runCanonTurn(
 	deps: CanonDeps,
@@ -427,9 +558,20 @@ export async function runCanonTurn(
 	const log = deps.logger.child({ canonSessionId: sessionId });
 	let promptSha256: string | null = null;
 	const abort = new AbortController();
+	const writeStep = stepWriter(deps, scope, sessionId, turn.turn.seq);
+	let pendingText = "";
+	const flushText = async () => {
+		if (pendingText === "") return;
+		const text = pendingText;
+		pendingText = "";
+		await writeStep({ kind: "text", label: "Writing", detail: { text } });
+	};
 	try {
 		const files = await readFiles(deps.blobs, turn.files);
 		const built = buildCanonPrompt({
+			mode: turn.turn.mode,
+			scope: scope.kind,
+			titled: turn.session.title !== null,
 			identityMd: turn.identityMd,
 			files,
 			memory: turn.memory,
@@ -438,13 +580,9 @@ export async function runCanonTurn(
 		promptSha256 = built.sha256;
 		const tools = toolsFor(turn.turn.mode, turn.session);
 		const clientId = scopeClientId(scope);
-		const intakeId = turn.session.intakeId;
-		const engagementId = turn.session.engagementId;
-		const callTool =
-			tools.length > 0 &&
-			clientId !== null &&
-			intakeId !== null &&
-			engagementId !== null
+		const { intakeId, engagementId } = turn.session;
+		const draft =
+			clientId !== null && intakeId !== null && engagementId !== null
 				? canonTools({
 						db: deps.db,
 						clock: deps.clock,
@@ -454,14 +592,53 @@ export async function runCanonTurn(
 						chunkIds: new Set(built.chunks.map((c) => c.chunkId)),
 						requestId: deps.ids.next(),
 					})
-				: noTools;
+				: null;
+		const parts: CanonPart[] = [];
+		const dispatchTool = async (
+			name: CanonToolName,
+			input: unknown,
+		): Promise<ToolResult> => {
+			if (!tools.includes(name)) return notHere(name);
+			if (name === "fetch") return fetchData(deps.db(), scope, input);
+			if (name === "name_session") {
+				return nameSession(deps, scope, sessionId, input);
+			}
+			return draft ? draft(name, input) : notHere(name);
+		};
+		const callTool = async (
+			name: CanonToolName,
+			input: unknown,
+		): Promise<ToolResult> => {
+			await flushText();
+			const startedAt = deps.clock.now();
+			const callSeq = await writeStep({
+				kind: "tool_call",
+				label: `Calling ${name}`,
+				detail: { tool: name, input: input ?? null },
+			});
+			const result = await dispatchTool(name, input);
+			await writeStep({
+				kind: "tool_result",
+				label: result.isError ? `${name} refused` : `${name} answered`,
+				detail: {
+					tool: name,
+					callSeq,
+					isError: result.isError === true,
+					text: result.text.slice(0, RESULT_DETAIL_CHARS),
+				},
+				startedAt,
+			});
+			if (!result.isError && result.parts) {
+				parts.push(...result.parts.slice(0, MAX_PARTS - parts.length));
+			}
+			return result;
+		};
 		for await (const event of deps.model.run({
 			sessionId,
 			model: turn.session.model,
 			prompt: built.prompt,
 			tools,
-			callTool: async (name, input) =>
-				tools.includes(name) ? callTool(name, input) : noTools(name),
+			callTool,
 			signal: abort.signal,
 		})) {
 			if (event.kind === "usage") {
@@ -470,7 +647,18 @@ export async function runCanonTurn(
 					log.info({ promptSha256 }, "canon turn halted at the hard ceiling");
 					return { outcome: "halted", promptSha256 };
 				}
+			} else if (event.kind === "text") {
+				pendingText += event.text;
+				if (pendingText.length >= TEXT_STEP_CHARS) await flushText();
+			} else if (event.kind === "reasoning") {
+				await flushText();
+				await writeStep({
+					kind: "reasoning_summary",
+					label: "Thinking",
+					detail: { text: event.text },
+				});
 			} else {
+				await flushText();
 				const citations = storedCitations(event.citations, built.chunks);
 				const stored = await storeReply(
 					deps,
@@ -479,21 +667,26 @@ export async function runCanonTurn(
 					turn.turn.mode,
 					event.text,
 					citations,
+					parts,
 				);
 				abort.abort();
 				log.info({ promptSha256, stored }, "canon turn replied");
 				return { outcome: stored ? "replied" : "skipped", promptSha256 };
 			}
 		}
+		await flushText();
 		await clearTurn(deps, scope, sessionId);
 		log.info({ promptSha256 }, "canon turn ended without a reply");
 		return { outcome: "ended", promptSha256 };
 	} catch (err) {
 		abort.abort();
-		log.error(
-			{ err: err instanceof Error ? err.message : String(err), promptSha256 },
-			"canon turn failed",
-		);
+		const message = err instanceof Error ? err.message : String(err);
+		log.error({ err: message, promptSha256 }, "canon turn failed");
+		await writeStep({
+			kind: "error",
+			label: "The turn failed",
+			detail: { message: message.slice(0, RESULT_DETAIL_CHARS) },
+		}).catch(() => null);
 		await clearTurn(deps, scope, sessionId);
 		return { outcome: "failed", promptSha256 };
 	}

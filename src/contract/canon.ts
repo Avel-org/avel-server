@@ -73,6 +73,7 @@ export const canonTitleSource = z.enum(CANON_TITLE_SOURCES);
 export const canonStepKind = z.enum(CANON_STEP_KINDS);
 
 export type CanonMode = z.infer<typeof canonMode>;
+export type CanonStepKind = z.infer<typeof canonStepKind>;
 
 /** The Idempotency-Key header, optional here: without one, a retry is a new request. */
 export const optionalIdempotencyHeaders = z.object({

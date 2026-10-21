@@ -1,3 +1,4 @@
+import type { CanonPart } from "../../contract";
 import type { CanonCitation } from "../../lib/canon";
 import type { TokenSplit } from "../../lib/prices";
 import type { CanonPrompt } from "./prompt";
@@ -9,20 +10,44 @@ import type { CanonPrompt } from "./prompt";
  * model; the Agent SDK one (sdk-model.ts) is never run by tests.
  */
 
-export const CANON_TOOL_NAMES = [
+/** Draft mode's tools: they write the intake's brief, questions, memory and roster. */
+export const DRAFT_TOOL_NAMES = [
 	"ask_operator",
 	"draft_brief",
 	"propose_memory",
 	"recommend_roster",
 ] as const;
 
-export type CanonToolName = (typeof CANON_TOOL_NAMES)[number];
+/**
+ * Every tool Canon has. fetch is fetch mode's read tool (fetch.ts);
+ * name_session names a session that has no title yet, in any mode.
+ */
+export const CANON_TOOL_NAMES = [
+	...DRAFT_TOOL_NAMES,
+	"fetch",
+	"name_session",
+] as const;
 
-/** What a tool hands back to the model. */
-export type ToolResult = { text: string; isError?: boolean };
+export type CanonToolName = (typeof CANON_TOOL_NAMES)[number];
+export type DraftToolName = (typeof DRAFT_TOOL_NAMES)[number];
+
+/**
+ * What a tool hands back to the model, and, for fetch, the cards and tables
+ * the operator sees beside Canon's reply.
+ */
+export type ToolResult = {
+	text: string;
+	isError?: boolean;
+	parts?: CanonPart[];
+};
 
 export type CanonToolCall = (
 	name: CanonToolName,
+	input: unknown,
+) => Promise<ToolResult>;
+
+export type DraftToolCall = (
+	name: DraftToolName,
 	input: unknown,
 ) => Promise<ToolResult>;
 
@@ -30,7 +55,11 @@ export type CanonModelEvent =
 	/** Tokens spent since the last event, to add to the session's counts. */
 	| { kind: "usage"; split: TokenSplit }
 	/** Canon's final text and what it cites, as the API returned them. */
-	| { kind: "reply"; text: string; citations: CanonCitation[] };
+	| { kind: "reply"; text: string; citations: CanonCitation[] }
+	/** Text as it is written, for the run trace. The reply is still one event. */
+	| { kind: "text"; text: string }
+	/** The API's summary of Canon's reasoning, never raw reasoning. */
+	| { kind: "reasoning"; text: string };
 
 export type CanonModelRun = {
 	sessionId: string;
@@ -61,6 +90,8 @@ export type FakeCanonStep =
 	| { usage: TokenSplit }
 	| { tool: CanonToolName; input: unknown }
 	| { reply: string; citations?: CanonCitation[] }
+	| { text: string }
+	| { reasoning: string }
 	| { fail: string };
 
 /**
@@ -106,6 +137,10 @@ export class FakeCanonModel implements CanonModel {
 					text: step.reply,
 					citations: step.citations ?? [],
 				};
+			} else if ("text" in step) {
+				yield { kind: "text", text: step.text };
+			} else if ("reasoning" in step) {
+				yield { kind: "reasoning", text: step.reasoning };
 			} else {
 				throw new Error(step.fail);
 			}

@@ -1,3 +1,4 @@
+import type { CanonMode } from "../../contract";
 import {
 	KNOWLEDGE_SPLIT_VERSION,
 	type KnowledgeChunk,
@@ -9,13 +10,16 @@ import {
 import { canonicalJson } from "../../lib/canonical";
 import { sha256Hex } from "../../lib/tokens";
 
-/** Bump with any change to CANON_INSTRUCTIONS. */
-export const CANON_INSTRUCTIONS_VERSION = 1;
+/**
+ * Bump with any change to the instructions below. 2 (2026-10-20): one
+ * section per mode and scope, and naming an untitled session.
+ */
+export const CANON_INSTRUCTIONS_VERSION = 2;
 
 /**
- * What Canon is told on every turn, after its identity (DECISIONS-V2,
+ * What Canon is told on a draft turn, after its identity (DECISIONS-V2,
  * Decided 2026-10-19: Canon is the briefer). [hypothesis]: the wording has
- * not met a real model yet.
+ * not met a real model yet. Unchanged in version 2; it became draft mode's.
  */
 export const CANON_INSTRUCTIONS = `You are briefing one project for the operator. The project's documents are given to you as search results, and its kept memory and the conversation follow them.
 
@@ -29,7 +33,30 @@ Propose a memory with propose_memory only for a lasting fact about this client t
 
 You never choose the cut: it is derived from the repository. You never approve anything, start anything, or act outside your tools. The operator decides.`;
 
+/** Every turn, whatever its mode. */
+export const CANON_BOUNDS = `You read and you draft; the operator decides. You never approve anything, start anything, or act outside your tools.`;
+
+/** Ask and fetch, by scope (J, 2026-10-20). [hypothesis], as above. */
+export const CANON_MODE_INSTRUCTIONS = {
+	ask: {
+		open: `This conversation belongs to no client, and you read no client's data in it. Answer from general knowledge and from how AVEL works. When the operator wants live data, say that fetch mode reads it.`,
+		client: `This conversation is about one client. Answer from what you are given: the client's kept memory, its documents when there are any, and the conversation. When the operator wants live data, say that fetch mode reads it.`,
+	},
+	fetch: {
+		open: `Answer from the command center's own data, which you read with the fetch tool: clients, engagements, intakes, missions, dispatches, spend, activity, gate runs and findings, across every client. Read before you answer, and say what you read. When a question needs data the tool cannot read, say so; never guess a number.`,
+		client: `Answer from the command center's own data for this one client, which you read with the fetch tool: its engagements, intakes, missions, dispatches, spend, activity, gate runs and findings. You cannot read any other client. Read before you answer, and say what you read. When a question needs data the tool cannot read, say so; never guess a number.`,
+	},
+} as const;
+
+/** Added while the session has no title. */
+export const CANON_NAMING = `This conversation has no title yet. After your first answer, name it with name_session: a few plain words saying what it is about.`;
+
 export type CanonPromptInput = {
+	/** The mode the turn runs in: its operator message's. */
+	mode: CanonMode;
+	scope: "open" | "client";
+	/** Whether the session has a title; Canon names it when it has none. */
+	titled: boolean;
 	/** Canon's identity, from its frozen identity version. */
 	identityMd: string;
 	/** The intake's live files, in a stable order. */
@@ -47,6 +74,8 @@ export type CanonPromptInput = {
 /** Everything a model is given for one turn. Model-agnostic: each model renders it. */
 export type CanonPrompt = {
 	instructionsVersion: number;
+	mode: CanonMode;
+	scope: "open" | "client";
 	splitVersion: string;
 	system: string;
 	knowledge: SearchResultBlock[];
@@ -65,10 +94,22 @@ export function buildCanonPrompt(input: CanonPromptInput): {
 	sha256: string;
 } {
 	const chunks = splitKnowledge(input.files);
+	const section =
+		input.mode === "draft"
+			? CANON_INSTRUCTIONS
+			: CANON_MODE_INSTRUCTIONS[input.mode][input.scope];
+	const system = [
+		input.identityMd.trimEnd(),
+		section,
+		CANON_BOUNDS,
+		...(input.titled ? [] : [CANON_NAMING]),
+	].join("\n\n");
 	const prompt: CanonPrompt = {
 		instructionsVersion: CANON_INSTRUCTIONS_VERSION,
+		mode: input.mode,
+		scope: input.scope,
 		splitVersion: KNOWLEDGE_SPLIT_VERSION,
-		system: `${input.identityMd.trimEnd()}\n\n${CANON_INSTRUCTIONS}`,
+		system,
 		knowledge: toSearchResultBlocks(chunks),
 		memory: [...input.memory],
 		transcript: [...input.messages]

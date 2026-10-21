@@ -936,7 +936,10 @@ J decided these on 2026-10-20, relayed by FE Main, after BE Main listed what the
 - **The session list returns a summary item**, not the full session: the definer function discloses no tokens, spend, messages or questions.
 - **`POST /api/canon-sessions` takes no Idempotency-Key.** An open session is unlimited and a retry makes a second one; a session on an intake is held to one open by the database.
 - **A fetch post refuses `canon_mode_unavailable` until fetch's read tools exist**, so no turn answers without the data it was asked for.
-- **A turn's mode is its operator message's mode**, and only draft, on a client session with an intake, gets tools. The model is offered only that mode's tools, and its PreToolUse hook denies any other.
+- **A turn's mode is its operator message's mode**, and only draft, on a client session with an intake, gets the draft tools. The model is offered only that mode's tools, and its PreToolUse hook denies any other.
+- **Fetch is one tool with an entity argument**, not one tool per entity: one place holds the allowlist and the client filter, and one test covers every entity. It reads no client's words: no client notes, intake source, brief, dispatch brief or activity payload, except a gate run's verdict and commit.
+- **Text steps are written in chunks of 400 characters** and before every tool call, so a poll once a second sees steady progress without a row per token. `[hypothesis]`.
+- **`name_session` is offered in every mode while a session has no title**, and its update requires the title still to be null, so it can never replace the operator's.
 
 ## Decided 2026-10-20: the spend ceiling is optional
 

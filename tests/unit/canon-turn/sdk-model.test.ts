@@ -16,6 +16,7 @@ import {
 	AgentSdkCanonModel,
 	CANON_TOOL_IDS,
 	denyNonCanon,
+	denyNotIn,
 } from "../../../src/runner/canon/sdk-model";
 
 // The Agent SDK model with a scripted query: no real model is called. It
@@ -23,6 +24,9 @@ import {
 
 const SHA = "b".repeat(64);
 const built = buildCanonPrompt({
+	mode: "draft",
+	scope: "client",
+	titled: true,
 	identityMd: "# Canon\n",
 	files: [{ fileId: "f1", sha256: SHA, name: "a.md", contentMd: "# A\nOne." }],
 	memory: ["Kept fact."],
@@ -107,7 +111,43 @@ describe("AgentSdkCanonModel", () => {
 			"mcp__canon__draft_brief",
 			"mcp__canon__propose_memory",
 			"mcp__canon__recommend_roster",
+			"mcp__canon__fetch",
+			"mcp__canon__name_session",
 		]);
+	});
+
+	it("offers a turn only its mode's tools, and no server at all with none", () => {
+		const model = make(scripted([]).query);
+		const options = (tools: CanonToolName[]) =>
+			model.turnOptions(
+				{
+					sessionId: "s1",
+					model: "claude-sonnet-5-5",
+					prompt: built.prompt,
+					tools,
+					callTool: async () => ({ text: "" }),
+					signal: new AbortController().signal,
+				},
+				new AbortController(),
+			);
+		const fetchOnly = options(["fetch"]);
+		expect(fetchOnly.allowedTools).toEqual(["mcp__canon__fetch"]);
+		expect(Object.keys(fetchOnly.mcpServers ?? {})).toEqual(["canon"]);
+		const none = options([]);
+		expect(none.allowedTools).toEqual([]);
+		expect(none.mcpServers).toEqual({});
+	});
+
+	it("denies, in a turn, every tool outside that turn's list", async () => {
+		const deny = denyNotIn(["mcp__canon__fetch"]);
+		const decide = (tool_name: string) =>
+			deny({ tool_name } as unknown as HookInput, undefined, {
+				signal: new AbortController().signal,
+			});
+		expect(await decide("mcp__canon__fetch")).toEqual({});
+		expect(await decide("mcp__canon__draft_brief")).toMatchObject({
+			hookSpecificOutput: { permissionDecision: "deny" },
+		});
 	});
 
 	it("denies every tool that is not Canon's", async () => {

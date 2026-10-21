@@ -17,7 +17,7 @@ import type { IdGenerator } from "../../lib/ids";
 import { type CheckIssue, checkIntake } from "../../lib/intake-check";
 import { ApiError } from "../../middleware/errors";
 import { requirePresetAgents } from "../../routes/roster";
-import type { CanonToolCall, CanonToolName, ToolResult } from "./model";
+import type { DraftToolCall, DraftToolName, ToolResult } from "./model";
 
 /**
  * Canon's tools, in process (DATA-CONTRACTS-V2, Canon's entities). Each
@@ -86,7 +86,7 @@ function issuesText(
 
 class Refused extends Error {}
 
-export function canonTools(ctx: CanonToolContext): CanonToolCall {
+export function canonTools(ctx: CanonToolContext): DraftToolCall {
 	const actor = {
 		actorKind: "canon" as const,
 		actorCanonSessionId: ctx.session.id,
@@ -137,7 +137,7 @@ export function canonTools(ctx: CanonToolContext): CanonToolCall {
 		return row;
 	}
 
-	const tools: Record<CanonToolName, (input: unknown) => Promise<ToolResult>> =
+	const tools: Record<DraftToolName, (input: unknown) => Promise<ToolResult>> =
 		{
 			ask_operator: async (input) => {
 				const parsed = askOperatorInput.safeParse(input);
