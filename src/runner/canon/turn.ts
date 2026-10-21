@@ -72,7 +72,17 @@ export type CanonDeps = {
 	) => Promise<unknown>;
 };
 
-export type TurnOutcome = "replied" | "ended" | "halted" | "failed" | "skipped";
+/**
+ * How a turn ended. `repeated`: a run of this turn already began (its claim
+ * is stored), so the model was not called again; the sweep ends it.
+ */
+export type TurnOutcome =
+	| "replied"
+	| "ended"
+	| "halted"
+	| "failed"
+	| "skipped"
+	| "repeated";
 
 export type TurnResult = { outcome: TurnOutcome; promptSha256: string | null };
 
@@ -234,6 +244,44 @@ async function readFiles(
 		out.push({ fileId: f.id, sha256: f.sha256, name: f.name, contentMd });
 	}
 	return out;
+}
+
+/**
+ * Claims the turn before the model runs, in its own transaction: stores its
+ * seq and its prompt's hash on the session. "claimed" when this run may go
+ * on; "repeated" when a run of this same turn already claimed it (it died
+ * before the turn's end committed, as on a restart), so running it again
+ * would spend twice; "gone" when the turn is no longer open.
+ */
+async function claimTurn(
+	deps: CanonDeps,
+	scope: CanonScope,
+	sessionId: string,
+	seq: number,
+	promptSha256: string,
+): Promise<"claimed" | "repeated" | "gone"> {
+	return withCanonScope(deps.db(), scope, async (tx) => {
+		const [s] = await tx
+			.select({
+				status: canonSession.status,
+				turnStartedAt: canonSession.turnStartedAt,
+				turnPromptSeq: canonSession.turnPromptSeq,
+			})
+			.from(canonSession)
+			.where(eq(canonSession.id, sessionId))
+			.for("update");
+		if (!s || s.status !== "open" || s.turnStartedAt === null) return "gone";
+		if (s.turnPromptSeq === seq) return "repeated";
+		await tx
+			.update(canonSession)
+			.set({
+				turnPromptSeq: seq,
+				turnPromptSha256: promptSha256,
+				...touch(deps.clock),
+			})
+			.where(eq(canonSession.id, sessionId));
+		return "claimed";
+	});
 }
 
 /** Clears the turn, in its own transaction. */
@@ -544,7 +592,8 @@ async function nameSession(
 
 /**
  * Runs one turn of the session, if it is open and mid-turn in this scope;
- * otherwise "skipped". A citation that names no passage of this turn's
+ * otherwise "skipped". It claims the turn before the model runs, so a turn
+ * is run once: a turn a run already claimed is "repeated", never run again. A citation that names no passage of this turn's
  * knowledge, or misquotes one, fails the turn: no reply is stored. Steps
  * are written as the turn runs, for the operator to watch.
  */
@@ -578,6 +627,21 @@ export async function runCanonTurn(
 			messages: turn.messages,
 		});
 		promptSha256 = built.sha256;
+		const claim = await claimTurn(
+			deps,
+			scope,
+			sessionId,
+			turn.turn.seq,
+			built.sha256,
+		);
+		if (claim === "gone") return { outcome: "skipped", promptSha256 };
+		if (claim === "repeated") {
+			log.warn(
+				{ promptSha256, seq: turn.turn.seq },
+				"canon turn already ran once; not running it again",
+			);
+			return { outcome: "repeated", promptSha256 };
+		}
 		const tools = toolsFor(turn.turn.mode, turn.session);
 		const clientId = scopeClientId(scope);
 		const { intakeId, engagementId } = turn.session;
