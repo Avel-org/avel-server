@@ -961,6 +961,12 @@ J decided both on 2026-10-21, in a BE Main session.
 
 ---
 
+## Decided 2026-10-21: the app-router cut
+
+J decided this on 2026-10-21. An app-router tree's cut is read from `src/features/*` (else `features/*`): two or more directories there make a vertical cut, one feature each. Route groups under `app/` do not count, because `TEMPLATE-BOOKING.md` assigns them to features by hand and that link is not in the tree. The rule runs only when the two-layer feature rule finds nothing, so every earlier fixture derives the same cut and evidence. The rule is in `ROSTER-V2.md`, *Choosing the cut*.
+
+---
+
 ## Open questions
 
 | Question | Blocking? |
