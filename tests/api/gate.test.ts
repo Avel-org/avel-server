@@ -196,6 +196,16 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 			const degraded = posted.reasons.filter((x) => x.degraded);
 			expect(degraded.length).toBeGreaterThan(0);
 			for (const x of degraded) expect(x.effect).toBe("warn");
+			// So the pass is not a verified one, and the run says so.
+			expect(posted.assurance).toBe("not_fully_checked");
+			expect([posted.decideVersion, posted.receiptVersion]).toEqual([2, 2]);
+			const receipt = JSON.parse(posted.receipt);
+			expect(receipt.assurance).toBe("not_fully_checked");
+			expect(
+				receipt.decision.notChecked.map(
+					(n: { findingId: string }) => n.findingId,
+				),
+			).toEqual(expect.arrayContaining(degraded.map((x) => x.findingId)));
 
 			const list = gateRunListEnvelope.parse(
 				await (await h.call(`/api/missions/${m.missionId}/gate-runs`)).json(),
@@ -203,6 +213,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 			expect(list.meta.total).toBe(1);
 			expect(list.data[0]?.id).toBe(posted.id);
 			expect(list.data[0]?.actor.kind).toBe("operator");
+			expect(list.data[0]?.assurance).toBe("not_fully_checked");
 			const read = successEnvelope(gateRunSchema).parse(
 				await (
 					await h.call(`/api/missions/${m.missionId}/gate-runs/${posted.id}`)
@@ -220,6 +231,45 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 					),
 				);
 			expect(logged?.id).toBe(posted.id);
+
+			// A run stored before decide() version 2 has no assurance on its
+			// row or in its decision: it is read from the stored reasons. The
+			// log is append-only, so the old run is a second row beside it.
+			if (!logged) throw new Error("no gate run row");
+			const v1 = JSON.parse(posted.receipt);
+			delete v1.assurance;
+			delete v1.decision.assurance;
+			delete v1.decision.notChecked;
+			const { assurance: _dropped, ...oldPayload } = logged.payload as Record<
+				string,
+				unknown
+			>;
+			const oldId = m.ids.next();
+			await h.tx.insert(activityLog).values({
+				...logged,
+				id: oldId,
+				payload: {
+					...oldPayload,
+					decideVersion: 1,
+					receiptVersion: 1,
+					receipt: JSON.stringify(v1),
+				},
+			});
+			const old = successEnvelope(gateRunSchema).parse(
+				await (
+					await h.call(`/api/missions/${m.missionId}/gate-runs/${oldId}`)
+				).json(),
+			).data;
+			expect([old.decideVersion, old.assurance]).toEqual([
+				1,
+				"not_fully_checked",
+			]);
+			const oldList = gateRunListEnvelope.parse(
+				await (await h.call(`/api/missions/${m.missionId}/gate-runs`)).json(),
+			);
+			expect(oldList.data.find((x) => x.id === oldId)?.assurance).toBe(
+				"not_fully_checked",
+			);
 		});
 	});
 
