@@ -1,6 +1,7 @@
 import type { FindingSeverity, FindingStatus } from "../../contract/agent";
 import type {
 	DECIDE_RULES,
+	GATE_ASSURANCES,
 	GATE_FINDING_KINDS,
 	GATE_VERDICTS,
 	IGNORED_OVERRIDE_WHYS,
@@ -17,6 +18,7 @@ export type GateOutcome = (typeof GATE_OUTCOMES)[number];
 // The gate's vocabulary is defined once, in the contract (src/contract/gate.ts).
 export {
 	DECIDE_RULES,
+	GATE_ASSURANCES,
 	GATE_FINDING_KINDS,
 	GATE_VERDICTS,
 	IGNORED_OVERRIDE_WHYS,
@@ -152,10 +154,25 @@ export type IgnoredOverride = GateOverride & {
 	why: (typeof IGNORED_OVERRIDE_WHYS)[number];
 };
 
+export type GateAssurance = (typeof GATE_ASSURANCES)[number];
+
+/** A counted finding that did not check: it did not run, or it broke. */
+export type NotChecked = {
+	gate: Gate;
+	findingId: string;
+	kind: GateFindingKind | "synthesized";
+	source: string | null;
+	outcome: "not_run" | "error";
+};
+
 export type Decision = {
 	version: number;
 	commitSha: string;
 	verdict: "pass" | "block";
+	/** verified only when `notChecked` is empty. */
+	assurance: GateAssurance;
+	/** Every counted finding that did not check, in GATES order, then by id. */
+	notChecked: NotChecked[];
 	/** Listed gates only, in GATES order. */
 	gates: GateDecision[];
 	/** Every reason, unlisted and stale ones included, sorted. */
