@@ -28,18 +28,18 @@
 
 ## The sidebar
 
-Twelve links in three groups, per ruling 3 of `avel-web/design/AVEL-DESIGN.md` (2026-10-05). An earlier draft of this section listed sixteen; that was a stale field count. A thirteenth, Drive `/drive`, is decided (2026-10-06) and arrives with the Drive after the first mission. Its design ruling is avel-web's.
+Twelve links in three groups. The sidebar's design belongs to avel-web: `avel-web/design/AVEL-DESIGN.md` rulings 3, 13, 33, 39, 40, 47 and 51, later ones superseding earlier, and `avel-web/src/shell/nav.ts` holds it. This table follows them (reconciled 2026-10-20); where they differ, they win. Agents and Settings are parents that group links, not pages.
 
-| Work | Library | System |
+| Work | Library | Control |
 |---|---|---|
-| Home `/` | Agent templates `/catalog/agents` — read-only | Activity `/activity` |
-| Missions `/missions` | Skills `/catalog/skills` | Repositories `/settings/repositories` |
-| Clients `/clients` | Sources `/catalog/sources` | Connections `/settings/connections` |
-| | Presets `/presets` | Account `/settings/account` |
-| | Playbooks `/playbooks` | |
+| Home `/` | Agents → All agents `/catalog/agents` — read-only | Activity `/activity` |
+| Missions `/missions` | Agents → Skills `/catalog/skills` | Settings → Repositories `/settings/repositories` |
+| Clients `/clients` | Teams `/presets`, with Playbooks as its second section (ruling 51) | Settings → Connections `/settings/connections` |
+| | Templates `/templates` (ruling 47) | Settings → Account `/settings/account` |
+| | Drive `/drive` (ruling 33) | |
 
-*Stale, recorded 2026-10-20, not yet reconciled:* this table no longer matches avel-web's sidebar (`avel-web/src/shell/nav.ts`), which also has twelve links. There the groups are Work, Library and Control; Presets is labelled Teams; Templates and Drive are links; Sources is not; Agents and Settings are parents of their links; and Playbooks is a section of Teams (ruling 51), not a link. Which rulings changed it, and whether this table follows nav.ts, is open for J.
-
+- **Names, not addresses** (ruling 39, J: "Don't rebuild just rename"): Canon's link is Home, Presets is Teams, the System group is Control. Every route kept its address.
+- **Sources is not a page** (ruling 40, J: "Remove Sources as a module"). A skill's sources are managed inside Skills (`/catalog/skills?view=sources`). The backend keeps the `skill_source` table and its routes.
 - **Agent templates** is read-only. Identity files are generated from roles, so the page shows each generated version and its hash.
 - Proposals, Findings, Roles and Templates are not in the sidebar. Decided 2026-10-06, except Templates:
   - **Proposals:** the top-bar inbox, and proposal cards in the Canon chat. They arrive with module 14, after the first mission; until then the Canon chat renders not-built.
@@ -78,10 +78,9 @@ Twelve links in three groups, per ruling 3 of `avel-web/design/AVEL-DESIGN.md` (
 /catalog/agents                    🖥   templates
 /catalog/agents/:slug              🖥   template detail
 /catalog/skills                    🖥   skill library
-/catalog/skills/:slug              🖥   skill detail
-/catalog/sources                   🖥   SkillSource catalog
+/catalog/skills/:slug              🖥   skill detail — *not in avel-web's route tree as of 2026-10-20; open*
 
-/presets                           🖥   saved squads
+/presets                           🖥   saved squads ("Teams")
 /presets/:id                       🖥   preset editor
 
 /presets?section=playbooks         🖥   process per mission type (avel-web ruling 51, 2026-10-20)
@@ -93,7 +92,10 @@ Twelve links in three groups, per ruling 3 of `avel-web/design/AVEL-DESIGN.md` (
 
 /activity                          📱   global log
 
-/drive                             🖥   general docs (after the first mission)
+/templates                         🖥   AVEL project templates (avel-web ruling 47)
+/templates/:slug                   🖥   template detail
+
+/drive                             🖥   general docs
 ```
 
 **Nothing at `/knowledge`.** KnowledgeEntry has no write path in V1 and an empty vault; a screen over zero rows is a screen that teaches you nothing. Deferred with the write-back.
@@ -108,7 +110,7 @@ Twelve links in three groups, per ruling 3 of `avel-web/design/AVEL-DESIGN.md` (
 |---|---|---|
 | ~~No `client`, `engagement`, or `intake` route groups.~~ Resolved: built with modules 0 and 1. | `/clients/*`, `/intake/:id` | — |
 | ~~No `preset` route group.~~ Resolved 2026-10-10: `presets` list, get, create, update; applying is `roster.applyPreset`. | `/presets`, `/presets/:id`, and the loadout screen's "apply preset" | — |
-| ~~No `skillSource` procedures.~~ Resolved: built with module 4. | `/catalog/sources` | — |
+| ~~No `skillSource` procedures.~~ Resolved: built with module 4. | inside `/catalog/skills` (`?view=sources`), since avel-web ruling 40 removed `/catalog/sources` | — |
 | `export.preview` | pre-flight | specced in `BLAST-RADIUS.md`, not yet in the contract |
 | `mission.getWithRoster` | loadout | Not built, by decision (2026-10-06): the loadout calls `missions.get` and `roster.list` |
 | `skill.resolveTiers` | loadout | Built as the pure function `resolveSkillTiers()` in the contract, not a route |
