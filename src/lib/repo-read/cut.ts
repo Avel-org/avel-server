@@ -24,6 +24,14 @@ export const FEATURE_CONTAINERS = ["modules", "features", "domains"] as const;
 const LAYER_SUFFIX =
 	/\.(controller|service|repository|dto|entity|handler|model|resolver|guard|middleware)\.[cm]?[jt]sx?$/;
 
+/**
+ * Where a features directory is read for the plain feature rule (J,
+ * 2026-10-21): each of its directories is one feature, layers or not. An
+ * app-router tree keeps its features here; its route groups under app/ are
+ * assigned by hand (TEMPLATE-BOOKING.md, Layout and mounts) and never count.
+ */
+const FEATURE_DIRECTORIES = ["src/features", "features"] as const;
+
 /** Source roots, in the order they are tried. The repository root is the fallback. */
 const SOURCE_ROOTS = ["src", "app", "lib"] as const;
 
@@ -93,7 +101,9 @@ const list = (names: string[]) => names.map((n) => `${n}/`).join(", ");
  * Which boundary is a directory (ROSTER-V2): the cut, read from the tree.
  *
  * - vertical: a feature container (modules/, features/, domains/) under the
- *   source root holds two or more features that each hold two or more layers.
+ *   source root holds two or more features that each hold two or more layers;
+ *   or, failing that, src/features/ (else a top-level features/) holds two or
+ *   more directories, each one feature (J, 2026-10-21).
  * - horizontal: the source root holds two or more layer directories, and no
  *   feature container qualifies.
  * - null: both, neither, or a monorepo. Null blocks approval; it is never guessed.
@@ -130,6 +140,20 @@ export function deriveCut(snapshot: Snapshot): CutResult {
 			break;
 		}
 	}
+	let rule = "each with two or more layers";
+	let plainRule = false;
+	if (container === undefined) {
+		for (const dir of FEATURE_DIRECTORIES) {
+			const plain = childDirectories(snapshot, dir);
+			if (plain.length >= 2) {
+				container = dir;
+				features.push(...plain.map((f) => join(dir, f)));
+				rule = "each a feature directory";
+				plainRule = true;
+				break;
+			}
+		}
+	}
 	const layers = children.filter((c) =>
 		(LAYER_DIRECTORIES as readonly string[]).includes(c),
 	);
@@ -142,7 +166,7 @@ export function deriveCut(snapshot: Snapshot): CutResult {
 			cut: "vertical",
 			root,
 			boundaries: features,
-			evidence: `${at}: feature-organised. ${container}/ holds ${names.length} features (${list(names)}), each with two or more layers, so one agent per feature.`,
+			evidence: `${at}: feature-organised. ${container}/ holds ${names.length} features (${list(names)}), ${rule}, so one agent per feature.`,
 		};
 	}
 	if (horizontal && !vertical) {
@@ -158,7 +182,7 @@ export function deriveCut(snapshot: Snapshot): CutResult {
 			cut: null,
 			root,
 			boundaries: [],
-			evidence: `${at}: both. ${container}/ holds features with their own layers, and ${shown} also holds layer directories (${list(layers)}). Neither boundary is the directory, so no cut is derived.`,
+			evidence: `${at}: both. ${container}/ holds ${plainRule ? "feature directories" : "features with their own layers"}, and ${shown} also holds layer directories (${list(layers)}). Neither boundary is the directory, so no cut is derived.`,
 		};
 	}
 	return {
