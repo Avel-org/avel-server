@@ -59,7 +59,9 @@ export async function seedAgent(
 	name = "Kel",
 ): Promise<SeededAgent> {
 	const templateId = ids.next();
-	const slug = `${name.toLowerCase()}-${templateId.slice(-4)}`;
+	// The whole id: its last block alone repeats in every caller, and slugs are
+	// unique, so concurrent tests waited on each other's uncommitted rows.
+	const slug = `${name.toLowerCase()}-${templateId.replaceAll("-", "")}`;
 	await tx.insert(agentTemplate).values({
 		id: templateId,
 		slug,

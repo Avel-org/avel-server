@@ -24,7 +24,7 @@ import {
 } from "../../src/db/schema";
 import { remove, stamp } from "../../src/db/schema/columns";
 import type { Tx } from "../../src/db/tx";
-import type { IdGenerator } from "../../src/lib/ids";
+import { type IdGenerator, randomIds } from "../../src/lib/ids";
 import { clock, closeApi, prefixedIds, statements, withApi } from "./support";
 
 const url = process.env.DATABASE_URL;
@@ -56,7 +56,9 @@ async function withMissions(fn: (h: Harness) => Promise<void>) {
 			await api.signIn();
 			await fn({
 				tx: api.tx,
-				ids: prefixedIds("dddddddd"),
+				// Its own random block: the app's ids use api.ns, and a fixed block
+				// made concurrent suites wait on each other's uncommitted keys.
+				ids: prefixedIds(randomIds.next().slice(0, 8)),
 				operatorId: await api.operatorId(),
 				call: (path) => api.call(path),
 				anonymous: async (path) => api.app.request(path),
@@ -629,11 +631,14 @@ describe.skipIf(!url)("/api/missions", () => {
 	describe("get", () => {
 		it("adds brief, spend, rationale, repo, live roster counts, the live playbook, null gates and recent activity", async () => {
 			await withMissions(async ({ tx, ids, call, operatorId }) => {
+				// The live playbook is unique per mission type, so the type is this
+				// test's own: concurrent suites would wait on each other's row.
+				const fullBuild = `full-build-${ids.next().slice(0, 8)}`;
 				const s = seeder(tx, ids);
 				const e = await s.engagement(await s.client("Meridian"), "App");
 				const m = await s.mission({
 					engagementId: e,
-					type: "full-build",
+					type: fullBuild,
 					brief: { goal: "ship" },
 					spendCeilingUsd: "1250.50",
 					cutSource: "overridden",
@@ -652,7 +657,7 @@ describe.skipIf(!url)("/api/missions", () => {
 				});
 				await tx.insert(playbook).values({
 					id: ids.next(),
-					missionType: "full-build",
+					missionType: fullBuild,
 					name: "Full build v1",
 					wavesApplicable: ["A"],
 					gates: [],
@@ -665,7 +670,7 @@ describe.skipIf(!url)("/api/missions", () => {
 				const template = ids.next();
 				await tx.insert(agentTemplate).values({
 					id: template,
-					slug: "backend",
+					slug: `backend-${template.replaceAll("-", "")}`,
 					name: "Backend",
 					kind: "feature",
 					roles: ["domain"],
@@ -707,7 +712,7 @@ describe.skipIf(!url)("/api/missions", () => {
 					cutRationale: "Monorepo with a layered backend",
 					repoUrl: "https://github.com/meridian-co/app",
 					roster: { agents: 3, active: 2 },
-					playbook: { missionType: "full-build", name: "Full build v1" },
+					playbook: { missionType: fullBuild, name: "Full build v1" },
 					lastExport: { status: "pr-open", gates: null },
 					needsYou: { reason: "pr_open" },
 					lastActivityAt: at(11).toISOString(),

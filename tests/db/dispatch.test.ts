@@ -614,7 +614,9 @@ describe.skipIf(!process.env.DATABASE_URL)("dispatch data layer", () => {
 			);
 			expect(row.createdAt.toISOString()).toBe(at);
 			expect(row.updatedAt.toISOString()).toBe(at);
-			expect(row.id).toMatch(/^00000000-0000-4000-8000-/);
+			// From the call's generator: its block, and the id after the agent's.
+			expect(row.id.slice(0, 8)).toBe(agent.missionId.slice(0, 8));
+			expect(row.id > agent.entryId).toBe(true);
 		});
 	});
 

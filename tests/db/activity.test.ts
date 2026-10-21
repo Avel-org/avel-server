@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { logActivity } from "../../src/db/activity";
 import { closeDb, getDb } from "../../src/db/client";
@@ -8,6 +8,7 @@ import type { Tx } from "../../src/db/tx";
 import { withTx } from "../../src/db/tx";
 import type { IdGenerator } from "../../src/lib/ids";
 import { clock, inRollback, refusal } from "./fixtures";
+import { errorOf, onScratchDatabase } from "./scratch";
 
 async function createClient(tx: Tx, ids: IdGenerator, requestId: string) {
 	const clientId = ids.next();
@@ -126,14 +127,15 @@ describe.skipIf(!process.env.DATABASE_URL)("activity_log", () => {
 		});
 	});
 
+	// On a database of its own: see tests/db/scratch.ts.
 	it("refuses TRUNCATE", async () => {
-		await inRollback(async (tx) => {
-			const err = await refusal(tx, (t) =>
-				t.execute(sql`truncate activity_log`),
+		await onScratchDatabase("activity_truncate", async (conn) => {
+			const err = await errorOf(conn`truncate activity_log`);
+			expect(err?.message).toBe(
+				"activity_log is append-only: TRUNCATE refused",
 			);
-			expect(err.message).toMatch(/append-only/);
 		});
-	});
+	}, 60_000);
 
 	it("rolls back with the mutation it records", async () => {
 		const requestId = "req-rollback-0001";

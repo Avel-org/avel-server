@@ -2,7 +2,8 @@ import { afterAll, describe, expect, it } from "vitest";
 import { clientSchema, errorEnvelope, pageEnvelope } from "../../src/contract";
 import { client } from "../../src/db/schema";
 import { stamp } from "../../src/db/schema/columns";
-import { clock, closeApi, prefixedIds, withApi } from "./support";
+import { randomIds } from "../../src/lib/ids";
+import { clock, closeApi, withApi } from "./support";
 
 const list = pageEnvelope(clientSchema);
 
@@ -14,7 +15,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		async function seedClient(
 			tx: Parameters<Parameters<typeof withApi>[0]>[0]["tx"],
 		) {
-			const id = prefixedIds("5eed0000").next();
+			// Random: a fixed id waited on the same key in a concurrent suite.
+			const id = randomIds.next();
 			await tx
 				.insert(client)
 				.values({ id, name: "Seeded Co", status: "active", ...stamp(clock) });

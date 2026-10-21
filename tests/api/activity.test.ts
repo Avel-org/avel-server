@@ -41,6 +41,8 @@ type Seeded = {
 	exportId: string;
 	rosterEntryId: string;
 	template: string;
+	/** The template's slug, its own: slugs are unique among live templates. */
+	slug: string;
 	operatorId: string;
 	/** The signed-in operator's GitHub login, which labels their rows. */
 	operatorLogin: string;
@@ -98,9 +100,10 @@ async function seed(
 		});
 	}
 	const template = ids.next();
+	const slug = `backend-${template.replaceAll("-", "")}`;
 	await tx.insert(agentTemplate).values({
 		id: template,
-		slug: "backend",
+		slug,
 		name: "Backend",
 		kind: "feature",
 		roles: ["domain"],
@@ -206,6 +209,7 @@ async function seed(
 		exportId,
 		rosterEntryId,
 		template,
+		slug,
 		operatorId,
 		operatorLogin,
 		prefix,
@@ -325,7 +329,7 @@ describe.skipIf(!url)("/api/activity", () => {
 						display: "Backend · booking",
 						agent: {
 							templateId: s.template,
-							slug: "backend",
+							slug: s.slug,
 							name: "Backend",
 							territory: "booking",
 						},
@@ -373,7 +377,7 @@ describe.skipIf(!url)("/api/activity", () => {
 				display: "Backend",
 				agent: {
 					templateId: s.template,
-					slug: "backend",
+					slug: s.slug,
 					name: "Backend",
 					territory: null,
 				},
