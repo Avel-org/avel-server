@@ -112,7 +112,7 @@ function canonServer(
 			),
 			tool(
 				"draft_brief",
-				"Save the brief in the intake's shape: summary, requirements and acceptance criteria, no modules. Returns what the intake check found.",
+				"Save the brief in the intake's shape: summary, requirements and acceptance criteria, no modules. Each requirement and criterion carries sources: the source strings of the search results it stands on. Returns what the intake check found.",
 				draftBriefInput.shape,
 				async (a) => result(await callTool("draft_brief", a)),
 			),

@@ -961,6 +961,18 @@ J decided both on 2026-10-21, in a BE Main session.
 
 ---
 
+## Decided 2026-10-21: Canon's sources ride on the brief
+
+J decided this on 2026-10-21, after the first live Canon turn returned no citations.
+
+- **Why none came back.** Probes showed the Agent SDK passes `search_result` blocks in and citations out unchanged, so that hypothesis held. The loss was the turn's shape: the brief travels as `draft_brief`'s tool input, and a tool input cannot carry API citations. The only text that could was Canon's closing recap, which named sections in prose and cited nothing. Unprompted, Claude also put a `source` on each requirement inside the tool input, which the strict brief schema refused.
+- **Option 1, built: sources on the brief.** Each requirement and criterion takes `sources`, chunk ids of the Intake's files, checked on every write (`DATA-CONTRACTS-V2.md`, *Sources*). The server checks the ids; the model only chooses them. This follows `ask_operator`'s `sourceChunkIds`.
+- **Option 3, built: a cited reply.** Instructions version 3 asks Canon to answer with each requirement and the passage behind it, so the chat reply carries API citations too.
+- **Rejected for now.** A second, tool-free citing call after the draft (it costs a call, and its citations land on a message, not the brief). Reading citations from every top-level text block of the turn (Canon's working talk rarely cites).
+- **Measured, one live run.** 6 of 6 brief items carried sources inside the notes, and 3 of 3 reply citations resolved to the notes (`COST-LOG.md`). One run is a sample of one.
+
+---
+
 ## Open questions
 
 | Question | Blocking? |

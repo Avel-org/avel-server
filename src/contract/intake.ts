@@ -1,5 +1,6 @@
 import { initContract } from "@ts-rest/core";
 import { z } from "zod";
+import { chunkId } from "./canon";
 import { missionCut, spendCeilingUsd } from "./mission";
 import { presetAgentSchema } from "./preset";
 import { boundarySchema, conventionSetSchema } from "./repo-read";
@@ -102,6 +103,15 @@ export const briefCheck = z.discriminatedUnion("kind", [
 export type BriefCheck = z.infer<typeof briefCheck>;
 
 /**
+ * The passages a requirement or criterion stands on: chunk ids of the
+ * intake's own files, which every write checks (src/lib/brief-sources.ts).
+ * A chunk id starts with its file's sha256, which the intake's file list
+ * carries, so a client resolves each to its file with no other read. A brief
+ * stored before 2026-10-21 has none, and none is the same as empty.
+ */
+const briefSources = z.array(chunkId).max(20).optional();
+
+/**
  * The brief Canon drafts and the operator approves. Held here and nowhere
  * else, so a different shape changes only this schema. Ids are permanent:
  * a criterion cites its requirement by id, never by position.
@@ -119,6 +129,7 @@ export const briefSchema = z
 					.object({
 						id: requirementId,
 						text: z.string().trim().min(1).max(2_000),
+						sources: briefSources,
 					})
 					.strict(),
 			)
@@ -130,6 +141,7 @@ export const briefSchema = z
 						id: criterionId,
 						requirementId,
 						text: z.string().trim().min(1).max(2_000),
+						sources: briefSources,
 					})
 					.strict(),
 			)
