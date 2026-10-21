@@ -1,3 +1,4 @@
+import { mkdir } from "node:fs/promises";
 import {
 	createSdkMcpServer,
 	type HookCallback,
@@ -248,6 +249,9 @@ export class AgentSdkCanonModel implements CanonModel {
 		input.signal.addEventListener("abort", () => abort.abort(), { once: true });
 		const usage = new UsageCounter();
 		let blocks: TextBlock[] = [];
+		// The turn runs in configDir, and a process cannot start in a folder
+		// that does not exist; nothing else creates it.
+		await mkdir(this.options.configDir, { recursive: true });
 		const messages = this.query({
 			prompt: oneMessage(input.prompt),
 			options: this.turnOptions(input, abort),

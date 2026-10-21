@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { afterAll, describe, expect, it } from "vitest";
@@ -357,6 +357,21 @@ async function drain(h: AgentSdkHarness, id: string) {
 }
 
 describe("AgentSdkHarness sessions", () => {
+	it("creates its config folder before the SDK starts", async () => {
+		const dir = path.join(base, "config");
+		rmSync(dir, { recursive: true, force: true });
+		let existed = false;
+		const { h } = harness(async function* () {
+			existed = existsSync(dir);
+			yield* [];
+		});
+		h.bindAgentApi(recordingApi().api);
+		const s = session();
+		await h.start(s);
+		await h.settled(s.dispatchId);
+		expect(existed).toBe(true);
+	});
+
 	it("refuses to start with no agent api bound, or with no brief", async () => {
 		const { h } = harness(async function* () {});
 		expect(await h.start(session())).toBe(false);

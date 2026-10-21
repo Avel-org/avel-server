@@ -1,3 +1,4 @@
+import { mkdir } from "node:fs/promises";
 import {
 	createSdkMcpServer,
 	type HookCallback,
@@ -372,6 +373,8 @@ export class AgentSdkHarness implements Harness {
 			for (const step of list) r.events.push({ kind: "step", step });
 		};
 		try {
+			// HOME and CLAUDE_CONFIG_DIR; nothing else creates it.
+			await mkdir(this.options.configDir, { recursive: true });
 			const messages = this.query({
 				prompt: FIRST_MESSAGE,
 				options: this.sessionOptions(session, r.tools, r.abort),

@@ -39,7 +39,8 @@ import { BASE_URL, captureLogger } from "../unit/support";
 // Checklist item 6: one Canon turn and one dispatch on the real Claude
 // Agent SDK, then the gate on the result, over the same API path as
 // tests/api/first-mission.test.ts. Spends real money, so it only runs with
-// AVEL_LIVE_SMOKE=1 and a key. Everything lives in a rolled-back
+// AVEL_LIVE_SMOKE=1 and a key. Run it with --disableConsoleIntercept, or vitest
+// hides the cost lines of a passing run. Everything lives in a rolled-back
 // transaction on DATABASE_URL; the source is the template-booking dev
 // fixture. The mission's ceiling is $20; the SDK backstops are $1 for
 // Canon and $2 for the dispatch.
@@ -307,8 +308,14 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 					summary.push(
 						`${day()} · first-mission-live · item-6 · canon · ${cs?.model} · ${cs?.tokensIn} · ${cs?.tokensOut} · ${cs?.spendUsd} · ${turns.map((t) => t.outcome).join(",")}; ${resolved.length}/${citations.length} citations resolve to the Drive file`,
 					);
+					// A failed turn's reason is only in the log; print it.
+					for (const l of lines.filter((l) => Number(l.level) >= 50))
+						console.log("CANON ERROR", l.msg, l.err);
 					expect(turns.map((t) => t.outcome)).toEqual(["replied"]);
 					// Every citation that came back names the uploaded file and quotes it.
+					// With none at all that holds vacuously, so require one: on
+					// 2026-10-21 the reply cited the notes in prose and returned none.
+					expect(citations.length, "no citations came back").toBeGreaterThan(0);
 					expect(resolved).toEqual(citations);
 
 					// 2. The mission, as in tests/api/first-mission.test.ts.

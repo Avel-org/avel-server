@@ -1,10 +1,13 @@
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import type {
 	HookInput,
 	Options,
 	SDKMessage,
 	SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { silentLogger } from "../../../src/lib/logger";
 import { buildCanonPrompt } from "../../../src/runner/canon";
 import {
@@ -75,10 +78,15 @@ const assistant = (content: unknown[], parent: string | null = null) => ({
 	message: { content },
 });
 
+// run() creates configDir, so it must be a real temp folder.
+const base = mkdtempSync(path.join(tmpdir(), "avel-canon-model-"));
+afterAll(() => rmSync(base, { recursive: true, force: true }));
+const CONFIG_DIR = path.join(base, "canon-config");
+
 const make = (query: ReturnType<typeof scripted>["query"]) =>
 	new AgentSdkCanonModel({
 		apiKey: "test-key",
-		configDir: "C:/avel/canon",
+		configDir: CONFIG_DIR,
 		logger: silentLogger(),
 		maxBudgetUsd: 1,
 		maxTurns: 10,
@@ -87,6 +95,19 @@ const make = (query: ReturnType<typeof scripted>["query"]) =>
 	});
 
 describe("AgentSdkCanonModel", () => {
+	it("creates its config folder before the SDK starts, which cannot start in a missing one", async () => {
+		rmSync(CONFIG_DIR, { recursive: true, force: true });
+		let existed = false;
+		const { query } = scripted([]);
+		await drain(
+			make((args) => {
+				existed = existsSync(CONFIG_DIR);
+				return query(args);
+			}),
+		);
+		expect(existed).toBe(true);
+	});
+
 	it("gives the SDK Canon's tools and nothing else", async () => {
 		const { seen, query } = scripted([]);
 		await drain(make(query));

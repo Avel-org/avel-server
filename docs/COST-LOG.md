@@ -20,6 +20,10 @@ date · mission · slice · agent · model · in_tokens · out_tokens · usd · 
 
 2026-10-14 · step-9e-smoke · 9e · kel · claude-sonnet-5-5 · 4091 · 115 · 0.0175 · halted by the 3000-token hard ceiling, as designed; system report
 2026-10-14 · step-9e-smoke · 9e · kel · claude-sonnet-5-5 · 13144 · 399 · 0.0159 · complete; agent report, 2 files read, 2 written
+2026-10-21 · first-mission-live · item-6 · canon · claude-sonnet-5-5 · 0 · 0 · 0 · failed twice before any call: the SDK could not start in a canon-config folder that did not exist (fixed the same day)
+2026-10-21 · first-mission-live · item-6 · canon+atlas · claude-sonnet-5-5 · ? · ? · ? · passed; numbers lost, vitest hid the output of a passing test. Expected near the run below; the Console's usage page holds the real figure
+2026-10-21 · first-mission-live · item-6 · canon · claude-sonnet-5-5 · 1230 · 2120 · 0.039871 · replied; 0 citations came back, so citations surviving the SDK is still unshown
+2026-10-21 · first-mission-live · item-6 · atlas · claude-sonnet-5-5 · 6 · 283 · 0.015916 · complete in 12 s; agent report, 1 file written; cache read 11375, cache write 2984; gate pass
 
 ---
 
