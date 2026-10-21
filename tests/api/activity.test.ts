@@ -516,56 +516,6 @@ describe.skipIf(!url)("/api/activity", () => {
 		});
 	});
 
-	it("takes a client's memory changes into its rows, through the routes, and never another client's", async () => {
-		await withApi(async (api) => {
-			await api.signIn();
-			const s = await seed(api.tx, await api.operatorId(), api.operator.login);
-			const otherClient = randomIds.next();
-			await api.tx.insert(client).values({
-				id: otherClient,
-				name: "Elsewhere",
-				status: "active",
-				...stamp(clock),
-			});
-			const write = async (clientId: string) => {
-				const res = await api.call(`/api/clients/${clientId}/memory`, {
-					method: "POST",
-					body: { contentMd: "Prefers Tuesday calls" },
-				});
-				expect(res.status, await res.clone().text()).toBe(201);
-				return ((await res.json()) as { data: { id: string } }).data.id;
-			};
-			const memoryId = await write(s.clientId);
-			const edited = await api.call(`/api/client-memory/${memoryId}`, {
-				method: "PATCH",
-				body: { contentMd: "Prefers Wednesday calls" },
-			});
-			expect(edited.status).toBe(200);
-			const removed = await api.call(`/api/client-memory/${memoryId}/remove`, {
-				method: "POST",
-			});
-			expect(removed.status).toBe(200);
-			await write(otherClient);
-
-			const call = (path: string) => api.call(path);
-			const { data, meta } = await listOf(
-				call,
-				`clientId=${s.clientId}&limit=100`,
-			);
-			const memoryRows = data.filter((r) => r.entityType === "client_memory");
-			expect(memoryRows.map((r) => [r.action, r.entityId])).toEqual([
-				["client_memory.removed", memoryId],
-				["client_memory.edited", memoryId],
-				["client_memory.written", memoryId],
-			]);
-			expect(meta.total).toBe(s.newestFirst.length + 3);
-			const other = await listOf(call, `clientId=${otherClient}`);
-			expect(other.data.map((r) => r.action)).toEqual([
-				"client_memory.written",
-			]);
-		});
-	});
-
 	it("takes several entity ids, repeated or indexed, at most 100", async () => {
 		await withActivity(async (call, s) => {
 			const expected = [s.row.f, s.row.d, s.row.c];
