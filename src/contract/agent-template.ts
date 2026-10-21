@@ -265,6 +265,34 @@ function plainWords(max: number) {
 		});
 }
 
+/** Lowercase words joined by single hyphens: a path segment in the export. */
+const templateSlug = z
+	.string()
+	.max(100)
+	.regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "Lowercase letters, digits and hyphens");
+
+/**
+ * A new template at version 1, with no identity: regenerate makes one.
+ * roles and waveDefaults are deduped. writablePaths is never empty, as in
+ * an update. A missing engagementId is a shared template. A Firm role is
+ * allowed: a new template sits on no roster, and roster add refuses it there.
+ */
+export const createAgentTemplateBody = z
+	.object({
+		slug: templateSlug,
+		name: z.string().trim().min(1).max(200),
+		kind: agentKind,
+		roles: z.array(role).min(1).transform(unique),
+		waveDefaults: z.array(wave).transform(unique),
+		writablePaths: z.array(z.string().min(1)).min(1),
+		title: plainWords(60).nullable().optional(),
+		description: plainWords(280).nullable().optional(),
+		engagementId: z.string().uuid().nullable().optional(),
+	})
+	.strict();
+
+export type CreateAgentTemplateBody = z.infer<typeof createAgentTemplateBody>;
+
 /**
  * Any subset, at least one. slug, name, kind and engagementId are not
  * editable. null clears title or description. roles and waveDefaults are
@@ -291,7 +319,7 @@ export type UpdateAgentTemplateBody = z.infer<typeof updateAgentTemplateBody>;
 const byId = z.object({ id: z.string().uuid() });
 const bySlug = z.object({ slug: z.string().min(1).max(200) });
 
-/** Module 4 reads; module 5 adds the operator's edit and identity regeneration. */
+/** Module 4 reads; module 5 adds the operator's edit and identity regeneration; create added 2026-10-21. */
 export const agentTemplateContract = c.router({
 	list: {
 		method: "GET",
@@ -312,6 +340,14 @@ export const agentTemplateContract = c.router({
 		pathParams: bySlug,
 		responses: { 200: successEnvelope(agentTemplateSchema) },
 		summary: "The live template with this slug. A deleted one is reached by id",
+	},
+	create: {
+		method: "POST",
+		path: "/api/agent-templates",
+		body: createAgentTemplateBody,
+		responses: { 201: successEnvelope(agentTemplateSchema) },
+		summary:
+			"A new template at version 1, with no identity until regenerated. Refused (422 agent_roles_cross_sides, agent_role_not_assignable, engagement_not_found). A slug taken by a live template is 409 CONFLICT",
 	},
 	update: {
 		method: "PATCH",

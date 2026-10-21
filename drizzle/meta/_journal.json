@@ -337,6 +337,13 @@
       "when": 1792623783638,
       "tag": "0047_activity_client_id",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1792624098517,
+      "tag": "0048_activity_agent_template_created",
+      "breakpoints": true
     }
   ]
 }
