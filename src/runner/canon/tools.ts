@@ -93,6 +93,7 @@ export function canonTools(ctx: CanonToolContext): DraftToolCall {
 	};
 	const logged = {
 		engagementId: ctx.session.engagementId,
+		clientId: ctx.clientId,
 		requestId: ctx.requestId,
 	};
 

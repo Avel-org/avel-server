@@ -330,6 +330,13 @@
       "when": 1792622920289,
       "tag": "0046_preset_applied_index",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1792623783638,
+      "tag": "0047_activity_client_id",
+      "breakpoints": true
     }
   ]
 }

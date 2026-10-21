@@ -10,7 +10,7 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
-import { engagement } from "./agency";
+import { client, engagement } from "./agency";
 import { user } from "./auth";
 import { canonSession } from "./canon";
 import { id } from "./columns";
@@ -154,6 +154,14 @@ export const activityLog = pgTable(
 		entityId: uuid("entity_id").notNull(),
 		missionId: uuid("mission_id").references(() => mission.id),
 		engagementId: uuid("engagement_id").references(() => engagement.id),
+		/**
+		 * The client the row touches, set by logActivity (src/db/activity.ts)
+		 * from the row's engagement, mission or client, or given by writers on
+		 * a client's memory and Canon sessions, which have neither. Null for a
+		 * row on no client. Internal: not on the wire. Added 2026-10-21, with
+		 * a backfill of every older row (drizzle/0047).
+		 */
+		clientId: uuid("client_id").references(() => client.id),
 		requestId: text("request_id").notNull(),
 		payload: jsonb("payload").notNull(),
 	},
@@ -162,6 +170,10 @@ export const activityLog = pgTable(
 		index("activity_log_mission_id_idx").on(t.missionId),
 		index("activity_log_engagement_id_idx").on(t.engagementId),
 		index("activity_log_at_idx").on(t.at),
+		// Ascending on purpose: scanned backward it gives "at desc, id desc"
+		// for a client's list and its max(at). A DESC NULLS LAST index (what
+		// .desc() makes) cannot, and the planner skips it.
+		index("activity_log_client_id_at_idx").on(t.clientId, t.at, t.id),
 		index("activity_log_actor_canon_session_id_idx").on(t.actorCanonSessionId),
 		// GET /api/presets/:id/applications (appliedFilter in
 		// src/routes/presets.ts): its action and presetId as the range, in its
