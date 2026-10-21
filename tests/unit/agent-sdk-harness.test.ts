@@ -454,6 +454,60 @@ describe("AgentSdkHarness sessions", () => {
 		expect(await drain(h, s.dispatchId)).toEqual([{ kind: "complete" }]);
 	});
 
+	it("writes its queued steps, then its usage, before the report closes the run", async () => {
+		const order: string[] = [];
+		const { api } = recordingApi();
+		let h!: AgentSdkHarness;
+		const s = session();
+		({ h } = harness(async function* () {
+			yield ev({
+				type: "content_block_delta",
+				delta: { type: "text_delta", text: "Reporting now." },
+			});
+			yield ev({ type: "content_block_stop" });
+			yield* message("m1", 100, 40);
+			yield {
+				type: "assistant",
+				parent_tool_use_id: null,
+				message: {
+					content: [
+						{
+							type: "tool_use",
+							id: "tu_r",
+							name: "mcp__avel__report",
+							input: {},
+						},
+					],
+				},
+			} as unknown as SDKMessage;
+			await h
+				.toolsFor(s.dispatchId)
+				?.report({ status: "complete", blockers: [] });
+			yield resultMsg(100, 40);
+		}));
+		h.bindAgentApi(async (req) => {
+			order.push("report");
+			return api(req);
+		});
+		h.bindStepSink(async (_id, step) => {
+			order.push(`step ${step.kind}`);
+		});
+		h.bindUsageSink(async (_id, split) => {
+			order.push(`usage ${split.tokensIn}`);
+			return true;
+		});
+		await h.start(s);
+		await h.settled(s.dispatchId);
+		// The run closes at the report, and the runner reads only running
+		// dispatches: anything still queued then would never be written.
+		expect(order).toEqual([
+			"step text",
+			"step tool_call",
+			"usage 100",
+			"report",
+		]);
+	});
+
 	it("stops: aborts the query and forgets the session, with no fail", async () => {
 		let aborted = false;
 		const { h } = harness(async function* (params) {

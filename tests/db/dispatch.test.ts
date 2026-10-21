@@ -327,6 +327,10 @@ describe.skipIf(!process.env.DATABASE_URL)("dispatch table", () => {
 					"FOREIGN KEY (roster_entry_id, mission_id) REFERENCES roster_entry(id, mission_id)",
 				],
 				[
+					"dispatch_step_dispatch_id_dispatch_id_fk",
+					"FOREIGN KEY (dispatch_id) REFERENCES dispatch(id)",
+				],
+				[
 					"finding_dispatch_mission_fk",
 					"FOREIGN KEY (reported_by_dispatch_id, mission_id) REFERENCES dispatch(id, mission_id)",
 				],

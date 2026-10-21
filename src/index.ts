@@ -39,7 +39,7 @@ import { type CanonModel, canonTick, offlineCanonModel } from "./runner/canon";
 import { AgentSdkCanonModel } from "./runner/canon/sdk-model";
 import { FakeHarness, type Harness } from "./runner/harness";
 import { startRunnerLoop } from "./runner/loop";
-import { applyUsage } from "./runner/runner";
+import { applyUsage, writeDispatchStep } from "./runner/runner";
 
 // Node does not read .env on its own; drizzle.config.ts and the seed do the
 // same. loadEnvFile never overrides a variable that is already set, so real
@@ -216,6 +216,9 @@ if (sdkHarness) {
 		roomSources,
 	};
 	sdkHarness.bindUsageSink((id, split) => applyUsage(runnerDeps, id, split));
+	sdkHarness.bindStepSink((id, step) =>
+		writeDispatchStep(runnerDeps, id, step),
+	);
 	startRunnerLoop(runnerDeps, {
 		intervalMs: Number(process.env.AVEL_RUNNER_INTERVAL_MS ?? 5000),
 		logger,

@@ -1,3 +1,4 @@
+import type { RunStep } from "../contract";
 import type { TokenSplit } from "../lib/prices";
 
 /**
@@ -10,8 +11,17 @@ import type { TokenSplit } from "../lib/prices";
  * runs a real one when AVEL_HARNESS=agent-sdk.
  */
 
+/**
+ * One step of the session's work, for the run trace (J, 2026-10-20): the
+ * agent's text, a reasoning summary, a tool call or its result, or an error.
+ * The runner writes it as a dispatch_step; it never touches the budget.
+ */
+export type HarnessStep = Pick<RunStep, "kind" | "label" | "detail">;
+
 /** What a running session reports, read one at a time by the runner. */
 export type HarnessEvent =
+	/** A step of the work, for the trace. */
+	| { kind: "step"; step: HarnessStep }
 	/** Tokens spent since the last event, to add to the dispatch's counts. */
 	| { kind: "usage"; split: TokenSplit }
 	/** The agent says it finished. Its own report closes the dispatch (step 8). */
@@ -70,6 +80,8 @@ export const FAKE_HARNESS_VERSION = "fake-harness@1";
 export type FakeScript = {
 	steps: readonly TokenSplit[];
 	outcome: "complete" | "blocked" | "fail" | "until_stopped";
+	/** Trace steps reported before the usage, in order. */
+	trace?: readonly HarnessStep[];
 };
 
 const IDLE: FakeScript = { steps: [], outcome: "until_stopped" };
@@ -124,10 +136,13 @@ export class FakeHarness implements Harness {
 	async start(session: HarnessSession): Promise<boolean> {
 		if (!this.accepting) return false;
 		const s = this.scripts.get(session.dispatchId) ?? IDLE;
-		const events: HarnessEvent[] = s.steps.map((split) => ({
-			kind: "usage",
-			split: { ...split },
-		}));
+		const events: HarnessEvent[] = [
+			...(s.trace ?? []).map((step) => ({ kind: "step" as const, step })),
+			...s.steps.map((split) => ({
+				kind: "usage" as const,
+				split: { ...split },
+			})),
+		];
 		if (s.outcome !== "until_stopped") events.push({ kind: s.outcome });
 		this.sessions.set(session.dispatchId, { session, events });
 		return true;

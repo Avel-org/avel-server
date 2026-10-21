@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, max, sql } from "drizzle-orm";
 import {
 	type HaltReason,
 	type MissionStatus,
@@ -12,6 +12,7 @@ import {
 	agentTemplate,
 	completionReport,
 	dispatch,
+	dispatchStep,
 	mission,
 	rosterEntry,
 } from "../db/schema";
@@ -40,7 +41,7 @@ import {
 	tableFor,
 	wallClockSpent,
 } from "./budget";
-import type { Harness, HarnessSession } from "./harness";
+import type { Harness, HarnessSession, HarnessStep } from "./harness";
 import { missionRoomSource, missionSourceMd } from "./room-source";
 import { dispatchSkills, skillsSha256 } from "./skills";
 
@@ -727,9 +728,66 @@ export async function sweep(deps: RunnerDeps): Promise<SweepResult> {
 }
 
 /**
+ * Writes one step of a dispatch's run, as the next seq, at the clock's now.
+ * A tool_result names the seq of its tool_call by the SDK's toolUseId, so
+ * the trace can pair them. Steps never touch the budget.
+ */
+export async function writeDispatchStep(
+	deps: RunnerDeps,
+	dispatchId: string,
+	step: HarnessStep,
+): Promise<number> {
+	return withTx(deps.db(), async (tx) => {
+		// One writer per dispatch: the runner's tick, and the seq follows.
+		await tx
+			.select({ id: dispatch.id })
+			.from(dispatch)
+			.where(eq(dispatch.id, dispatchId))
+			.for("update");
+		const [last] = await tx
+			.select({ seq: max(dispatchStep.seq) })
+			.from(dispatchStep)
+			.where(eq(dispatchStep.dispatchId, dispatchId));
+		const seq = (last?.seq ?? 0) + 1;
+		const detail = { ...step.detail };
+		const toolUseId = detail.toolUseId;
+		if (step.kind === "tool_result" && typeof toolUseId === "string") {
+			const [call] = await tx
+				.select({ seq: dispatchStep.seq })
+				.from(dispatchStep)
+				.where(
+					and(
+						eq(dispatchStep.dispatchId, dispatchId),
+						eq(dispatchStep.kind, "tool_call"),
+						sql`${dispatchStep.detail}->>'toolUseId' = ${toolUseId}`,
+					),
+				)
+				.orderBy(asc(dispatchStep.seq))
+				.limit(1);
+			detail.callSeq = call?.seq ?? null;
+		}
+		const now = deps.clock.now();
+		await tx.insert(dispatchStep).values({
+			id: deps.ids.next(),
+			dispatchId,
+			seq,
+			kind: step.kind,
+			label: step.label.slice(0, 80),
+			detail,
+			startedAt: now,
+			endedAt: now,
+			tokensIn: null,
+			tokensOut: null,
+			createdAt: now,
+		});
+		return seq;
+	});
+}
+
+/**
  * One runner tick at the clock's now: the sweep, then every running
- * dispatch's harness events, each in its own step. A usage event is
- * counted; fail closes the dispatch as failed. complete and blocked are the
+ * dispatch's harness events, each in its own step. A step event is written
+ * for the trace; a usage event is counted; fail closes the dispatch as failed. complete and blocked are the
  * agent's to report with its token (step 8), so the runner reads them and
  * does nothing, and the dispatch runs on until its report or its wall clock.
  */
@@ -745,7 +803,9 @@ export async function tick(deps: RunnerDeps): Promise<SweepResult> {
 		for (;;) {
 			const event = await deps.harness.next(id);
 			if (event === null) break;
-			if (event.kind === "usage") {
+			if (event.kind === "step") {
+				await writeDispatchStep(deps, id, event.step);
+			} else if (event.kind === "usage") {
 				if (!(await applyUsage(deps, id, event.split))) break;
 			} else if (event.kind === "fail") {
 				await closeRunning(deps, id, { status: "failed" });

@@ -19,6 +19,7 @@ import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import type { IdentityInputs } from "../../contract/agent-template";
 import { type BriefRef, reportFiledBy } from "../../contract/dispatch";
 import { DELIVERABLES } from "../../contract/playbook";
+import { RUN_STEP_KINDS } from "../../contract/shared/run-step";
 import {
 	COMPLETION_STATUSES,
 	DISPATCH_STATUSES,
@@ -47,6 +48,7 @@ export const completionStatus = pgEnum(
 export const haltReason = pgEnum("halt_reason", HALT_REASONS);
 export const versionSource = pgEnum("version_source", VERSION_SOURCES);
 export const dispatchStatus = pgEnum("dispatch_status", DISPATCH_STATUSES);
+export const dispatchStepKind = pgEnum("dispatch_step_kind", RUN_STEP_KINDS);
 export const reportFiledByEnum = pgEnum(
 	"report_filed_by",
 	reportFiledBy.options,
@@ -457,6 +459,58 @@ export interface StoredEdgeMismatch {
 }
 
 /** What an agent produced and the evidence it consumed. Required to close a dispatch. */
+/**
+ * One step of a dispatch's run, for the run trace (J, 2026-10-20), in the
+ * shape Canon's steps take (src/contract/shared/run-step.ts). The runner
+ * writes it as it reads the harness's events, so it lands on the runner's
+ * tick, not as it happens. Append-only: a trigger refuses UPDATE, DELETE
+ * and TRUNCATE (drizzle/0044). Not under row-level security, as dispatch is not.
+ */
+export const dispatchStep = pgTable(
+	"dispatch_step",
+	{
+		...id,
+		dispatchId: uuid("dispatch_id")
+			.notNull()
+			.references(() => dispatch.id),
+		seq: integer("seq").notNull(),
+		kind: dispatchStepKind("kind").notNull(),
+		label: text("label").notNull(),
+		detail: jsonb("detail").$type<Record<string, unknown>>().notNull(),
+		startedAt: timestamp("started_at", {
+			withTimezone: true,
+			mode: "date",
+		}).notNull(),
+		endedAt: timestamp("ended_at", { withTimezone: true, mode: "date" }),
+		tokensIn: integer("tokens_in"),
+		tokensOut: integer("tokens_out"),
+		createdAt: timestamp("created_at", {
+			withTimezone: true,
+			mode: "date",
+		}).notNull(),
+	},
+	(t) => [
+		uniqueIndex("dispatch_step_dispatch_seq_uq").on(t.dispatchId, t.seq),
+		check("dispatch_step_seq_positive", sql`${t.seq} >= 1`),
+		check(
+			"dispatch_step_label_length",
+			sql`char_length(btrim(${t.label})) between 1 and 80`,
+		),
+		check(
+			"dispatch_step_detail_object",
+			sql`jsonb_typeof(${t.detail}) = 'object'`,
+		),
+		check(
+			"dispatch_step_ended_after_started",
+			sql`${t.endedAt} is null or ${t.endedAt} >= ${t.startedAt}`,
+		),
+		check(
+			"dispatch_step_tokens_nonnegative",
+			sql`(${t.tokensIn} is null or ${t.tokensIn} >= 0) and (${t.tokensOut} is null or ${t.tokensOut} >= 0)`,
+		),
+	],
+);
+
 export const completionReport = pgTable(
 	"completion_report",
 	{

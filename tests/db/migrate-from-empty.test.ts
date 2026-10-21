@@ -34,6 +34,7 @@ const EXPECTED_TABLES = [
 	"completion_report",
 	"connection",
 	"dispatch",
+	"dispatch_step",
 	"engagement",
 	"export",
 	"file",

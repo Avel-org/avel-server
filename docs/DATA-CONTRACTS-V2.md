@@ -977,6 +977,10 @@ started_at · ended_at? · tokens_in? · tokens_out?   tokens are approximate: u
 created_at
 ```
 
+#### DispatchStep
+
+`[built]` 2026-10-20. A dispatch's run trace, the same wire as CanonStep (`runStep`, with `turn` null), read by `GET /api/dispatches/:id/steps` (operator only; 404 as the dispatch get route). Columns as CanonStep's, keyed on `dispatch_id` instead of a session, with no client and no row-level security, as Dispatch has none. Written by the runner from the harness's step events, on its tick. A `tool_result`'s `detail.callSeq` is found by the SDK's `toolUseId`, and is null when its call never landed. Append-only.
+
 #### CanonMessage
 
 ```

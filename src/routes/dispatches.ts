@@ -1,5 +1,5 @@
 import { tsr } from "@ts-rest/serverless/fetch";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq, gt, max } from "drizzle-orm";
 import {
 	type BriefRef,
 	briefSchema,
@@ -22,6 +22,7 @@ import {
 	agentTemplate,
 	client,
 	dispatch,
+	dispatchStep,
 	engagement,
 	mission,
 	rosterEntry,
@@ -373,6 +374,45 @@ export function dispatchRoutes(deps: RouteDeps & RunnerDeps) {
 		get: async ({ params }) => {
 			const wire = await visibleDispatch(deps.db(), params.id);
 			return { status: 200, body: ok(wire) };
+		},
+
+		steps: async ({ params, query }) => {
+			const db = deps.db();
+			await visibleDispatch(db, params.id);
+			const rows = await db
+				.select()
+				.from(dispatchStep)
+				.where(
+					and(
+						eq(dispatchStep.dispatchId, params.id),
+						gt(dispatchStep.seq, query.afterSeq),
+					),
+				)
+				.orderBy(asc(dispatchStep.seq))
+				.limit(query.limit);
+			const [last] = await db
+				.select({ seq: max(dispatchStep.seq) })
+				.from(dispatchStep)
+				.where(eq(dispatchStep.dispatchId, params.id));
+			return {
+				status: 200,
+				body: {
+					success: true as const,
+					data: rows.map((r) => ({
+						id: r.id,
+						seq: r.seq,
+						turn: null,
+						kind: r.kind,
+						label: r.label,
+						detail: r.detail,
+						startedAt: r.startedAt.toISOString(),
+						endedAt: r.endedAt?.toISOString() ?? null,
+						tokensIn: r.tokensIn,
+						tokensOut: r.tokensOut,
+					})),
+					meta: { lastSeq: last?.seq ?? 0 },
+				},
+			};
 		},
 
 		brief: async ({ params }) => {

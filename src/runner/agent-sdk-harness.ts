@@ -15,7 +15,13 @@ import {
 	agentTools,
 	type ToolResult,
 } from "./agent-tools";
-import type { Harness, HarnessEvent, HarnessSession } from "./harness";
+import type {
+	Harness,
+	HarnessEvent,
+	HarnessSession,
+	HarnessStep,
+} from "./harness";
+import { SdkStepTrace } from "./sdk-steps";
 import {
 	type ResultModelUsage,
 	UsageCounter,
@@ -85,6 +91,12 @@ export type UsageSink = (
 	dispatchId: string,
 	split: import("../lib/prices").TokenSplit,
 ) => Promise<boolean>;
+
+/** The runner's writeDispatchStep, for the steps queued when a report closes the run. */
+export type StepSink = (
+	dispatchId: string,
+	step: HarnessStep,
+) => Promise<unknown>;
 
 type Running = {
 	abort: AbortController;
@@ -226,6 +238,7 @@ export class AgentSdkHarness implements Harness {
 	private readonly sessions = new Map<string, Running>();
 	private api: AgentApi | null = null;
 	private countUsage: UsageSink | null = null;
+	private writeStep: StepSink | null = null;
 
 	constructor(options: AgentSdkHarnessOptions) {
 		this.options = options;
@@ -245,6 +258,27 @@ export class AgentSdkHarness implements Harness {
 	 */
 	bindUsageSink(sink: UsageSink): void {
 		this.countUsage = sink;
+	}
+
+	/**
+	 * The runner's writeDispatchStep, bound with the runner's deps. The
+	 * report closes the dispatch, and the runner reads only running ones, so
+	 * the report tool writes every queued step first; ticks write the rest.
+	 */
+	bindStepSink(sink: StepSink): void {
+		this.writeStep = sink;
+	}
+
+	/** Writes the session's queued steps now, in order; other events stay queued. */
+	private async flushSteps(dispatchId: string, events: HarnessEvent[]) {
+		const sink = this.writeStep;
+		if (!sink) return;
+		for (;;) {
+			const i = events.findIndex((e) => e.kind === "step");
+			if (i < 0) return;
+			const [e] = events.splice(i, 1);
+			if (e?.kind === "step") await sink(dispatchId, e.step);
+		}
 	}
 
 	/** Counts the session's queued usage events now, in order; other events stay queued. */
@@ -313,7 +347,10 @@ export class AgentSdkHarness implements Harness {
 				skills: session.skills,
 				api: this.api,
 				ids: this.options.ids,
-				beforeReport: () => this.flushUsage(session.dispatchId, events),
+				beforeReport: async () => {
+					await this.flushSteps(session.dispatchId, events);
+					await this.flushUsage(session.dispatchId, events);
+				},
 				onReported: (status) => {
 					running.reported = true;
 					events.push({ kind: status });
@@ -330,6 +367,10 @@ export class AgentSdkHarness implements Harness {
 	private async run(session: HarnessSession, r: Running): Promise<void> {
 		const log = this.options.logger.child({ dispatchId: session.dispatchId });
 		const usage = new UsageCounter();
+		const trace = new SdkStepTrace();
+		const steps = (list: HarnessStep[]) => {
+			for (const step of list) r.events.push({ kind: "step", step });
+		};
 		try {
 			const messages = this.query({
 				prompt: FIRST_MESSAGE,
@@ -337,6 +378,7 @@ export class AgentSdkHarness implements Harness {
 			});
 			for await (const m of messages) {
 				if (r.abort.signal.aborted) return;
+				steps(trace.onMessage(m));
 				if (m.type === "stream_event") {
 					const split = usage.onEvent(m.event as UsageStreamEvent);
 					if (split) r.events.push({ kind: "usage", split });
@@ -359,6 +401,7 @@ export class AgentSdkHarness implements Harness {
 					);
 				}
 			}
+			steps(trace.flush());
 			// The session ended. Without a report, its work stopped with
 			// nothing to say, which the runner records as failed.
 			if (!r.reported && !r.abort.signal.aborted)
@@ -369,6 +412,10 @@ export class AgentSdkHarness implements Harness {
 				{ err: err instanceof Error ? err.message : String(err) },
 				"agent session failed",
 			);
+			steps([
+				...trace.flush(),
+				trace.error(err instanceof Error ? err.message : String(err)),
+			]);
 			if (!r.reported) r.events.push({ kind: "fail" });
 		}
 	}

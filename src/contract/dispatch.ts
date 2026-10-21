@@ -4,6 +4,7 @@ import { missionOrigin } from "./mission";
 import { successEnvelope } from "./shared/envelope";
 import { idempotencyHeaders } from "./shared/idempotency";
 import { pageEnvelope, pageMeta, pageQuery } from "./shared/pagination";
+import { runStepsEnvelope, runStepsQuery } from "./shared/run-step";
 import {
 	completionStatus,
 	DISPATCH_STATUSES,
@@ -285,6 +286,15 @@ export const dispatchContract = c.router({
 		responses: { 200: successEnvelope(dispatchBrief) },
 		summary:
 			"The brief the dispatch started with: scope, read, method, done when",
+	},
+	steps: {
+		method: "GET",
+		path: "/api/dispatches/:id/steps",
+		pathParams: byId,
+		query: runStepsQuery,
+		responses: { 200: runStepsEnvelope },
+		summary:
+			"The run's steps in seq order, the same shape as a Canon session's; written on the runner's tick",
 	},
 	create: {
 		method: "POST",
