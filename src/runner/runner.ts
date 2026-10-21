@@ -56,9 +56,9 @@ import { dispatchSkills, skillsSha256 } from "./skills";
  * deadlock. The harness is told to stop only after that transaction
  * commits.
  *
- * Nothing calls sweep() or tick() in production yet: no runner process
- * exists, and a later step wires one. They hold no timers; the caller
- * passes the clock.
+ * The server ticks sweep() and tick() in its own process when the real
+ * harness is on (src/runner/loop.ts, src/runner/wiring.ts). They hold no
+ * timers; the caller passes the clock.
  */
 
 export type RunnerDeps = {

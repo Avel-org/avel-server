@@ -1,0 +1,130 @@
+import path from "node:path";
+import type { IdGenerator } from "../lib/ids";
+import type { Logger } from "../lib/logger";
+import { AgentSdkHarness, type QueryFn } from "./agent-sdk-harness";
+import { type CanonModel, offlineCanonModel } from "./canon";
+import { AgentSdkCanonModel } from "./canon/sdk-model";
+import { FakeHarness, type Harness } from "./harness";
+import { type StopLoop, startRunnerLoop } from "./loop";
+import { applyUsage, type RunnerDeps, writeDispatchStep } from "./runner";
+
+/**
+ * The harness and Canon's model the server runs with (step 9d), from its
+ * environment. The FakeHarness and the offline Canon model unless
+ * AVEL_HARNESS=agent-sdk, which runs real agents on the Claude Agent SDK
+ * and spends real money; it refuses to start without ANTHROPIC_API_KEY.
+ * The key is taken out of `env` once read, so no other child process
+ * (git) inherits it. Any other AVEL_HARNESS value keeps the FakeHarness,
+ * as .env.example says.
+ */
+export type ServerHarness = {
+	harness: Harness;
+	/** The real harness, when on: the server binds it and ticks the runner. */
+	sdk: AgentSdkHarness | null;
+	canonModel: CanonModel;
+};
+
+export function harnessFromEnv(
+	env: NodeJS.ProcessEnv,
+	options: {
+		/** The parent of the rooms directory: the SDK config dirs go beside it. */
+		stateDir: string;
+		ids: IdGenerator;
+		logger: Logger;
+		/** The SDK's query; tests pass a scripted one. */
+		query?: QueryFn;
+	},
+): ServerHarness {
+	if (env.AVEL_HARNESS !== "agent-sdk") {
+		return {
+			harness: new FakeHarness(),
+			sdk: null,
+			canonModel: offlineCanonModel(),
+		};
+	}
+	const apiKey = env.ANTHROPIC_API_KEY;
+	if (!apiKey) {
+		throw new Error("AVEL_HARNESS=agent-sdk needs ANTHROPIC_API_KEY");
+	}
+	delete env.ANTHROPIC_API_KEY;
+	const { logger } = options;
+	const sdk = new AgentSdkHarness({
+		model: env.AVEL_HARNESS_MODEL || "claude-sonnet-5-5",
+		apiKey,
+		configDir: path.join(options.stateDir, "runner-config"),
+		ids: options.ids,
+		logger,
+		maxBudgetUsd: Number(env.AVEL_HARNESS_MAX_BUDGET_USD ?? 2),
+		maxTurns: Number(env.AVEL_HARNESS_MAX_TURNS ?? 60),
+		...(options.query ? { query: options.query } : {}),
+	});
+	const canonModel = new AgentSdkCanonModel({
+		apiKey,
+		configDir: path.join(options.stateDir, "canon-config"),
+		logger,
+		maxBudgetUsd: Number(env.AVEL_CANON_MAX_BUDGET_USD ?? 1),
+		maxTurns: Number(env.AVEL_CANON_MAX_TURNS ?? 30),
+	});
+	return { harness: sdk, sdk, canonModel };
+}
+
+/**
+ * Binds the real harness to the app and the runner, then starts the
+ * runner's loop. Report and finding go through the app itself, in
+ * process; usage and trace steps go to the runner with its own deps.
+ */
+export function startRealRunner(
+	sdk: AgentSdkHarness,
+	fetch: (request: Request) => Response | Promise<Response>,
+	deps: RunnerDeps,
+	options: Parameters<typeof startRunnerLoop>[1],
+): StopLoop {
+	sdk.bindAgentApi((request) => Promise.resolve(fetch(request)));
+	sdk.bindUsageSink((id, split) => applyUsage(deps, id, split));
+	sdk.bindStepSink((id, step) => writeDispatchStep(deps, id, step));
+	return startRunnerLoop(deps, options);
+}
+
+/**
+ * The server's shutdown: stops every loop and waits for the steps in
+ * flight, stops taking requests and waits for those open, then closes the
+ * database. 0 when all of it finished within `timeoutMs`, else 1, with the
+ * reason logged; the caller exits with it either way.
+ */
+export async function shutdown(parts: {
+	stops: readonly StopLoop[];
+	server: { close: (done: (err?: Error) => void) => unknown };
+	closeDb: () => Promise<void>;
+	logger: Logger;
+	timeoutMs?: number;
+}): Promise<0 | 1> {
+	const { logger } = parts;
+	const timeoutMs = parts.timeoutMs ?? 10_000;
+	const work = (async () => {
+		await Promise.all(parts.stops.map((stop) => stop()));
+		await new Promise<void>((resolve, reject) =>
+			parts.server.close((err) => (err ? reject(err) : resolve())),
+		);
+		await parts.closeDb();
+	})();
+	let timer: NodeJS.Timeout | undefined;
+	const timedOut = new Promise<"timeout">((resolve) => {
+		timer = setTimeout(() => resolve("timeout"), timeoutMs);
+	});
+	try {
+		if ((await Promise.race([work, timedOut])) === "timeout") {
+			logger.error({ timeoutMs }, "shutdown timed out");
+			return 1;
+		}
+		logger.info("shut down");
+		return 0;
+	} catch (err) {
+		logger.error(
+			{ err: err instanceof Error ? err.message : String(err) },
+			"shutdown failed",
+		);
+		return 1;
+	} finally {
+		clearTimeout(timer);
+	}
+}

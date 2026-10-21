@@ -9,7 +9,7 @@ import { authConfigFromEnv } from "./auth/config";
 import { previewAuthConfig, previewConfigFromEnv } from "./auth/preview";
 import { signInRecorder } from "./auth/sign-in-activity";
 import { sweepStuckCanonTurns } from "./db/canon";
-import { getDb, useDatabaseUrl } from "./db/client";
+import { closeDb, getDb, useDatabaseUrl } from "./db/client";
 import { dispatchByTokenSha256 } from "./db/dispatch";
 import { assertRuntimeRole, runtimeDatabaseUrl } from "./db/runtime";
 import * as authSchema from "./db/schema/auth";
@@ -33,13 +33,9 @@ import { runnerCredentialSha256 } from "./lib/tokens";
 import { worktreeRooms } from "./rooms/provider";
 import { localSources } from "./rooms/sources";
 import { DEFAULT_UPLOAD_MAX_BYTES } from "./routes/files";
-import { AgentSdkHarness } from "./runner/agent-sdk-harness";
 import { DEFAULT_PRICE_BOOK } from "./runner/budget";
-import { type CanonModel, canonTick, offlineCanonModel } from "./runner/canon";
-import { AgentSdkCanonModel } from "./runner/canon/sdk-model";
-import { FakeHarness, type Harness } from "./runner/harness";
-import { startRunnerLoop } from "./runner/loop";
-import { applyUsage, writeDispatchStep } from "./runner/runner";
+import { intervalFromEnv, type StopLoop, startCanonLoop } from "./runner/loop";
+import { harnessFromEnv, shutdown, startRealRunner } from "./runner/wiring";
 
 // Node does not read .env on its own; drizzle.config.ts and the seed do the
 // same. loadEnvFile never overrides a variable that is already set, so real
@@ -103,42 +99,16 @@ const roomsRoot = path.join(
 	"rooms",
 );
 
-// The harness (step 9d). The FakeHarness unless AVEL_HARNESS=agent-sdk,
-// which runs real agents on the Claude Agent SDK and spends real money; it
-// refuses to start without ANTHROPIC_API_KEY. The key is taken out of
-// process.env once read, so no other child process (git) inherits it.
-const realHarness = process.env.AVEL_HARNESS === "agent-sdk";
-let harness: Harness = new FakeHarness();
-let sdkHarness: AgentSdkHarness | null = null;
-// Canon's model turns run on the same opt-in: no real model without it.
-// Without it, every turn answers that no model is connected, so a posted
-// message still ends its turn and the sweep still runs.
-let canonModel: CanonModel = offlineCanonModel();
-if (realHarness) {
-	const apiKey = process.env.ANTHROPIC_API_KEY;
-	if (!apiKey) {
-		throw new Error("AVEL_HARNESS=agent-sdk needs ANTHROPIC_API_KEY");
-	}
-	delete process.env.ANTHROPIC_API_KEY;
-	sdkHarness = new AgentSdkHarness({
-		model: process.env.AVEL_HARNESS_MODEL || "claude-sonnet-5-5",
-		apiKey,
-		configDir: path.join(path.dirname(roomsRoot), "runner-config"),
-		ids: randomIds,
-		logger,
-		maxBudgetUsd: Number(process.env.AVEL_HARNESS_MAX_BUDGET_USD ?? 2),
-		maxTurns: Number(process.env.AVEL_HARNESS_MAX_TURNS ?? 60),
-	});
-	harness = sdkHarness;
-	canonModel = new AgentSdkCanonModel({
-		apiKey,
-		configDir: path.join(path.dirname(roomsRoot), "canon-config"),
-		logger,
-		maxBudgetUsd: Number(process.env.AVEL_CANON_MAX_BUDGET_USD ?? 1),
-		maxTurns: Number(process.env.AVEL_CANON_MAX_TURNS ?? 30),
-	});
+// The harness and Canon's model (src/runner/wiring.ts): the FakeHarness and
+// the offline model unless AVEL_HARNESS=agent-sdk.
+const { harness, sdk, canonModel } = harnessFromEnv(process.env, {
+	stateDir: path.dirname(roomsRoot),
+	ids: randomIds,
+	logger,
+});
+if (sdk) {
 	logger.warn(
-		{ model: sdkHarness.model, harness: sdkHarness.version },
+		{ model: sdk.model, harness: sdk.version },
 		"REAL HARNESS is ON: started dispatches run a real model and spend money",
 	);
 } else {
@@ -146,6 +116,17 @@ if (realHarness) {
 		"No model is connected: dispatches run the FakeHarness and Canon answers every message with a fixed reply",
 	);
 }
+// Read before anything starts, so a bad value refuses to start the server.
+const runnerIntervalMs = intervalFromEnv(
+	"AVEL_RUNNER_INTERVAL_MS",
+	process.env.AVEL_RUNNER_INTERVAL_MS,
+	5000,
+);
+const canonIntervalMs = intervalFromEnv(
+	"AVEL_CANON_INTERVAL_MS",
+	process.env.AVEL_CANON_INTERVAL_MS,
+	3000,
+);
 const rooms = worktreeRooms(roomsRoot);
 // The Drive's bytes: AVEL_BLOB_DIR, else beside the rooms. R2 replaces this
 // in production behind the same interface (src/gateways/blob.ts).
@@ -204,63 +185,60 @@ const app = createApp({
 
 // The real harness files reports and findings through the app itself, in
 // process, and the runner ticks here. With the FakeHarness nothing ticks.
-if (sdkHarness) {
-	sdkHarness.bindAgentApi((request) => Promise.resolve(app.fetch(request)));
-	const runnerDeps = {
-		db: getDb,
-		clock: systemClock,
-		ids: randomIds,
-		harness: sdkHarness,
-		prices: DEFAULT_PRICE_BOOK,
-		rooms,
-		roomSources,
-	};
-	sdkHarness.bindUsageSink((id, split) => applyUsage(runnerDeps, id, split));
-	sdkHarness.bindStepSink((id, step) =>
-		writeDispatchStep(runnerDeps, id, step),
+const stops: StopLoop[] = [];
+if (sdk) {
+	stops.push(
+		startRealRunner(
+			sdk,
+			app.fetch,
+			{
+				db: getDb,
+				clock: systemClock,
+				ids: randomIds,
+				harness: sdk,
+				prices: DEFAULT_PRICE_BOOK,
+				rooms,
+				roomSources,
+			},
+			{ intervalMs: runnerIntervalMs, logger },
+		),
 	);
-	startRunnerLoop(runnerDeps, {
-		intervalMs: Number(process.env.AVEL_RUNNER_INTERVAL_MS ?? 5000),
-		logger,
-	});
 }
 
 // Canon's turns: a posted operator message starts one; this tick answers it.
 // It always runs, model or not, because nothing else ends a turn.
-{
-	const canonDeps = {
-		db: getDb,
-		clock: systemClock,
-		ids: randomIds,
-		prices: DEFAULT_PRICE_BOOK,
-		blobs: localDiskBlobs(blobRoot, randomIds),
-		model: canonModel,
-		logger,
-		sweepStuckTurns: sweepStuckCanonTurns,
-	};
-	let canonBusy = false;
-	setInterval(
-		async () => {
-			if (canonBusy) return;
-			canonBusy = true;
-			try {
-				const results = await canonTick(canonDeps);
-				if (results.length > 0) logger.info({ results }, "canon turns ran");
-			} catch (err) {
-				logger.error(
-					{ err: err instanceof Error ? err.message : String(err) },
-					"canon tick failed",
-				);
-			} finally {
-				canonBusy = false;
-			}
+stops.push(
+	startCanonLoop(
+		{
+			db: getDb,
+			clock: systemClock,
+			ids: randomIds,
+			prices: DEFAULT_PRICE_BOOK,
+			blobs: localDiskBlobs(blobRoot, randomIds),
+			model: canonModel,
+			logger,
+			sweepStuckTurns: sweepStuckCanonTurns,
 		},
-		Number(process.env.AVEL_CANON_INTERVAL_MS ?? 3000),
-	);
-}
+		{ intervalMs: canonIntervalMs, logger },
+	),
+);
 
-serve({ fetch: app.fetch, port });
+const server = serve({ fetch: app.fetch, port });
 logger.info(
 	{ port },
 	`avel-server listening on http://localhost:${port}/api/health`,
 );
+
+// On SIGINT or SIGTERM: stop the loops and let the steps in flight commit,
+// stop taking requests, close the database, exit. A second signal exits at once.
+let shuttingDown = false;
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+	process.on(signal, () => {
+		if (shuttingDown) process.exit(1);
+		shuttingDown = true;
+		logger.info({ signal }, "shutting down");
+		void shutdown({ stops, server, closeDb, logger }).then((code) =>
+			process.exit(code),
+		);
+	});
+}
