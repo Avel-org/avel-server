@@ -87,7 +87,8 @@ export const missionLifecycleContract = c.router({
 		pathParams: byId,
 		body: c.noBody(),
 		responses: { 200: successEnvelope(missionStatusChange) },
-		summary: "draft → active; refuses with the first readiness blocker",
+		summary:
+			"draft → active; refuses with the first readiness blocker, then template_not_rosterable for a Firm template on the roster",
 	},
 	halt: {
 		method: "POST",
