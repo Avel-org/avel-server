@@ -78,10 +78,6 @@ export function buildApp(
 		clock?: Clock;
 		ids?: IdGenerator;
 		operators?: string[];
-		/** Dev preview on. */
-		preview?: boolean;
-		/** Preview started without GitHub credentials: sign-in endpoints off. */
-		signInDisabled?: boolean;
 		/** Replaces the fake auth.signed_in recorder, for example with one that throws. */
 		recordSignIn?: (entry: SignIn) => Promise<void>;
 		/** Makes every insert into this Better Auth model throw, inside a transaction too. */
@@ -96,10 +92,7 @@ export function buildApp(
 		account: [],
 		verification: [],
 	} as Record<string, Array<Record<string, unknown>>>;
-	const config = {
-		...testAuthConfig(options.operators ?? [String(OPERATOR.id)]),
-		...(options.signInDisabled ? { signInDisabled: true as const } : {}),
-	};
+	const config = testAuthConfig(options.operators ?? [String(OPERATOR.id)]);
 	const auth = createAuth({
 		config,
 		database: options.failInserts
@@ -123,7 +116,6 @@ export function buildApp(
 			throw new Error("unit tests have no database; use tests/api");
 		},
 		webOrigins: config.webOrigins,
-		preview: options.preview ?? false,
 		repos: noRepos,
 		templates: noTemplates,
 		dispatchByToken: noDispatches,

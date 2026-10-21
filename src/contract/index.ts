@@ -74,8 +74,6 @@ export const healthResponse = z.object({
 	ok: z.literal(true),
 	service: z.literal("avel-server"),
 	time: z.string().datetime(),
-	/** True while dev preview lets sessionless reads through (AVEL_DEV_PREVIEW). */
-	preview: z.boolean(),
 });
 
 export const contract = c.router(
