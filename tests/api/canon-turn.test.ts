@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { eq, or } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { sweepStuckCanonTurns } from "../../src/db/canon";
 import { closeDb } from "../../src/db/client";
 import type { ClientId } from "../../src/db/client-id";
 import {
@@ -197,6 +198,31 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 				.orderBy(canonMessage.seq),
 		);
 
+	/**
+	 * The operator posts again: a new operator message at `seq` and the turn
+	 * started. A turn runs once (its claim), so a test that runs a session
+	 * again starts a new turn, as the route does.
+	 */
+	const postAgain = (tx: Tx, t: Tenant & { sessionId: string }, seq: number) =>
+		withClientScope(tx, t.scope, async (x) => {
+			await x.insert(canonMessage).values({
+				id: randomUUID(),
+				canonSessionId: t.sessionId,
+				clientId: t.clientId,
+				seq,
+				role: "operator",
+				mode: "draft",
+				parts: [],
+				contentMd: `Again, ${seq}.`,
+				citations: [],
+				createdAt: clock.now(),
+			});
+			await x
+				.update(canonSession)
+				.set({ turnStartedAt: clock.now() })
+				.where(eq(canonSession.id, t.sessionId));
+		});
+
 	const activityOf = (tx: Tx, sessionId: string) =>
 		tx
 			.select()
@@ -384,12 +410,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 				.update(intake)
 				.set({ status: "proposed" })
 				.where(eq(intake.id, s.a.intakeId));
-			await withClientScope(tx, s.a.scope, (x) =>
-				x
-					.update(canonSession)
-					.set({ turnStartedAt: clock.now() })
-					.where(eq(canonSession.id, s.a.sessionId)),
-			);
+			await postAgain(tx, s.a, 2);
 			s.model.script(s.a.sessionId, [
 				{ tool: "draft_brief", input: { brief } },
 			]);
@@ -486,16 +507,12 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 			const s = await seed(tx);
 			const [booking] = s.chunksOf(s.a);
 			if (!booking) throw new Error("no chunk");
-			for (const citation of [
+			for (const [i, citation] of [
 				{ source: "canon://nowhere/x", cited_text: booking.text },
 				{ source: sourceFor(booking), cited_text: "Clients book a table." },
-			]) {
-				await withClientScope(tx, s.a.scope, (x) =>
-					x
-						.update(canonSession)
-						.set({ turnStartedAt: clock.now() })
-						.where(eq(canonSession.id, s.a.sessionId)),
-				);
+			].entries()) {
+				// The seed's message is the first turn; each later one is posted.
+				if (i > 0) await postAgain(tx, s.a, i + 1);
 				s.model.script(s.a.sessionId, [
 					{ reply: "Booking.", citations: [citation] },
 				]);
@@ -503,7 +520,9 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 					(await runCanonTurn(s.deps, inClient(s.a.scope), s.a.sessionId))
 						.outcome,
 				).toBe("failed");
-				expect(await messagesOf(tx, s.a)).toHaveLength(1);
+				expect(
+					(await messagesOf(tx, s.a)).filter((m) => m.role === "canon"),
+				).toEqual([]);
 				expect((await sessionRow(tx, s.a)).turnStartedAt).toBeNull();
 			}
 		});
@@ -849,6 +868,138 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 				(await runCanonTurn(s.deps, inClient(s.a.scope), s.a.sessionId))
 					.outcome,
 			).toBe("skipped");
+		});
+	});
+
+	describe("one run per turn (the prompt hash, 2026-10-21)", () => {
+		const midTurnAgain = (tx: Tx, t: Tenant & { sessionId: string }) =>
+			withClientScope(tx, t.scope, (x) =>
+				x
+					.update(canonSession)
+					.set({ turnStartedAt: clock.now() })
+					.where(eq(canonSession.id, t.sessionId)),
+			);
+
+		it("claims the turn, its seq and its prompt's hash, before the model runs", async () => {
+			await asApp(async (tx) => {
+				const s = await seed(tx);
+				let seenByModel: unknown = "never ran";
+				const model: CanonDeps["model"] = {
+					version: FAKE_CANON_VERSION,
+					async *run() {
+						const row = await sessionRow(tx, s.a);
+						seenByModel = [row.turnPromptSeq, row.turnPromptSha256];
+						yield { kind: "reply", text: "Hello.", citations: [] };
+					},
+				};
+				const result = await runCanonTurn(
+					{ ...s.deps, model },
+					inClient(s.a.scope),
+					s.a.sessionId,
+				);
+				expect(result.outcome).toBe("replied");
+				expect(result.promptSha256).toMatch(/^[0-9a-f]{64}$/);
+				expect(seenByModel).toEqual([1, result.promptSha256]);
+				expect(await sessionRow(tx, s.a)).toMatchObject({
+					turnStartedAt: null,
+					turnPromptSeq: 1,
+					turnPromptSha256: result.promptSha256,
+				});
+			});
+		});
+
+		it("never runs a claimed turn again: a run that died mid-turn leaves its claim, and the next one calls no model", async () => {
+			await asApp(async (tx) => {
+				const s = await seed(tx);
+				s.model.script(s.a.sessionId, [{ reply: "Hello." }]);
+				await runCanonTurn(s.deps, inClient(s.a.scope), s.a.sessionId);
+				// As if the process died before the turn's end committed.
+				await midTurnAgain(tx, s.a);
+				const before = s.model.prompts.length;
+				const again = await runCanonTurn(
+					s.deps,
+					inClient(s.a.scope),
+					s.a.sessionId,
+				);
+				expect(again.outcome).toBe("repeated");
+				expect(s.model.prompts).toHaveLength(before);
+				expect(await messagesOf(tx, s.a)).toHaveLength(2);
+			});
+		});
+
+		it("runs a new turn: a later operator message is not held by the last turn's claim", async () => {
+			await asApp(async (tx) => {
+				const s = await seed(tx);
+				s.model.script(s.a.sessionId, [{ reply: "Hello." }]);
+				const first = await runCanonTurn(
+					s.deps,
+					inClient(s.a.scope),
+					s.a.sessionId,
+				);
+				await withClientScope(tx, s.a.scope, (x) =>
+					x.insert(canonMessage).values({
+						id: randomUUID(),
+						canonSessionId: s.a.sessionId,
+						clientId: s.a.clientId,
+						seq: 3,
+						role: "operator",
+						mode: "draft",
+						parts: [],
+						contentMd: "One more thing.",
+						citations: [],
+						createdAt: clock.now(),
+					}),
+				);
+				await midTurnAgain(tx, s.a);
+				s.model.script(s.a.sessionId, [{ reply: "Sure." }]);
+				const second = await runCanonTurn(
+					s.deps,
+					inClient(s.a.scope),
+					s.a.sessionId,
+				);
+				expect(second.outcome).toBe("replied");
+				expect(second.promptSha256).not.toBe(first.promptSha256);
+				expect(await sessionRow(tx, s.a)).toMatchObject({
+					turnPromptSeq: 3,
+					turnPromptSha256: second.promptSha256,
+				});
+			});
+		});
+
+		it("the sweep ends a claimed turn at once, and leaves an unclaimed one until its 10 minutes", async () => {
+			await asApp(async (tx) => {
+				const s = await seed(tx);
+				s.model.script(s.a.sessionId, [{ reply: "Hello." }]);
+				await runCanonTurn(s.deps, inClient(s.a.scope), s.a.sessionId);
+				await midTurnAgain(tx, s.a);
+				// b is mid-turn and was never claimed: a turn not yet run.
+				expect(await sweepStuckCanonTurns(tx, clock)).toEqual([s.a.sessionId]);
+				expect((await sessionRow(tx, s.a)).turnStartedAt).toBeNull();
+				expect((await sessionRow(tx, s.b)).turnStartedAt).not.toBeNull();
+			});
+		});
+
+		it("ticks a repeat to an end: the sweep clears it, and no model runs it", async () => {
+			await asApp(async (tx) => {
+				const s = await seed(tx);
+				s.model.script(s.a.sessionId, [{ reply: "Hello." }]);
+				await runCanonTurn(s.deps, inClient(s.a.scope), s.a.sessionId);
+				await midTurnAgain(tx, s.a);
+				await withClientScope(tx, s.b.scope, (x) =>
+					x
+						.update(canonSession)
+						.set({ turnStartedAt: null })
+						.where(eq(canonSession.id, s.b.sessionId)),
+				);
+				const before = s.model.prompts.length;
+				const results = await canonTick({
+					...s.deps,
+					sweepStuckTurns: sweepStuckCanonTurns,
+				});
+				expect(results).toEqual([]);
+				expect(s.model.prompts).toHaveLength(before);
+				expect((await sessionRow(tx, s.a)).turnStartedAt).toBeNull();
+			});
 		});
 	});
 });

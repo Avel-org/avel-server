@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNotNull, lt } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, lt, or, sql } from "drizzle-orm";
 import type { Clock } from "../lib/clock";
 import {
 	type ClientId,
@@ -105,9 +105,12 @@ export async function canonScopes(db: Executor): Promise<CanonScope[]> {
 export const CANON_TURN_MAX_MS = 10 * 60 * 1000;
 
 /**
- * Ends turns that never finished: an open session whose turn started more
- * than `maxMs` ago (a crash mid-reply, a lost harness) gets its
- * turn_started_at cleared, so the operator can post again. The session
+ * Ends turns that never finished, so the operator can post again: an open
+ * session whose turn started more than `maxMs` ago (a crash mid-reply, a
+ * lost harness), and at once one whose current turn is claimed (its run
+ * began and never ended; running it again would spend twice), get
+ * turn_started_at cleared. Run it only between turns, as the tick does: a
+ * turn running now is claimed too. The session
  * stays open; nothing else changes. canon_session is under row-level
  * security, so this runs once per scope (canonScopes), the open scope
  * first, then each client in id order. Returns the sessions it cleared, for the caller's log.
@@ -129,7 +132,18 @@ export async function sweepStuckCanonTurns(
 					and(
 						eq(canonSession.status, "open"),
 						isNotNull(canonSession.turnStartedAt),
-						lt(canonSession.turnStartedAt, cutoff),
+						or(
+							lt(canonSession.turnStartedAt, cutoff),
+							// Claimed: a run of this turn began and never ended. The
+							// identifiers are qualified by hand: Drizzle renders them
+							// unqualified in raw sql, and the subquery would bind
+							// "seq" and "id" to canon_message.
+							sql`"canon_session"."turn_prompt_seq" = (
+								select max("m"."seq") from "canon_message" "m"
+								where "m"."canon_session_id" = "canon_session"."id"
+									and "m"."role" = 'operator'
+							)`,
+						),
 					),
 				)
 				.returning({ id: canonSession.id }),
