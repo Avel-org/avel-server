@@ -419,7 +419,8 @@ export type DispatchEnd =
 
 /**
  * The one way a running dispatch ends without the agent: halted or failed.
- * Sets the status, the halt reason and closed_at, files the system's
+ * First counts the usage the harness reported and the runner has not read
+ * (countPending), then sets the status, the halt reason and closed_at, files the system's
  * CompletionReport from the dispatch's own fields, and queues the harness
  * stop for after the commit. Logs, in this order:
  *
@@ -428,20 +429,25 @@ export type DispatchEnd =
  *   dispatch.closed          (system)
  *
  * Closing sets closed_at, and the token dies with the status: the caller
- * middleware answers anything but running 401 DISPATCH_CLOSED.
+ * middleware answers anything but running 401 DISPATCH_CLOSED. When the
+ * counted usage brings an active mission to its spend ceiling, the mission
+ * halts after the close (haltAtCeiling).
  */
 export async function closeBySystem(
 	step: Step,
 	deps: RunnerDeps,
 	m: LockedMission,
-	d: DispatchRow,
+	running: DispatchRow,
 	end: DispatchEnd,
 	by: Acting,
 ): Promise<void> {
+	let d = running;
 	const { tx } = step;
 	if (d.status !== "running") {
 		throw new Error(`dispatch ${d.id} is ${d.status}, not running`);
 	}
+	const pending = await countPending(step, deps, m, d, by.requestId);
+	d = pending.d;
 	const haltReason = end.status === "halted" ? end.haltReason : null;
 	await tx
 		.update(dispatch)
@@ -514,6 +520,7 @@ export async function closeBySystem(
 		payload: { status: end.status, reportId },
 	});
 	step.stops.push(d.id);
+	if (pending.counted) await haltAtCeiling(step, deps, m, by.requestId);
 }
 
 /** Halts every running dispatch of the locked mission with `reason`, oldest first. */
@@ -540,6 +547,120 @@ export async function haltRunningDispatches(
 			by,
 		);
 	}
+}
+
+/**
+ * Writes one usage step's counts onto the dispatch, logs the first
+ * soft-ceiling crossing as the system, and returns the row as counted.
+ * Throws when the dispatch has no price table, which start refuses.
+ */
+async function writeUsage(
+	tx: Tx,
+	deps: RunnerDeps,
+	m: LockedMission,
+	d: DispatchRow,
+	split: TokenSplit,
+	requestId: string,
+): Promise<{ d: DispatchRow; hardReached: boolean }> {
+	const version = d.priceVersion;
+	const table = version === null ? undefined : tableFor(deps.prices, version);
+	if (!table || d.model === null) {
+		throw new Error(`dispatch ${d.id} has no price table ${version}`);
+	}
+	const next = addUsage({ ...d, model: d.model }, split, table);
+	const counts = {
+		tokensIn: next.tokensIn,
+		tokensOut: next.tokensOut,
+		cacheReadTokens: next.cacheReadTokens,
+		cacheWriteTokens: next.cacheWriteTokens,
+		tokensUsed: next.tokensUsed,
+		spendUsd: next.spendUsd,
+		softCeilingCrossed: next.softCeilingCrossed,
+	};
+	await tx
+		.update(dispatch)
+		.set({ ...counts, ...touch(deps.clock) })
+		.where(eq(dispatch.id, d.id));
+	if (next.crossedSoftNow) {
+		await logActivity(tx, deps, {
+			...SYSTEM,
+			action: "dispatch.soft_ceiling_crossed",
+			entityType: "dispatch",
+			entityId: d.id,
+			missionId: m.id,
+			engagementId: m.engagementId,
+			requestId,
+			payload: {
+				tokenSoftCeiling: d.tokenSoftCeiling,
+				tokensUsed: next.tokensUsed,
+			},
+		});
+	}
+	return { d: { ...d, ...counts }, hardReached: next.hardReached };
+}
+
+const isZeroSplit = (s: TokenSplit) =>
+	s.tokensIn === 0 &&
+	s.tokensOut === 0 &&
+	s.cacheReadTokens === 0 &&
+	s.cacheWriteTokens === 0;
+
+/**
+ * Runner H1: counts, in the closing step's transaction, the usage the
+ * harness reported for a running dispatch and the runner has not read yet
+ * (Harness.pendingUsage): queued usage events, a message still streaming
+ * and the SDK's end-of-run totals. Without it, whatever closed the
+ * dispatch (a halt, a ceiling, the wall clock, the agent's report) dropped
+ * those tokens, since usage counts only on a running dispatch. The halt
+ * reason is the closer's; a hard ceiling crossed here only shows in the
+ * counts. A first soft-ceiling crossing is logged under `requestId`, the
+ * closer's. Returns the row as counted, and whether anything was.
+ */
+export async function countPending(
+	step: Step,
+	deps: RunnerDeps,
+	m: LockedMission,
+	d: DispatchRow,
+	requestId: string,
+): Promise<{ d: DispatchRow; counted: boolean }> {
+	const split = await deps.harness.pendingUsage(d.id);
+	if (isZeroSplit(split)) return { d, counted: false };
+	const written = await writeUsage(step.tx, deps, m, d, split, requestId);
+	return { d: written.d, counted: true };
+}
+
+/**
+ * Halts the mission at its spend ceiling, as the system, when it is still
+ * active and its spend has reached the ceiling. Reads the mission's status
+ * again, under the lock its caller holds, since an earlier step in the
+ * same transaction may have halted it. Returns whether it halted it.
+ */
+export async function haltAtCeiling(
+	step: Step,
+	deps: RunnerDeps,
+	m: LockedMission,
+	requestId: string,
+): Promise<boolean> {
+	const [now] = await step.tx
+		.select({ status: mission.status })
+		.from(mission)
+		.where(eq(mission.id, m.id));
+	if (now?.status !== "active") return false;
+	if (
+		!spendCeilingReached(
+			await missionSpentUsd(step.tx, m.id),
+			m.spendCeilingUsd,
+		)
+	) {
+		return false;
+	}
+	await haltMissionAtCeiling(
+		step,
+		deps,
+		{ ...m, status: now.status },
+		{ actor: SYSTEM, requestId },
+	);
+	return true;
 }
 
 /**
@@ -608,71 +729,28 @@ export async function applyUsage(
 	return inStep(deps, async (step) => {
 		const locked = await lockRunning(step.tx, dispatchId);
 		if (!locked) return false;
-		const { m, d } = locked;
-		const version = d.priceVersion;
-		const table = version === null ? undefined : tableFor(deps.prices, version);
-		if (!table || d.model === null) {
-			throw new Error(`dispatch ${d.id} has no price table ${version}`);
-		}
-		const next = addUsage({ ...d, model: d.model }, split, table);
-		await step.tx
-			.update(dispatch)
-			.set({
-				tokensIn: next.tokensIn,
-				tokensOut: next.tokensOut,
-				cacheReadTokens: next.cacheReadTokens,
-				cacheWriteTokens: next.cacheWriteTokens,
-				tokensUsed: next.tokensUsed,
-				spendUsd: next.spendUsd,
-				softCeilingCrossed: next.softCeilingCrossed,
-				...touch(deps.clock),
-			})
-			.where(eq(dispatch.id, d.id));
-		const counted: DispatchRow = {
-			...d,
-			tokensIn: next.tokensIn,
-			tokensOut: next.tokensOut,
-			cacheReadTokens: next.cacheReadTokens,
-			cacheWriteTokens: next.cacheWriteTokens,
-			tokensUsed: next.tokensUsed,
-			spendUsd: next.spendUsd,
-			softCeilingCrossed: next.softCeilingCrossed,
-		};
-
+		const { m } = locked;
 		const by = system(deps);
-		if (next.crossedSoftNow) {
-			await logActivity(step.tx, deps, {
-				...by.actor,
-				action: "dispatch.soft_ceiling_crossed",
-				entityType: "dispatch",
-				entityId: d.id,
-				missionId: m.id,
-				engagementId: m.engagementId,
-				requestId: by.requestId,
-				payload: {
-					tokenSoftCeiling: d.tokenSoftCeiling,
-					tokensUsed: next.tokensUsed,
-				},
-			});
-		}
-		if (next.hardReached) {
+		const { d, hardReached } = await writeUsage(
+			step.tx,
+			deps,
+			m,
+			locked.d,
+			split,
+			by.requestId,
+		);
+		if (hardReached) {
 			await closeBySystem(
 				step,
 				deps,
 				m,
-				counted,
+				d,
 				{ status: "halted", haltReason: "token_hard_ceiling" },
 				by,
 			);
 		}
-		const ceilingReached =
-			m.status === "active" &&
-			spendCeilingReached(
-				await missionSpentUsd(step.tx, m.id),
-				m.spendCeilingUsd,
-			);
-		if (ceilingReached) await haltMissionAtCeiling(step, deps, m, by);
-		return !next.hardReached && !ceilingReached;
+		const ceilingReached = await haltAtCeiling(step, deps, m, by.requestId);
+		return !hardReached && !ceilingReached;
 	});
 }
 

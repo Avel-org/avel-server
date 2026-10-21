@@ -565,4 +565,43 @@ describe.skipIf(!process.env.DATABASE_URL)("POST /api/agent/report", () => {
 			expect(existsSync(run.root)).toBe(true);
 		}),
 	);
+
+	it("counts the usage the runner has not read yet before the report takes the dispatch's tokens (runner H1)", async () => {
+		const harness = new FakeHarness();
+		const root = roomsRoot();
+		await withApi(
+			async (h) => {
+				await h.signIn();
+				const m = await realMission(h.tx, h.ns);
+				const split = (n: number) => ({
+					tokensIn: n,
+					tokensOut: 0,
+					cacheReadTokens: 0,
+					cacheWriteTokens: 0,
+				});
+				const run = await started(h, harness, m, {
+					steps: [split(700), split(50)],
+					outcome: "until_stopped",
+				});
+				const res = await h.call(REPORT, {
+					method: "POST",
+					body: { ...complete, artifactsRead: [] },
+					headers: bearer(run.token),
+				});
+				expect(res.status).toBe(201);
+				const wire = created.parse(await res.json()).data;
+				expect(wire.actualTokens).toBe(750);
+				expect(await row(h.tx, run.id)).toMatchObject({
+					status: "complete",
+					tokensIn: 750,
+					tokensUsed: 750,
+				});
+			},
+			{
+				harness,
+				rooms: worktreeRooms(root),
+				roomSources: localSources(sources),
+			},
+		);
+	});
 });

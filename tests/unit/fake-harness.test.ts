@@ -75,4 +75,17 @@ describe("FakeHarness", () => {
 		expect(await h.has("d1")).toBe(false);
 		expect(await h.next("d1")).toBeNull();
 	});
+
+	it("reads its queued usage as pending, read only, and none once stopped", async () => {
+		const h = new FakeHarness();
+		expect(await h.pendingUsage("d1")).toEqual(split(0));
+		h.script("d1", { steps: [split(1), split(2)], outcome: "complete" });
+		await h.start(session("d1"));
+		expect(await h.pendingUsage("d1")).toEqual(split(3));
+		expect(await h.pendingUsage("d1")).toEqual(split(3));
+		await h.next("d1");
+		expect(await h.pendingUsage("d1")).toEqual(split(2));
+		await h.stop("d1");
+		expect(await h.pendingUsage("d1")).toEqual(split(0));
+	});
 });

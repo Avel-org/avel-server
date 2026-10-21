@@ -95,6 +95,15 @@ export class UsageCounter {
 		return this.total;
 	}
 
+	/**
+	 * The counts so far of the message still streaming, which its
+	 * message_stop would count; zero when none is. Read only.
+	 */
+	get streaming(): TokenSplit {
+		const c = this.current;
+		return c && !this.counted.has(c.id) ? c.split : ZERO;
+	}
+
 	/** One stream event; a split to count when a message ends, else null. */
 	onEvent(event: UsageStreamEvent): TokenSplit | null {
 		if (event.type === "message_start") {
