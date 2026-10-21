@@ -585,19 +585,6 @@ describe.skipIf(!process.env.DATABASE_URL)("the Drive's byte routes", () => {
 		);
 	});
 
-	it("refuses a dev-preview read with no session", async () => {
-		await withApi(
-			async (h) => {
-				const { a, upload, download } = await setUp(h);
-				const data = await uploaded(await upload(a.intakeId, "a.md", BRIEF));
-				expect(
-					(await download(a.intakeId, data.id, { cookie: "" })).status,
-				).toBe(401);
-			},
-			{ asApp: true, preview: true },
-		);
-	});
-
 	describe("GET /api/intakes/:id/files", () => {
 		type ListBody = {
 			success: true;

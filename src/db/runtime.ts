@@ -30,7 +30,8 @@ export function runtimeDatabaseUrl(
 			);
 		}
 		// Hosts may differ (Neon's pooled endpoint is not the direct one); the
-		// database may not, or the dev preview's _dev guard checks the wrong one.
+		// database may not, or the server reads another database than the one
+		// migrations and the seed write.
 		if (a.pathname !== o.pathname) {
 			throw new Error(
 				`AVEL_APP_DATABASE_URL names ${a.pathname.slice(1)}, but DATABASE_URL names ${o.pathname.slice(1)}.`,
