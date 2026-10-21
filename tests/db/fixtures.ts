@@ -3,7 +3,7 @@ import { client, engagement, mission } from "../../src/db/schema";
 import { stamp } from "../../src/db/schema/columns";
 import { type Tx, withTx } from "../../src/db/tx";
 import { fixedClock } from "../../src/lib/clock";
-import { type IdGenerator, sequentialIds } from "../../src/lib/ids";
+import { type IdGenerator, randomIds, sequentialIds } from "../../src/lib/ids";
 
 export const clock = fixedClock("2026-10-05T12:00:00.000Z");
 
@@ -16,7 +16,13 @@ class Rollback extends Error {}
 export async function inRollback(
 	fn: (tx: Tx, ids: IdGenerator) => Promise<void>,
 ) {
-	const ids = sequentialIds();
+	// Sequential under a random first block, as withApi does: the same ids in
+	// every call made concurrent files wait on each other's uncommitted keys.
+	const block = randomIds.next().slice(0, 8);
+	const inner = sequentialIds();
+	const ids: IdGenerator = {
+		next: () => inner.next().replace(/^00000000/, block),
+	};
 	await withTx(getDb(), async (tx) => {
 		await fn(tx, ids);
 		throw new Rollback();

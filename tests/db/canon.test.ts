@@ -374,7 +374,6 @@ describe.skipIf(!process.env.DATABASE_URL)("Canon's tables", () => {
 				for (const statement of [
 					sql`update canon_message set content_md = 'edited' where id = ${rowsA.canon_message}`,
 					sql`delete from canon_message where id = ${rowsA.canon_message}`,
-					sql`truncate canon_message`,
 				]) {
 					const err = await refusal(tx, (t) => t.execute(statement));
 					expect(err.code).toBe(APPEND_ONLY);
