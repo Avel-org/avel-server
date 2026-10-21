@@ -185,6 +185,28 @@ describe("buildReceipt", () => {
 		}
 	});
 
+	it("carries the decision's assurance: verified only when every counted check ran", () => {
+		expect(parse(buildReceipt(input(passing))).assurance).toBe("verified");
+		const findings = [
+			...passing,
+			check("t3", "acceptance", "not_run", { source: "runner" }),
+		];
+		const body = parse(buildReceipt(input(findings)));
+		expect([body.verdict, body.assurance]).toEqual([
+			"pass",
+			"not_fully_checked",
+		]);
+		expect(body.decision.notChecked).toEqual([
+			{
+				gate: "acceptance",
+				findingId: "t3",
+				kind: "check",
+				source: "runner",
+				outcome: "not_run",
+			},
+		]);
+	});
+
 	it("lists the degraded not_run findings", () => {
 		const findings = [
 			...passing,
