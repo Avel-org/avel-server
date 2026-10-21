@@ -30,6 +30,7 @@ import {
 	lockMission,
 	type RunnerDeps,
 } from "../runner/runner";
+import { firmRolesIn, notRosterable, rosteredTemplates } from "./firm";
 import {
 	notFound,
 	operatorOf,
@@ -270,6 +271,17 @@ export function missionLifecycleRoutes(deps: RouteDeps & RunnerDeps) {
 						throw new ApiError("PRECONDITION_FAILED", MESSAGES[first.reason], {
 							details: { ...first, missionId: m.id },
 						});
+					}
+					// Not a readiness blocker: a template edit refuses this, so only
+					// a race with a roster add reaches it.
+					const firm = (
+						await rosteredTemplates(tx, eq(rosterEntry.missionId, m.id))
+					).filter((e) => firmRolesIn(e.roles).length > 0);
+					if (firm.length > 0) {
+						throw notRosterable(
+							[...new Set(firm.flatMap((e) => firmRolesIn(e.roles)))],
+							{ missionId: m.id, rosterEntryIds: firm.map((e) => e.id) },
+						);
 					}
 					return { status: 200, body: ok(await change(tx, ctx, m, "active")) };
 				}),

@@ -45,6 +45,7 @@ import { type Executor, withTx } from "../db/tx";
 import type { IdentityRefusal } from "../lib/identity";
 import { mergeAllowed } from "../lib/roles";
 import { ApiError } from "../middleware/errors";
+import { firmRolesIn, notRosterable, rosteredTemplates } from "./firm";
 import { entryAccessInput } from "./roster";
 import {
 	after,
@@ -353,6 +354,26 @@ export function agentTemplateRoutes(deps: RouteDeps) {
 					.where(and(eq(agentTemplate.id, params.id), live(agentTemplate)))
 					.for("update");
 				if (!current) throw notFound("agent template", params.id);
+				const firm = body.roles ? firmRolesIn(body.roles) : [];
+				if (firm.length > 0) {
+					// Rosters that can still run; a shipped or archived one never does.
+					const entries = await rosteredTemplates(
+						tx,
+						and(
+							eq(rosterEntry.agentTemplateId, params.id),
+							inArray(mission.status, ["draft", "active", "halted"]),
+						),
+					);
+					const missions = new Set(entries.map((e) => e.missionId));
+					if (entries.length > 0) {
+						throw notRosterable(firm, {
+							...(missions.size === 1
+								? { missionId: entries[0]?.missionId }
+								: {}),
+							rosterEntryIds: entries.map((e) => e.id),
+						});
+					}
+				}
 				const [updated] = await tx
 					.update(agentTemplate)
 					.set({

@@ -44,6 +44,7 @@ import {
 	type RunnerDeps,
 	startDispatch,
 } from "../runner/runner";
+import { firmRolesIn, notRosterable, rosteredTemplates } from "./firm";
 import {
 	notFound,
 	operatorOf,
@@ -219,6 +220,8 @@ async function create(
 				},
 			);
 		}
+		const firm = firmRolesIn(entry.roles);
+		if (firm.length > 0) throw notRosterable(firm, at);
 		if (
 			!identitySupported(entry.roles) ||
 			(await currentIdentity(tx, entry.templateId)) === null
@@ -346,6 +349,33 @@ async function lockedMissionOf(tx: Tx, id: string): Promise<LockedMission> {
 	return m;
 }
 
+/**
+ * A queued dispatch whose template took a Firm role after it was queued
+ * does not start. Checked here, before startDispatch in the runner, because
+ * this route is its only caller.
+ */
+async function refuseFirmStart(tx: Tx, dispatchId: string): Promise<void> {
+	const [d] = await tx
+		.select({
+			status: dispatch.status,
+			missionId: dispatch.missionId,
+			entryId: dispatch.rosterEntryId,
+		})
+		.from(dispatch)
+		.where(eq(dispatch.id, dispatchId));
+	// Anything but queued is startDispatch's to refuse, in its own order.
+	if (d?.status !== "queued") return;
+	const [entry] = await rosteredTemplates(tx, eq(rosterEntry.id, d.entryId));
+	const firm = entry ? firmRolesIn(entry.roles) : [];
+	if (firm.length > 0) {
+		throw notRosterable(firm, {
+			dispatchId,
+			missionId: d.missionId,
+			rosterEntryIds: [d.entryId],
+		});
+	}
+}
+
 /** The operator as the actor of a start or halt. */
 function operatorActing(ctx: RequestContext): Acting {
 	return {
@@ -450,6 +480,7 @@ export function dispatchRoutes(deps: RouteDeps & RunnerDeps) {
 			const by = operatorActing(ctx);
 			await inStep(deps, async (step) => {
 				const m = await lockedMissionOf(step.tx, params.id);
+				await refuseFirmStart(step.tx, params.id);
 				await startDispatch(step, deps, m, params.id, by);
 			});
 			const wire = await dispatchWire(deps.db(), params.id);
