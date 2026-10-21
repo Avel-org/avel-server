@@ -6,7 +6,6 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { createApp } from "./app";
 import { createAuth } from "./auth";
 import { authConfigFromEnv } from "./auth/config";
-import { previewAuthConfig, previewConfigFromEnv } from "./auth/preview";
 import { signInRecorder } from "./auth/sign-in-activity";
 import { sweepStuckCanonTurns } from "./db/canon";
 import { getDb, useDatabaseUrl } from "./db/client";
@@ -57,17 +56,8 @@ logger.info(
 	{ role: await assertRuntimeRole(getDb()) },
 	"database runtime role checked",
 );
-// Dev preview: refuses to start unless every guard holds (src/auth/preview.ts).
-const preview = previewConfigFromEnv(process.env);
-const { config, missing } = preview.enabled
-	? previewAuthConfig(process.env, randomIds)
-	: { config: authConfigFromEnv(process.env), missing: [] };
-if (preview.enabled) {
-	logger.warn(
-		{ guards: preview.guards, signInDisabled: missing.length > 0, missing },
-		"DEV PREVIEW is ON: GET and HEAD under /api/* need no session; every other method still does. Local only.",
-	);
-}
+// Refuses to start on any auth variable that is missing or malformed.
+const config = authConfigFromEnv(process.env);
 // Template repositories: GitHub when a credential is configured. Without
 // one, dev reads the fixture; production reads nothing, so every row shows
 // unreadable rather than made-up data.
@@ -186,7 +176,6 @@ const app = createApp({
 	auth,
 	db: getDb,
 	webOrigins: config.webOrigins,
-	preview: preview.enabled,
 	// A Connection names an env var; the gateway reads it at read time.
 	repos: githubRepoSource({ env: (name) => process.env[name] }),
 	templates,
