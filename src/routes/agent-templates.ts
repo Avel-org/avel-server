@@ -35,13 +35,19 @@ import {
 	versionsBySha,
 	versionsFor,
 } from "../db/identity";
-import { agentTemplate, mission, rosterEntry } from "../db/schema";
-import { live, touch } from "../db/schema/columns";
+import {
+	agentTemplate,
+	client,
+	engagement,
+	mission,
+	rosterEntry,
+} from "../db/schema";
+import { live, stamp, touch } from "../db/schema/columns";
 import {
 	templateDispatches,
 	templateDispatchTotals,
 } from "../db/template-dispatches";
-import { type Executor, withTx } from "../db/tx";
+import { type Executor, type Tx, withTx } from "../db/tx";
 import type { IdentityRefusal } from "../lib/identity";
 import { mergeAllowed } from "../lib/roles";
 import { ApiError } from "../middleware/errors";
@@ -220,6 +226,49 @@ function checkRoles(roles: readonly Role[]): void {
 	}
 }
 
+function slugTaken(slug: string): ApiError {
+	return new ApiError(
+		"CONFLICT",
+		`A live agent template already has the slug ${slug}`,
+	);
+}
+
+/**
+ * Two creates racing on one slug both pass the pre-check; the partial
+ * unique index stops the second. Postgres aborts the transaction on that
+ * error, so it is translated outside withTx, never caught inside it.
+ */
+function isSlugViolation(err: unknown): boolean {
+	for (let e = err; e instanceof Error; e = e.cause) {
+		const pg = e as Error & { code?: string; constraint_name?: string };
+		if (
+			pg.code === "23505" &&
+			pg.constraint_name === "agent_template_slug_live_uq"
+		)
+			return true;
+	}
+	return false;
+}
+
+/**
+ * A live engagement of a live client, locked for share so it cannot be
+ * removed before the template that names it commits. A closed engagement
+ * is allowed: a template outlives the engagement it was made for.
+ */
+async function requireEngagement(tx: Tx, engagementId: string) {
+	const [row] = await tx
+		.select({ id: engagement.id })
+		.from(engagement)
+		.innerJoin(client, and(eq(client.id, engagement.clientId), live(client)))
+		.where(and(eq(engagement.id, engagementId), live(engagement)))
+		.for("share", { of: engagement });
+	if (!row) {
+		throw new ApiError("PRECONDITION_FAILED", "The engagement does not exist", {
+			details: { reason: "engagement_not_found", engagementId },
+		});
+	}
+}
+
 export function agentTemplateRoutes(deps: RouteDeps) {
 	return tsr.platformContext<RequestContext>().router(agentTemplateContract, {
 		list: async ({ query }) => {
@@ -339,6 +388,59 @@ export function agentTemplateRoutes(deps: RouteDeps) {
 							version,
 						}),
 					};
+		},
+
+		// Version 1 and no identity: regenerate makes the first one.
+		create: async ({ body }, ctx) => {
+			const operator = operatorOf(ctx);
+			checkRoles(body.roles);
+			try {
+				const wire = await withTx(deps.db(), async (tx) => {
+					const engagementId = body.engagementId ?? null;
+					if (engagementId) await requireEngagement(tx, engagementId);
+					const [taken] = await tx
+						.select({ id: agentTemplate.id })
+						.from(agentTemplate)
+						.where(and(eq(agentTemplate.slug, body.slug), live(agentTemplate)))
+						.limit(1);
+					if (taken) throw slugTaken(body.slug);
+					const [created] = await tx
+						.insert(agentTemplate)
+						.values({
+							id: deps.ids.next(),
+							slug: body.slug,
+							name: body.name,
+							kind: body.kind,
+							roles: body.roles,
+							engagementId,
+							waveDefaults: body.waveDefaults,
+							title: body.title ?? null,
+							description: body.description ?? null,
+							writablePaths: body.writablePaths,
+							version: 1,
+							...stamp(deps.clock),
+						})
+						.returning();
+					if (!created)
+						throw new Error("an agent template insert returned no row");
+					await logActivity(tx, deps, {
+						actorKind: "operator",
+						actorUserId: operator.id,
+						action: "agent_template.created",
+						entityType: "agent_template",
+						entityId: created.id,
+						engagementId,
+						requestId: ctx.requestId,
+						payload: { slug: created.slug, version: created.version },
+					});
+					const [wire] = await withIdentity(tx, [created]);
+					return wire as AgentTemplate;
+				});
+				return { status: 201, body: ok(wire) };
+			} catch (err) {
+				if (isSlugViolation(err)) throw slugTaken(body.slug);
+				throw err;
+			}
 		},
 
 		// Does not regenerate the identity: a roles or writablePaths change

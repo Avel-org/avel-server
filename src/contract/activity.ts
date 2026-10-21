@@ -85,6 +85,7 @@ export const activityAction = z.enum([
 	"canon_session.unarchived",
 	"canon_session.renamed",
 	"canon_message.posted",
+	"agent_template.created",
 ]);
 
 /** Must equal the activity_entity_type pgEnum; tests/api/activity.test.ts checks it. */
