@@ -283,6 +283,8 @@ Read the client's directory structure before assigning anyone.
 
 The test is mechanical: **which boundary is a directory in this codebase?** That is the cut. You are not choosing a philosophy, you are reading a filesystem.
 
+**Feature directories with no layers** (J, 2026-10-21) `[built]`. An app-router tree colocates by feature without layer suffixes, so its features fail the two-layer test. When no feature container qualifies that way, `src/features/` (else a top-level `features/`) holding two or more directories is a vertical cut, one feature per directory. Route groups under `app/` never count; the roster assigns them by hand (`TEMPLATE-BOOKING.md`, *Layout and mounts*). Beside two or more layer directories it is "both", and no cut is derived (`src/lib/repo-read/cut.ts`).
+
 ## The horizontal instantiation
 
 For layer-organized codebases. **One agent per role**, across every feature.
