@@ -231,7 +231,6 @@ describe.skipIf(!url)(
 					auth,
 					db: () => g.db,
 					webOrigins: [],
-					preview: false,
 					repos: noRepos,
 					templates: noTemplates,
 					dispatchByToken: noDispatches,

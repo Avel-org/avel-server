@@ -20,7 +20,7 @@ export type RouteDeps = {
 export type RequestContext = {
 	requestId: string;
 	operator: Operator | undefined;
-	/** Who the request is from (src/middleware/caller.ts); unset on a dev-preview read. */
+	/** Who the request is from (src/middleware/caller.ts); unset on a public path. */
 	caller?: Caller;
 };
 

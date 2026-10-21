@@ -13,7 +13,7 @@ import type { TemplateSource } from "./gateways/template-source";
 import type { Clock } from "./lib/clock";
 import type { IdGenerator } from "./lib/ids";
 import type { Logger } from "./lib/logger";
-import { previewHeader, requireTrustedOrigin } from "./middleware/auth";
+import { requireTrustedOrigin } from "./middleware/auth";
 import { limitBody } from "./middleware/body-limit";
 import {
 	type CallerVariables,
@@ -69,8 +69,6 @@ export type AppDeps = {
 	db: () => Executor;
 	/** Origins allowed credentialed CORS (the Tauri builds). Empty means none. */
 	webOrigins: readonly string[];
-	/** Dev preview (src/auth/preview.ts): sessionless reads. False everywhere but a local _dev run. */
-	preview: boolean;
 	/** Where the repo read gets repositories (src/gateways/repo-source.ts). GitHub in production, fixtures in tests. */
 	repos: RepoSource;
 	/** Where the template route reads template repositories (src/gateways/template-source.ts). GitHub in production, a fixture in dev and tests. */
@@ -110,7 +108,7 @@ export function createApp(deps: AppDeps) {
 		roomSources: deps.roomSources,
 	};
 	const router = tsr.platformContext<RequestContext>().router(contract, {
-		health: health(deps.clock, deps.preview),
+		health: health(deps.clock),
 		clients: clientRoutes(routeDeps),
 		engagements: engagementRoutes(routeDeps),
 		missions: missionRoutes(routeDeps),
@@ -138,8 +136,6 @@ export function createApp(deps: AppDeps) {
 	const app = new Hono<{ Variables: CallerVariables }>();
 
 	// First, so a preflight is answered before auth can refuse it.
-	// Outermost, so every /api response carries it, errors included.
-	if (deps.preview) app.use("/api/*", previewHeader());
 	app.use("/api/*", corsFor(deps.webOrigins));
 	app.use("/api/*", requestId(deps.ids));
 	// After the request id, so a refusal carries one; before anything reads a body.
@@ -150,7 +146,6 @@ export function createApp(deps: AppDeps) {
 		"/api/*",
 		resolveCaller({
 			auth: deps.auth,
-			preview: deps.preview,
 			db: deps.db,
 			contract,
 			dispatchByToken: deps.dispatchByToken,

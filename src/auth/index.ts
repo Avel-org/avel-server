@@ -123,9 +123,7 @@ export function createAuth(deps: AuthDeps) {
 				}
 			}),
 		},
-		disabledPaths: deps.config.signInDisabled
-			? [...DISABLED_PATHS, "/sign-in/social", "/callback/github"]
-			: DISABLED_PATHS,
+		disabledPaths: DISABLED_PATHS,
 		user: {
 			// Set from GitHub's profile by mapProfileToUser. Better Auth drops
 			// `input: false` fields from a provider profile too, so these are
