@@ -29,7 +29,9 @@ import {
 	DECIDE_VERSION,
 	type Decision,
 	decide,
+	type GateAssurance,
 	type GateFinding,
+	storedAssurance,
 } from "../lib/gate";
 import { GATE_CONFIG } from "../lib/gate/config";
 import {
@@ -79,6 +81,8 @@ type GateRunPayload = {
 	commitSha: string;
 	baseSha: string;
 	verdict: "pass" | "block";
+	/** From decide() version 2; older rows read it from their receipt (assuranceOf). */
+	assurance?: GateAssurance;
 	decideVersion: number;
 	receiptVersion: number;
 	configSha256: string;
@@ -104,6 +108,14 @@ function sideOf(roles: readonly Role[]): string | null {
 	return null;
 }
 
+/** The run's assurance: stored on the row, else read from its receipt's decision. */
+function assuranceOf(p: GateRunPayload): GateAssurance {
+	if (p.assurance !== undefined) return p.assurance;
+	return storedAssurance(
+		(JSON.parse(p.receipt) as { decision: Decision }).decision,
+	);
+}
+
 /** The run's wire shape, rebuilt from its activity row. */
 function toRun(
 	row: { id: string; at: Date; missionId: string | null },
@@ -117,6 +129,7 @@ function toRun(
 		commitSha: p.commitSha,
 		baseSha: p.baseSha,
 		verdict: p.verdict,
+		assurance: assuranceOf(p),
 		decideVersion: p.decideVersion,
 		receiptVersion: p.receiptVersion,
 		configSha256: p.configSha256,
@@ -499,6 +512,7 @@ export function gateRoutes(deps: GateDeps) {
 					commitSha: judged.commitSha,
 					baseSha: judged.baseSha,
 					verdict: judged.decision.verdict,
+					assurance: judged.decision.assurance,
 					decideVersion: DECIDE_VERSION,
 					receiptVersion: RECEIPT_VERSION,
 					configSha256: parsed.config.sha256,
@@ -577,6 +591,7 @@ export function gateRoutes(deps: GateDeps) {
 							id: r.id,
 							at: r.at.toISOString(),
 							verdict: p.verdict,
+							assurance: assuranceOf(p),
 							commitSha: p.commitSha,
 							baseSha: p.baseSha,
 							receiptSha256: p.receiptSha256,

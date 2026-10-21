@@ -48,6 +48,15 @@ export const REASON_EFFECTS = [
 
 export const GATE_VERDICTS = ["pass", "warn", "overridden", "block"] as const;
 
+/**
+ * Whether every check a run counted actually checked (decided 2026-10-21).
+ * `not_fully_checked` when any counted finding did not run, broke
+ * (`error`), or was a gate with no evidence at all: a degraded check only
+ * warns, so without this a run could pass with zero tests run. Set on a
+ * blocked run too. `verdict` is unchanged by it.
+ */
+export const GATE_ASSURANCES = ["verified", "not_fully_checked"] as const;
+
 export const IGNORED_OVERRIDE_WHYS = [
 	"wrong_commit",
 	"no_rationale",
@@ -107,6 +116,8 @@ export const gateRun = z.object({
 	/** The mission's pinned commit. */
 	baseSha: sha40,
 	verdict: z.enum(["pass", "block"]),
+	/** Whether every counted check ran: a pass that is not_fully_checked is not a verified one. */
+	assurance: z.enum(GATE_ASSURANCES),
 	decideVersion: z.number().int().positive(),
 	receiptVersion: z.number().int().positive(),
 	configSha256: sha256,
@@ -144,6 +155,7 @@ export const gateRunSummary = gateRun
 		id: true,
 		at: true,
 		verdict: true,
+		assurance: true,
 		commitSha: true,
 		baseSha: true,
 		receiptSha256: true,
