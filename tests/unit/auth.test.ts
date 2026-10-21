@@ -79,6 +79,14 @@ describe("auth.signed_in", () => {
 		expect(memory.session).toHaveLength(0);
 	});
 
+	it("is not recorded when the session insert fails", async () => {
+		const { app, memory, signIns } = buildApp({ failInserts: "session" });
+		const result = await signInWithGitHub(app, OPERATOR);
+		expect(result.cookie).toBeNull();
+		expect(memory.session).toHaveLength(0);
+		expect(signIns).toEqual([]);
+	});
+
 	it("ignores a client-sent request id header", async () => {
 		const { app, signIns } = buildApp();
 		await signInWithGitHub(app, OPERATOR, { "x-avel-request-id": "forged" });
