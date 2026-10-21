@@ -127,6 +127,26 @@ describe("normalizeRoomPath", () => {
 		}
 	});
 
+	it("refuses an 8.3 short name, which Windows can resolve to another name (GIT~1 is .git)", () => {
+		for (const p of [
+			"GIT~1",
+			"git~1/config",
+			"src/GIT~1/HEAD",
+			"Git~2",
+			"PROGRA~1",
+			"src/README~1.MD",
+			"docs/LONGNA~12.txt",
+		]) {
+			expect(() => normalizeRoomPath(p), p).toThrow(
+				expect.objectContaining({ refusal: "path_invalid" }),
+			);
+		}
+		// A tilde without the short-name shape is fine.
+		for (const p of ["src/a~.ts", "src/~tmp", "src/a~b.ts", "src/v~1x.ts"]) {
+			expect(normalizeRoomPath(p), p).toBe(p);
+		}
+	});
+
 	it("refuses device names in any case, with or without an extension", () => {
 		for (const p of [
 			"CON",
@@ -171,6 +191,15 @@ describe("readTool", () => {
 		);
 		await refused(readTool(room, "src/missing.ts"), "not_found");
 		await refused(readTool(room, "src"), "not_a_file");
+	});
+
+	it("refuses GIT~1, which NTFS opens as .git where short names are on", async () => {
+		await refused(readTool(room, "GIT~1/config"), "path_invalid");
+		await refused(
+			writeTool(room, "git~1/hooks/pre-commit", "x"),
+			"path_invalid",
+		);
+		expect(existsSync(path.join(room.root, ".git", "hooks"))).toBe(false);
 	});
 
 	it("refuses a path through a junction or symlink that leads outside", async () => {

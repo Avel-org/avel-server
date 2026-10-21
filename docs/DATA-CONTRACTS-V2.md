@@ -535,7 +535,7 @@ deleted_at · timestamps
 
 **`halted` is the state the runner puts a mission in when its attributed spend reaches `spend_ceiling_usd`** (`SANDBOX.md`, and *CompletionReport* below). The status values are exported from the contract as `MISSION_STATUSES` in `src/contract/shared/status.ts`, and the database pgEnum is built from that list. Decided 2026-10-05.
 
-**Starting a mission** `[built]` 2026-10-13. Nothing moves a mission out of `draft` except `start`, and start runs the same checks readiness lists, in this order. Start refuses with the first one; readiness returns them all. Each blocker carries the fields a refused start would put in its details, and its issue paths are contract: clients build their own sentences from the reason, the paths and the ids, never from the message.
+**Starting a mission** `[built]` 2026-10-13. Nothing moves a mission out of `draft` except `start`, and start runs the same checks readiness lists, in this order, then one more (below). Start refuses with the first one; readiness returns them all. Each blocker carries the fields a refused start would put in its details, and its issue paths are contract: clients build their own sentences from the reason, the paths and the ids, never from the message.
 
 | Reason | Fires when | Carries |
 |---|---|---|
@@ -546,6 +546,8 @@ deleted_at · timestamps
 | `estimate_missing` | an active, live entry that can be dispatched (every role a model role, so never the operator's `foundations` entry) has no `estimated_tokens` | `rosterEntryIds` in roster order, one issue per entry at `["roster", entryId, "estimatedTokens"]` |
 
 *Reversed 2026-10-20:* `spend_ceiling_missing` no longer blocks. Readiness returns it in `warnings` (`READINESS_WARNINGS`), which `ready` ignores and start does not check (`DECISIONS-V2.md`, *Decided 2026-10-20: the spend ceiling is optional*).
+
+*Added 2026-10-21:* Firm roles never sit on a mission roster, and four places refuse them with 422 `template_not_rosterable`. Adding a Firm template to a roster was already refused. Now a template edit that gives a Firm role to a template on a live entry of a `draft`, `active` or `halted` mission is refused (`missionId` when there is one mission, `rosterEntryIds`). Once the readiness checks pass, start refuses a roster with a Firm template (`missionId`, `rosterEntryIds`). Dispatch create refuses one (`missionId`, `rosterEntryIds`), and so does starting a queued dispatch (`dispatchId`, `missionId`, `rosterEntryIds`). The start check is not a readiness blocker, because adding one to `READINESS_REASONS` is a contract change. Only a template edit racing a roster add can reach it.
 
 Start locks the mission row, as roster writes do, so the roster cannot change between the check and the status change. Halting a mission halts its running dispatches in the same transaction, each with `halt_reason` `operator` and a system-filed report. The runner halts a mission itself at its spend ceiling, as the system, and halts its running dispatches with `spend_ceiling`.
 

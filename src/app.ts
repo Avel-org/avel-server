@@ -14,6 +14,7 @@ import type { Clock } from "./lib/clock";
 import type { IdGenerator } from "./lib/ids";
 import type { Logger } from "./lib/logger";
 import { previewHeader, requireTrustedOrigin } from "./middleware/auth";
+import { limitBody } from "./middleware/body-limit";
 import {
 	type CallerVariables,
 	type DispatchTokenLookup,
@@ -141,6 +142,8 @@ export function createApp(deps: AppDeps) {
 	if (deps.preview) app.use("/api/*", previewHeader());
 	app.use("/api/*", corsFor(deps.webOrigins));
 	app.use("/api/*", requestId(deps.ids));
+	// After the request id, so a refusal carries one; before anything reads a body.
+	app.use("/api/*", limitBody());
 	// After the request id, so a refusal still carries one. A request without
 	// a bearer token goes through requireOperator unchanged.
 	app.use(

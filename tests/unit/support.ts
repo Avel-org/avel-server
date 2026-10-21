@@ -84,6 +84,8 @@ export function buildApp(
 		signInDisabled?: boolean;
 		/** Replaces the fake auth.signed_in recorder, for example with one that throws. */
 		recordSignIn?: (entry: SignIn) => Promise<void>;
+		/** Makes every insert into this Better Auth model throw, inside a transaction too. */
+		failInserts?: string;
 	} = {},
 ) {
 	const signIns: SignIn[] = [];
@@ -100,7 +102,9 @@ export function buildApp(
 	};
 	const auth = createAuth({
 		config,
-		database: memoryAdapter(memory),
+		database: options.failInserts
+			? failingInserts(memoryAdapter(memory), options.failInserts)
+			: memoryAdapter(memory),
 		ids: sequentialIds(),
 		logger,
 		recordSignIn:
@@ -131,6 +135,27 @@ export function buildApp(
 		drive: { blobs: memoryBlobs(), maxBytes: DEFAULT_UPLOAD_MAX_BYTES },
 	});
 	return { app, auth, memory, logs: lines, signIns };
+}
+
+type MemoryAdapter = ReturnType<typeof memoryAdapter>;
+type Adapter = ReturnType<MemoryAdapter>;
+
+/** An adapter whose inserts into `model` throw, as a failed database insert would. */
+function failingInserts(factory: MemoryAdapter, model: string): MemoryAdapter {
+	const failing = <A extends Pick<Adapter, "create">>(adapter: A): A => ({
+		...adapter,
+		create: (async (args) => {
+			if (args.model === model) throw new Error(`${model} insert failed`);
+			return adapter.create(args);
+		}) as A["create"],
+	});
+	return (options) => {
+		const adapter = factory(options);
+		return {
+			...failing(adapter),
+			transaction: (cb) => adapter.transaction((trx) => cb(failing(trx))),
+		};
+	};
 }
 
 type Profile = typeof OPERATOR;
