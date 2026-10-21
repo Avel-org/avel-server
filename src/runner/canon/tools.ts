@@ -11,6 +11,7 @@ import {
 } from "../../db/schema";
 import { stamp, touch } from "../../db/schema/columns";
 import { type Tx, withClientScope } from "../../db/tx";
+import { briefSourceIssues, withChunkIds } from "../../lib/brief-sources";
 import { askOperatorInput } from "../../lib/canon";
 import type { Clock } from "../../lib/clock";
 import type { IdGenerator } from "../../lib/ids";
@@ -193,7 +194,19 @@ export function canonTools(ctx: CanonToolContext): DraftToolCall {
 			draft_brief: async (input) => {
 				const parsed = draftBriefInput.safeParse(input);
 				if (!parsed.success) return error(issuesText(parsed.error.issues));
-				const { brief } = parsed.data;
+				const brief = withChunkIds(parsed.data.brief);
+				const unknownSources = briefSourceIssues(
+					brief,
+					(c) => ctx.chunkIds.has(c),
+					["brief"],
+				);
+				if (unknownSources.length > 0) {
+					return error(
+						`Cite only the passages you were given: ${unknownSources
+							.map((i) => `${i.path.join(".")}: ${i.message}`)
+							.join("; ")}`,
+					);
+				}
 				for (const key of ["modules", "checks"] as const) {
 					const value = brief[key];
 					if (
