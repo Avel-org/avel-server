@@ -402,6 +402,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						},
 					]);
 					expect(run.verdict).toBe("pass");
+					// The pass ran no test, so it must not read as verified (J,
+					// 2026-10-21): a warn gate with no evidence and a degraded check
+					// both leave the run not fully checked.
+					expect(run).toMatchObject({
+						assurance: "not_fully_checked",
+						decideVersion: 2,
+						receiptVersion: 2,
+					});
 
 					// 10. The mission's activity, oldest first.
 					const log = await h.call(
