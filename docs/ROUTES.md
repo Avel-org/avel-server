@@ -78,7 +78,8 @@ Twelve links in three groups. The sidebar's design belongs to avel-web: `avel-we
 /catalog/agents                    🖥   templates
 /catalog/agents/:slug              🖥   template detail
 /catalog/skills                    🖥   skill library
-/catalog/skills/:slug              🖥   skill detail — *not in avel-web's route tree as of 2026-10-20; open*
+/catalog/skills?skill=:slug        🖥   skill detail, in the page's inspector, not a route of its own (never built as one;
+                                       ?view=edit, ?view=sources&source=:id, ?view=new, ?view=discover)
 
 /presets                           🖥   saved squads ("Teams")
 /presets/:id                       🖥   preset editor
