@@ -12,6 +12,7 @@ import { closeDb } from "../../src/db/client";
 import {
 	activityLog,
 	client,
+	clientMemory,
 	clientStatus as clientStatusEnum,
 	engagement,
 	mission,
@@ -306,7 +307,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api/clients", () => {
 		});
 	});
 
-	it("takes lastActivityAt from the client, its engagements and their missions, never another client", async () => {
+	it("takes lastActivityAt from the client, its engagements, their missions and its memory, never another client", async () => {
 		await withApi(async ({ signIn, call, tx, ns }) => {
 			await signIn();
 			let n = 0xa00;
@@ -391,14 +392,42 @@ describe.skipIf(!process.env.DATABASE_URL)("/api/clients", () => {
 			});
 			await log(day(9), "engagement", a.clientId);
 			expect(await lastFor(a.clientId)).toBe(day(3).toISOString());
+			// A client-memory row carries no engagement or mission, and
+			// counts for the client the memory belongs to, never another.
+			const memoryOf = async (clientId: string) => {
+				const memoryId = id();
+				await tx.insert(clientMemory).values({
+					id: memoryId,
+					clientId,
+					contentMd: "Prefers Tuesday calls",
+					status: "proposed",
+					...stamp(clock),
+				});
+				return memoryId;
+			};
+			const logMemory = (at: Date, memoryId: string) =>
+				tx.insert(activityLog).values({
+					id: id(),
+					at,
+					actorKind: "system",
+					action: "client_memory.kept",
+					entityType: "client_memory",
+					entityId: memoryId,
+					requestId: "test",
+					payload: {},
+				});
+			await logMemory(day(4), await memoryOf(a.clientId));
+			expect(await lastFor(a.clientId)).toBe(day(4).toISOString());
+			await logMemory(day(10), await memoryOf(other.clientId));
+			expect(await lastFor(a.clientId)).toBe(day(4).toISOString());
 
 			const listed = list.parse(
 				await (await call(`/api/clients?q=Activity ${ns}`)).json(),
 			);
 			expect(listed.data.map((c) => [c.id, c.lastActivityAt]).sort()).toEqual(
 				[
-					[a.clientId, day(3).toISOString()],
-					[other.clientId, day(9).toISOString()],
+					[a.clientId, day(4).toISOString()],
+					[other.clientId, day(10).toISOString()],
 				].sort(),
 			);
 		});
