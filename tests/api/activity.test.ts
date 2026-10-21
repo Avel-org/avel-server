@@ -190,6 +190,8 @@ async function seed(
 			id,
 			requestId: `req-${name}`,
 			payload: { name },
+			// As logActivity sets it: every seeded row is on this client.
+			clientId,
 			...values,
 		});
 	}
@@ -486,7 +488,7 @@ describe.skipIf(!url)("/api/activity", () => {
 		});
 	});
 
-	it("narrows to one client's rows, through its engagements and missions", async () => {
+	it("narrows to one client's rows, by the client_id each row carries", async () => {
 		await withActivity(async (call, s, tx) => {
 			const otherClient = randomIds.next();
 			await tx.insert(client).values({
@@ -502,6 +504,7 @@ describe.skipIf(!url)("/api/activity", () => {
 				action: "client.created",
 				entityType: "client",
 				entityId: otherClient,
+				clientId: otherClient,
 				requestId: "req-other",
 				payload: {},
 			});

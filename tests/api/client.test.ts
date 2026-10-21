@@ -306,102 +306,116 @@ describe.skipIf(!process.env.DATABASE_URL)("/api/clients", () => {
 		});
 	});
 
-	it("takes lastActivityAt from the client, its engagements and their missions, never another client", async () => {
-		await withApi(async ({ signIn, call, tx, ns }) => {
-			await signIn();
-			let n = 0xa00;
-			const id = () => {
-				n += 1;
-				return `${ns}-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
-			};
-			const day = (d: number) =>
-				new Date(clock.now().getTime() + d * 86_400_000);
-			const newClient = async () => {
-				const clientId = id();
-				await tx.insert(client).values({
-					id: clientId,
-					name: `Activity ${ns} ${n}`,
-					status: "active",
-					...stamp(clock),
-				});
-				const engagementId = id();
-				await tx.insert(engagement).values({
-					id: engagementId,
-					clientId,
-					name: "Portal",
-					status: "active",
-					startedAt: clock.now(),
-					...stamp(clock),
-				});
-				const missionId = id();
-				await tx.insert(mission).values({
-					id: missionId,
-					origin: "client",
-					engagementId,
-					type: "template-booking",
-					brief: {},
-					sprintN: 1,
-					status: "active",
-					cut: "vertical",
-					cutSource: "derived",
-					repoUrl: "https://github.com/avel-org/app",
-					...stamp(clock),
-				});
-				return { clientId, engagementId, missionId };
-			};
-			const log = (
-				at: Date,
-				entityType: "client" | "engagement",
-				entityId: string,
-				ref: { missionId?: string; engagementId?: string } = {},
-			) =>
-				tx.insert(activityLog).values({
-					id: id(),
-					at,
-					actorKind: "system",
-					action: "engagement.updated",
-					entityType,
-					entityId,
-					requestId: "test",
-					payload: {},
-					...ref,
-				});
-			const lastFor = async (clientId: string) =>
-				one.parse(await (await call(`/api/clients/${clientId}`)).json()).data
-					.lastActivityAt;
+	it("takes lastActivityAt from the client, its engagements and their missions, never another client, as avel_app", async () => {
+		await withApi(
+			async ({ signIn, call, tx, ns }) => {
+				await signIn();
+				let n = 0xa00;
+				const id = () => {
+					n += 1;
+					return `${ns}-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
+				};
+				const day = (d: number) =>
+					new Date(clock.now().getTime() + d * 86_400_000);
+				const newClient = async () => {
+					const clientId = id();
+					await tx.insert(client).values({
+						id: clientId,
+						name: `Activity ${ns} ${n}`,
+						status: "active",
+						...stamp(clock),
+					});
+					const engagementId = id();
+					await tx.insert(engagement).values({
+						id: engagementId,
+						clientId,
+						name: "Portal",
+						status: "active",
+						startedAt: clock.now(),
+						...stamp(clock),
+					});
+					const missionId = id();
+					await tx.insert(mission).values({
+						id: missionId,
+						origin: "client",
+						engagementId,
+						type: "template-booking",
+						brief: {},
+						sprintN: 1,
+						status: "active",
+						cut: "vertical",
+						cutSource: "derived",
+						repoUrl: "https://github.com/avel-org/app",
+						...stamp(clock),
+					});
+					return { clientId, engagementId, missionId };
+				};
+				const log = (
+					at: Date,
+					entityType: "client" | "engagement",
+					entityId: string,
+					ref: {
+						missionId?: string;
+						engagementId?: string;
+						clientId?: string;
+					} = {},
+				) =>
+					tx.insert(activityLog).values({
+						id: id(),
+						at,
+						actorKind: "system",
+						action: "engagement.updated",
+						entityType,
+						entityId,
+						requestId: "test",
+						payload: {},
+						...ref,
+					});
+				const lastFor = async (clientId: string) =>
+					one.parse(await (await call(`/api/clients/${clientId}`)).json()).data
+						.lastActivityAt;
 
-			const a = await newClient();
-			const other = await newClient();
-			expect(await lastFor(a.clientId)).toBeNull();
+				const a = await newClient();
+				const other = await newClient();
+				expect(await lastFor(a.clientId)).toBeNull();
 
-			await log(day(1), "client", a.clientId);
-			expect(await lastFor(a.clientId)).toBe(day(1).toISOString());
-			await log(day(2), "engagement", a.engagementId, {
-				engagementId: a.engagementId,
-			});
-			expect(await lastFor(a.clientId)).toBe(day(2).toISOString());
-			// A mission row that carries no engagement id still counts.
-			await log(day(3), "engagement", a.missionId, { missionId: a.missionId });
-			expect(await lastFor(a.clientId)).toBe(day(3).toISOString());
-			// Another client's newer rows, and a row naming this client's id
-			// under another entity type, never count.
-			await log(day(9), "client", other.clientId);
-			await log(day(9), "engagement", other.missionId, {
-				missionId: other.missionId,
-			});
-			await log(day(9), "engagement", a.clientId);
-			expect(await lastFor(a.clientId)).toBe(day(3).toISOString());
+				await log(day(1), "client", a.clientId, { clientId: a.clientId });
+				expect(await lastFor(a.clientId)).toBe(day(1).toISOString());
+				await log(day(2), "engagement", a.engagementId, {
+					engagementId: a.engagementId,
+					clientId: a.clientId,
+				});
+				expect(await lastFor(a.clientId)).toBe(day(2).toISOString());
+				// Each row carries its client_id, as logActivity sets it.
+				await log(day(3), "engagement", a.missionId, {
+					missionId: a.missionId,
+					clientId: a.clientId,
+				});
+				expect(await lastFor(a.clientId)).toBe(day(3).toISOString());
+				// Another client's newer rows, and a row naming this client's id
+				// under another entity type, never count.
+				await log(day(9), "client", other.clientId, {
+					clientId: other.clientId,
+				});
+				await log(day(9), "engagement", other.missionId, {
+					missionId: other.missionId,
+					clientId: other.clientId,
+				});
+				await log(day(9), "engagement", a.clientId);
+				expect(await lastFor(a.clientId)).toBe(day(3).toISOString());
 
-			const listed = list.parse(
-				await (await call(`/api/clients?q=Activity ${ns}`)).json(),
-			);
-			expect(listed.data.map((c) => [c.id, c.lastActivityAt]).sort()).toEqual(
-				[
-					[a.clientId, day(3).toISOString()],
-					[other.clientId, day(9).toISOString()],
-				].sort(),
-			);
-		});
+				const listed = list.parse(
+					await (await call(`/api/clients?q=Activity ${ns}`)).json(),
+				);
+				expect(listed.data.map((c) => [c.id, c.lastActivityAt]).sort()).toEqual(
+					[
+						[a.clientId, day(3).toISOString()],
+						[other.clientId, day(9).toISOString()],
+					].sort(),
+				);
+			},
+			{ asApp: true },
+		);
 	});
 
 	it("answers 404 for a soft-deleted client, on get, update and in the list", async () => {

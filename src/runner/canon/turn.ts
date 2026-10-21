@@ -360,6 +360,7 @@ async function applyCanonUsage(
 				entityType: "canon_session",
 				entityId: s.id,
 				engagementId: s.engagementId,
+				clientId: s.clientId,
 				requestId: deps.ids.next(),
 				payload: {
 					haltReason: "token_hard_ceiling",
@@ -571,7 +572,10 @@ async function nameSession(
 					isNull(canonSession.title),
 				),
 			)
-			.returning({ engagementId: canonSession.engagementId });
+			.returning({
+				engagementId: canonSession.engagementId,
+				clientId: canonSession.clientId,
+			});
 		const [row] = named;
 		if (!row)
 			return { text: "The session already has a title.", isError: true };
@@ -582,6 +586,7 @@ async function nameSession(
 			entityType: "canon_session",
 			entityId: sessionId,
 			engagementId: row.engagementId,
+			clientId: row.clientId,
 			requestId: deps.ids.next(),
 			// The title is client text: never in the log.
 			payload: { sessionId, hadTitle: false },

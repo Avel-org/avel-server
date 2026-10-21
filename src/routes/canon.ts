@@ -680,6 +680,7 @@ export function canonRoutes(deps: CanonDeps) {
 			entityType: "canon_session",
 			entityId: row.id,
 			engagementId: o.place.engagementId,
+			clientId: o.place.clientId,
 			requestId: ctx.requestId,
 			payload: {
 				sessionId: row.id,
@@ -759,6 +760,7 @@ export function canonRoutes(deps: CanonDeps) {
 					entityType: "canon_question",
 					entityId: id,
 					engagementId: eng?.id ?? null,
+					clientId: row.clientId,
 					requestId: ctx.requestId,
 					payload: {
 						questionId: id,
@@ -812,6 +814,7 @@ export function canonRoutes(deps: CanonDeps) {
 					entityType: "client_memory",
 					entityId: id,
 					requestId: ctx.requestId,
+					clientId: scope,
 					payload: { memoryId: id, ...decided.payload },
 				});
 				return oneOf(memoryWires(s, [updated]));
@@ -1074,6 +1077,7 @@ export function canonRoutes(deps: CanonDeps) {
 							entityType: "canon_session",
 							entityId: params.id,
 							engagementId: row.engagementId,
+							clientId: row.clientId,
 							requestId: ctx.requestId,
 							// The title is client text: never in the log.
 							payload: { sessionId: params.id, hadTitle: row.title !== null },
@@ -1140,6 +1144,7 @@ export function canonRoutes(deps: CanonDeps) {
 						entityType: "canon_session",
 						entityId: params.id,
 						engagementId: row.engagementId,
+						clientId: row.clientId,
 						requestId: ctx.requestId,
 						payload: {
 							sessionId: params.id,
@@ -1188,6 +1193,7 @@ export function canonRoutes(deps: CanonDeps) {
 						entityType: "canon_session" as const,
 						entityId: params.id,
 						engagementId: row.engagementId,
+						clientId: row.clientId,
 						requestId: ctx.requestId,
 					};
 					if (closing) {
@@ -1230,6 +1236,7 @@ export function canonRoutes(deps: CanonDeps) {
 						entityType: "canon_session",
 						entityId: params.id,
 						engagementId: row.engagementId,
+						clientId: row.clientId,
 						requestId: ctx.requestId,
 						payload: { sessionId: params.id },
 					});
@@ -1340,6 +1347,7 @@ export function canonRoutes(deps: CanonDeps) {
 						entityType: "canon_session",
 						entityId: params.id,
 						engagementId: row.engagementId,
+						clientId: row.clientId,
 						requestId: ctx.requestId,
 						payload: { sessionId: params.id, intakeId: row.intakeId },
 					});
@@ -1380,6 +1388,7 @@ export function canonRoutes(deps: CanonDeps) {
 						entityType: "canon_session",
 						entityId: params.id,
 						engagementId: row.engagementId,
+						clientId: row.clientId,
 						requestId: ctx.requestId,
 						payload: {
 							sessionId: params.id,
@@ -1521,6 +1530,7 @@ export function canonRoutes(deps: CanonDeps) {
 						entityType: "canon_session",
 						entityId: params.id,
 						engagementId: session.engagementId,
+						clientId: session.clientId,
 						requestId: ctx.requestId,
 						// Never the text: ids, the seq and the mode only.
 						payload: {
@@ -1667,6 +1677,7 @@ export function canonRoutes(deps: CanonDeps) {
 						action: "client_memory.written",
 						entityType: "client_memory",
 						entityId: row.id,
+						clientId: row.clientId,
 						requestId: ctx.requestId,
 						payload: {
 							memoryId: row.id,
