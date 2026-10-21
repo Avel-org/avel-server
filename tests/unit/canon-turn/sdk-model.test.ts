@@ -95,6 +95,28 @@ const make = (query: ReturnType<typeof scripted>["query"]) =>
 	});
 
 describe("AgentSdkCanonModel", () => {
+	it("never launches the SDK for a turn stopped while its folder was made", async () => {
+		let launched = false;
+		const stop = new AbortController();
+		const model = make((() => {
+			launched = true;
+			return (async function* () {})();
+		}) as never);
+		const run = model.run({
+			sessionId: "s1",
+			model: "claude-sonnet-5-5",
+			prompt: built.prompt,
+			tools: CANON_TOOL_NAMES,
+			callTool: async () => ({ text: "ok" }),
+			signal: stop.signal,
+		});
+		// The generator starts on the first next(); the stop lands during mkdir.
+		const first = run[Symbol.asyncIterator]().next();
+		stop.abort();
+		await first;
+		expect(launched).toBe(false);
+	});
+
 	it("creates its config folder before the SDK starts, which cannot start in a missing one", async () => {
 		rmSync(CONFIG_DIR, { recursive: true, force: true });
 		let existed = false;

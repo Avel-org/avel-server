@@ -380,6 +380,8 @@ export class AgentSdkHarness implements Harness {
 		try {
 			// HOME and CLAUDE_CONFIG_DIR; nothing else creates it.
 			await mkdir(this.options.configDir, { recursive: true });
+			// A stop while the folder was made: never launch the SDK at all.
+			if (r.abort.signal.aborted) return;
 			const messages = this.query({
 				prompt: FIRST_MESSAGE,
 				options: this.sessionOptions(session, r.tools, r.abort),

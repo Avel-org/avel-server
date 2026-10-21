@@ -252,6 +252,8 @@ export class AgentSdkCanonModel implements CanonModel {
 		// The turn runs in configDir, and a process cannot start in a folder
 		// that does not exist; nothing else creates it.
 		await mkdir(this.options.configDir, { recursive: true });
+		// A stop while the folder was made: never launch the SDK at all.
+		if (abort.signal.aborted) return;
 		const messages = this.query({
 			prompt: oneMessage(input.prompt),
 			options: this.turnOptions(input, abort),

@@ -523,8 +523,31 @@ describe("AgentSdkHarness sessions", () => {
 		]);
 	});
 
+	it("never launches the SDK when stopped before the query starts", async () => {
+		let launched = false;
+		const { h } = harness(async function* () {
+			launched = true;
+			yield* message("m1", 1, 1);
+		});
+		h.bindAgentApi(recordingApi().api);
+		const s = session();
+		await h.start(s);
+		// Taken before the stop, which forgets the session.
+		const done = h.settled(s.dispatchId);
+		// No await between start and stop: the stop lands while the config
+		// folder is still being made.
+		await h.stop(s.dispatchId);
+		await done;
+		expect(launched).toBe(false);
+		expect(await h.has(s.dispatchId)).toBe(false);
+	});
+
 	it("stops: aborts the query and forgets the session, with no fail", async () => {
 		let aborted = false;
+		let started: () => void = () => {};
+		const running = new Promise<void>((r) => {
+			started = r;
+		});
 		const { h } = harness(async function* (params) {
 			const signal = params.options?.abortController?.signal;
 			yield* message("m1", 1, 1);
@@ -533,6 +556,7 @@ describe("AgentSdkHarness sessions", () => {
 					aborted = true;
 					resolve();
 				});
+				started();
 			});
 			throw new Error("aborted");
 		});
@@ -540,7 +564,9 @@ describe("AgentSdkHarness sessions", () => {
 		const s = session();
 		await h.start(s);
 		const done = h.settled(s.dispatchId);
-		await new Promise((r) => setTimeout(r, 10));
+		// Wait for the query itself, not a fixed delay: under load the config
+		// folder can take longer than any delay chosen here.
+		await running;
 		await h.stop(s.dispatchId);
 		await done;
 		expect(aborted).toBe(true);
