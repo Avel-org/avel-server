@@ -112,6 +112,7 @@ describe("the error envelope is a discriminated union on code", () => {
 			"writes_outside_mount",
 			"requirement_unchecked",
 			"intake_questions_open",
+			"brief_sources_unconfirmed",
 			"finding_not_open",
 			"dispatches_running",
 			"integration_conflict",

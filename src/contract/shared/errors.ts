@@ -129,6 +129,8 @@ export const PRECONDITION_REASONS = [
 	"requirement_unchecked",
 	// Canon (2026-10-19): an intake with an open Canon question is not approved.
 	"intake_questions_open",
+	// Brief sources (J, 2026-10-21): approval waits on the operator's confirmation of every source.
+	"brief_sources_unconfirmed",
 	// Module 9: a finding moves out of open once, by the operator.
 	"finding_not_open",
 	// Module 9: the gate run (POST /api/missions/:id/gate).
@@ -186,7 +188,7 @@ export const preconditionDetails = z
 		tokens: z.number().int().nonnegative().optional(),
 		/** identity_over_token_cap: the cap it went over. */
 		cap: z.number().int().positive().optional(),
-		/** What a mechanical check found (intake_check_failed, intake_questions_open, access_override_invalid, agent_role_not_assignable, plan_check_failed, coherence_blocked, writes_outside_mount, source_unavailable, requirement_unchecked) or what a plan changed (plan_changes_approved_brief), in a stable order. */
+		/** What a mechanical check found (intake_check_failed, intake_questions_open, brief_sources_unconfirmed, access_override_invalid, agent_role_not_assignable, plan_check_failed, coherence_blocked, writes_outside_mount, source_unavailable, requirement_unchecked) or what a plan changed (plan_changes_approved_brief), in a stable order. */
 		issues: z
 			.array(
 				z
