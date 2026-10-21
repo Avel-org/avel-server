@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
@@ -293,6 +294,29 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 					const resolved = citations.filter(
 						(c) => c.fileId === fileId && NOTES.includes(c.quote),
 					);
+					// The brief's own sources (instructions v3): every requirement and
+					// criterion should stand on a passage of the uploaded notes.
+					const drafted = (
+						(await (await h.call(`/api/intakes/${canonIntakeId}`)).json()) as {
+							data: {
+								proposedBrief: {
+									requirements: Array<{ id: string; sources?: string[] }>;
+									acceptanceCriteria: Array<{ id: string; sources?: string[] }>;
+								} | null;
+							};
+						}
+					).data.proposedBrief;
+					const notesSha = createHash("sha256").update(NOTES).digest("hex");
+					const items = [
+						...(drafted?.requirements ?? []),
+						...(drafted?.acceptanceCriteria ?? []),
+					];
+					const unsourced = items
+						.filter((i) => (i.sources ?? []).length === 0)
+						.map((i) => i.id);
+					const foreign = items.flatMap((i) =>
+						(i.sources ?? []).filter((c) => !c.startsWith(`${notesSha}:`)),
+					);
 					const [cs] = await h.tx
 						.select()
 						.from(canonSession)
@@ -305,6 +329,9 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 								reply: reply?.contentMd.slice(0, 600),
 								citations: citations.length,
 								resolved: resolved.length,
+								briefItems: items.length,
+								unsourced,
+								foreign,
 							},
 							null,
 							2,
@@ -322,6 +349,9 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 					// 2026-10-21 the reply cited the notes in prose and returned none.
 					expect(citations.length, "no citations came back").toBeGreaterThan(0);
 					expect(resolved).toEqual(citations);
+					expect(items.length, "no brief was drafted").toBeGreaterThan(0);
+					expect(unsourced, "brief items with no source").toEqual([]);
+					expect(foreign, "sources outside the notes").toEqual([]);
 
 					// 2. The mission, as in tests/api/first-mission.test.ts.
 					const intakeId = (
@@ -512,7 +542,7 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 					const gateRes = await post(`/api/missions/${missionId}/gate`);
 					const gateText = await gateRes.clone().text();
 					console.log("GATE", gateRes.status, gateText.slice(0, 4000));
-					console.log("SUMMARY\n" + summary.join("\n"));
+					console.log(`SUMMARY\n${summary.join("\n")}`);
 					console.log(
 						"LOG",
 						JSON.stringify(

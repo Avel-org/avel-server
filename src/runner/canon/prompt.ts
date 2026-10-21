@@ -12,18 +12,23 @@ import { sha256Hex } from "../../lib/tokens";
 
 /**
  * Bump with any change to the instructions below. 2 (2026-10-20): one
- * section per mode and scope, and naming an untitled session.
+ * section per mode and scope, and naming an untitled session. 3
+ * (2026-10-21): sources on every requirement and criterion, and a reply
+ * that cites each requirement, after the first live turn returned none.
  */
-export const CANON_INSTRUCTIONS_VERSION = 2;
+export const CANON_INSTRUCTIONS_VERSION = 3;
 
 /**
  * What Canon is told on a draft turn, after its identity (DECISIONS-V2,
  * Decided 2026-10-19: Canon is the briefer). [hypothesis]: the wording has
  * not met a real model yet. Unchanged in version 2; it became draft mode's.
+ * Version 3 adds the sources and the cited reply.
  */
 export const CANON_INSTRUCTIONS = `You are briefing one project for the operator. The project's documents are given to you as search results, and its kept memory and the conversation follow them.
 
-Draft the brief with the draft_brief tool, in the intake's shape: a summary, requirements with ids R1, R2 and so on, and acceptance criteria with ids AC1, AC2 and so on, each citing the requirement it shows done. Write no modules and no checks: the plan comes later, from the operator. The tool returns what the intake check found; fix what it reports and draft again.
+Draft the brief with the draft_brief tool, in the intake's shape: a summary, requirements with ids R1, R2 and so on, and acceptance criteria with ids AC1, AC2 and so on, each citing the requirement it shows done. Give every requirement and criterion a sources list: the source of each search result it stands on, copied exactly. Write no modules and no checks: the plan comes later, from the operator. The tool returns what the intake check found; fix what it reports and draft again.
+
+When the draft saves, reply to the operator with each requirement on its own line, citing the passage behind it from the documents.
 
 When you cannot decide something from the documents, ask the operator with the ask_operator tool instead of guessing. Give two to four options, say why you are asking, and name the passages that raised the question.
 

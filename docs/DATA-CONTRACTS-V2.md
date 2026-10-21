@@ -241,11 +241,13 @@ deleted_at · timestamps
 
 ```
 summary              text
-requirements         [{ id: 'R1', text }]                         — at least one; ids unique and permanent
-acceptanceCriteria   [{ id: 'AC1', requirementId: 'R1', text }]   — ids unique; each cites an existing requirement
+requirements         [{ id: 'R1', text, sources? }]                — at least one; ids unique and permanent
+acceptanceCriteria   [{ id: 'AC1', requirementId: 'R1', text, sources? }]   — ids unique; each cites an existing requirement
 modules              [{ id: 'M1', name, requirementIds: ['R1'], reads: ['src/booking/**'] }]  — [built] 2026-10-10, module 3; defaults to [] so a brief stored before it parses. reads [built] 2026-10-14 (step 9): repo-relative paths or globs, at most 100, never absolute, no `..` segment; defaults to []
 checks               [{ id: 'CK1', requirementId: 'R1', kind, path | command, note? }]  — [built] 2026-10-14 (step 9); kind is file_exists (with path) or test, typecheck, command (with command); defaults to []
 ```
+
+**Sources** (decided by J 2026-10-21) `[built]`: `sources` is at most 20 chunk ids (`<file sha256>:<first line>-<last line>`) of the Intake's own files, the passages the item stands on. Absent and empty mean the same. Intake create refuses any (a new Intake has no files), revise refuses a chunk whose hash none of the Intake's files has, and Canon's `draft_brief` refuses one it was not shown that turn. All three answer with issue paths `[...,"requirements"|"acceptanceCriteria",i,"sources",j]`. Canon may give a search result's `canon://` source; the tool stores its chunk id. Whether a passage supports its item is not checked by anything `[unspecified]`. A mission plan's brief is not checked against files: only the Intake's sources resolve to files.
 
 **Done when** (decided by the operator 2026-10-14, `STEP-9-PLAN.md`): every requirement names a check outside the agent, and the plan adds them as it adds modules. The gate (module 9) runs them; the agent never does. Contract shape `[built]` 2026-10-14 (9a). `checkPlan` rule 5 `[built]` 2026-10-14 (9b): every requirement has a check (`["brief","requirements",i,"checks"]`), check ids are unique (`["brief","checks",i,"id"]`), and every check cites an existing requirement (`["brief","checks",i,"requirementId"]`). Dispatch create and start refuse `requirement_unchecked` (9b) for a mission whose plan predates the rule.
 
