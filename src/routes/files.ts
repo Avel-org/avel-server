@@ -4,6 +4,7 @@ import type { Context } from "hono";
 import type { Operator } from "../auth";
 import { type IntakeFile, intakeFileContract } from "../contract";
 import { logActivity } from "../db/activity";
+import { lockBlobKey } from "../db/blob-lock";
 import { clientIdOfIntake } from "../db/client-id";
 import {
 	client,
@@ -199,13 +200,6 @@ async function linkedFile(
 	return row.file;
 }
 
-/** One blob key at a time: an upload and a purge of the same bytes never interleave. */
-async function lockKey(tx: Tx, key: string) {
-	await tx.execute(
-		sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`,
-	);
-}
-
 /** Reads the body, refusing as soon as it passes the cap. */
 async function readCapped(ctx: Context, maxBytes: number): Promise<Uint8Array> {
 	const tooLarge = () =>
@@ -302,7 +296,7 @@ export function fileRoutes(deps: FileDeps) {
 		};
 		const row = await withTx(db, (tx) =>
 			withClientScope(tx, scope.clientId, async (s) => {
-				await lockKey(s, key);
+				await lockBlobKey(s, key);
 				const [inserted] = await s.insert(file).values(values).returning();
 				await s
 					.insert(intakeFiles)
@@ -325,7 +319,8 @@ export function fileRoutes(deps: FileDeps) {
 					},
 				});
 				// Last, so a refused row writes no bytes. A commit that fails
-				// after this leaves an orphan blob; there is no sweep yet.
+				// after this leaves an orphan blob, which src/db/blob-sweep.ts
+				// removes once it is past its grace.
 				await blobs.put(prefix, bytes);
 				if (!inserted) throw new Error("file insert returned no row");
 				return inserted;
@@ -381,7 +376,7 @@ export function fileRoutes(deps: FileDeps) {
 				// Already purged: nothing changes, so nothing is logged.
 				if (found.purgedAt || !found.storageKey) return found;
 				const key = found.storageKey;
-				await lockKey(s, key);
+				await lockBlobKey(s, key);
 				// A concurrent purge may have committed while this one waited
 				// for the lock, so decide again on a row read after taking it.
 				const locked = await linkedFile(

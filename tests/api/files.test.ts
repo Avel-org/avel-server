@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -125,6 +126,64 @@ describe("localDiskBlobs", () => {
 		const { key, sha256 } = await blobs.put("general", BRIEF);
 		await writeFile(path.join(root, "general", sha256), text("tampered"));
 		await expect(blobs.get(key)).rejects.toThrow(/does not match its hash/);
+	});
+
+	it("lists its keys in key order with when their bytes were written, and removes only old temporary files", async () => {
+		const { root, blobs } = await store();
+		const a = await blobs.put(`clients/${A}`, BRIEF);
+		const g = await blobs.put("general", text("# General\n"));
+		const old = new Date("2026-10-01T00:00:00.000Z");
+		await utimes(path.join(root, "clients", A, a.sha256), old, old);
+		// A put of bytes already stored writes nothing, so the time stays.
+		await blobs.put(`clients/${A}`, BRIEF);
+		const staleTemp = path.join(root, "clients", A, `${a.sha256}.x.tmp`);
+		const freshTemp = path.join(root, "general", `${g.sha256}.y.tmp`);
+		await writeFile(staleTemp, BRIEF);
+		await utimes(staleTemp, old, old);
+		await writeFile(freshTemp, BRIEF);
+		await writeFile(path.join(root, "general", "notes.txt"), "not a key");
+
+		const listed = await blobs.list();
+		expect(listed.map((e) => e.key)).toEqual([a.key, g.key].sort());
+		expect(listed.find((e) => e.key === a.key)?.writtenAt).toEqual(old);
+		expect(await blobs.removeStaleTemps(new Date("2026-10-02T00:00:00Z"))).toBe(
+			1,
+		);
+		expect(existsSync(staleTemp)).toBe(false);
+		expect(existsSync(freshTemp)).toBe(true);
+		expect((await blobs.list()).map((e) => e.key)).toEqual(
+			[a.key, g.key].sort(),
+		);
+	});
+
+	it("lists nothing, and removes nothing, before its first put", async () => {
+		const blobs = localDiskBlobs(
+			path.join(tmpdir(), "avel-blobs-never-made"),
+			sequentialIds(),
+		);
+		expect(await blobs.list()).toEqual([]);
+		expect(await blobs.removeStaleTemps(new Date())).toBe(0);
+	});
+});
+
+describe("memoryBlobs", () => {
+	it("lists its keys in key order, written at the clock's time of the first put", async () => {
+		let now = new Date("2026-10-01T00:00:00.000Z");
+		const blobs = memoryBlobs({ now: () => now });
+		const a = await blobs.put(
+			"clients/00000000-0000-4000-8000-00000000000a",
+			BRIEF,
+		);
+		now = new Date("2026-10-02T00:00:00.000Z");
+		const g = await blobs.put("general", BRIEF);
+		await blobs.put("clients/00000000-0000-4000-8000-00000000000a", BRIEF);
+		expect(await blobs.list()).toEqual(
+			[
+				{ key: a.key, writtenAt: new Date("2026-10-01T00:00:00.000Z") },
+				{ key: g.key, writtenAt: new Date("2026-10-02T00:00:00.000Z") },
+			].sort((x, y) => (x.key < y.key ? -1 : 1)),
+		);
+		expect(await blobs.removeStaleTemps(now)).toBe(0);
 	});
 });
 
