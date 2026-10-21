@@ -163,6 +163,21 @@ export const activityLog = pgTable(
 		index("activity_log_engagement_id_idx").on(t.engagementId),
 		index("activity_log_at_idx").on(t.at),
 		index("activity_log_actor_canon_session_id_idx").on(t.actorCanonSessionId),
+		// GET /api/presets/:id/applications (appliedFilter in
+		// src/routes/presets.ts): its action and presetId as the range, in its
+		// (at desc, id desc) order, so a page is one ordered index range. Only
+		// rows whose payload names a preset; a query on presetId = x implies
+		// that, even with x a parameter. Not partial on the action: an enum
+		// literal is refused in a batch that also adds the value (55P04), and
+		// action::text is not immutable, so no index predicate may use it.
+		index("activity_log_preset_applied_idx")
+			.on(
+				t.action,
+				sql`(${t.payload}->>'presetId')`,
+				t.at.desc().nullsFirst(),
+				t.id.desc().nullsFirst(),
+			)
+			.where(sql`(${t.payload}->>'presetId') is not null`),
 		check(
 			"activity_log_operator_has_user",
 			sql`(${t.actorKind} = 'operator') = (${t.actorUserId} is not null)`,
