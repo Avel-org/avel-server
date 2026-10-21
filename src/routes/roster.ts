@@ -164,6 +164,9 @@ function requireRosterable(
  * A preset's agents, as applying them requires: each template live and
  * rosterable, and each template at most once per territory (no territory
  * counts as one). Preset create and update check the same before saving.
+ * The templates are locked FOR SHARE, as roster add locks its one: inside
+ * a transaction, an edit giving one a Firm role waits for the apply, or
+ * the apply waits for the edit and sees the role.
  */
 export async function requirePresetAgents(
 	db: Executor,
@@ -180,7 +183,9 @@ export async function requirePresetAgents(
 						deletedAt: agentTemplate.deletedAt,
 					})
 					.from(agentTemplate)
-					.where(inArray(agentTemplate.id, templateIds));
+					.where(inArray(agentTemplate.id, templateIds))
+					.orderBy(asc(agentTemplate.id))
+					.for("share");
 	const byId = new Map(templates.map((t) => [t.id, t]));
 	for (const id of templateIds) requireRosterable(byId.get(id), id);
 
@@ -423,6 +428,10 @@ export function rosterRoutes(deps: RouteDeps) {
 			const { missionId } = params;
 			const entry = await withTx(deps.db(), async (tx) => {
 				const m = await lockDraftMission(tx, missionId);
+				// Locked FOR SHARE: a template edit takes it FOR UPDATE before it
+				// looks for roster entries, so the edit waits for this add and
+				// finds the entry, or this add waits for the edit and sees its
+				// roles. Either way no Firm role reaches the roster.
 				const [template] = await tx
 					.select({
 						id: agentTemplate.id,
@@ -431,7 +440,8 @@ export function rosterRoutes(deps: RouteDeps) {
 						deletedAt: agentTemplate.deletedAt,
 					})
 					.from(agentTemplate)
-					.where(eq(agentTemplate.id, body.agentTemplateId));
+					.where(eq(agentTemplate.id, body.agentTemplateId))
+					.for("share");
 				requireRosterable(template, body.agentTemplateId);
 				if (!template) throw new Error("unreachable: checked above");
 
