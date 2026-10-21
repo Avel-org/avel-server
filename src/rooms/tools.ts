@@ -17,7 +17,8 @@ import { writable } from "./globs";
  *
  * Every path is relative to the room's root, written with / or \. It is
  * refused when absolute, when any segment is `..` or `.git` (any case),
- * or when it resolves, through a symlink or junction, outside the room.
+ * or when it resolves, through a symlink or junction, outside the room or
+ * into .git.
  * Write and edit are refused outside the writable globs. That write check
  * is the tool's own [attestation]-grade guard, not a mount: the exit
  * checkpoint (checkpoint.ts) is what refuses the work if anything got past.
@@ -135,6 +136,11 @@ async function resolveInRoom(room: ToolRoom, rel: string): Promise<string> {
 					rel,
 					`${rel} resolves outside the room`,
 				);
+			}
+			// A link that stays inside can still lead into .git, which the
+			// path's own segments never named: check where it landed too.
+			if (path.relative(root, real).split(path.sep).some(isGitSegment)) {
+				throw new ToolError("git_dir", rel, `${rel} resolves inside .git`);
 			}
 			return target;
 		} catch (err) {

@@ -7,6 +7,7 @@ import {
 	getTableName,
 	ilike,
 	inArray,
+	ne,
 	type SQL,
 	sql,
 	type Table,
@@ -190,10 +191,18 @@ export function skillSourceRoutes(deps: RouteDeps) {
 					.where(and(eq(skillSource.id, params.id), live(skillSource)))
 					.for("update");
 				if (!locked) throw notFound("skill source", params.id);
+				// A retired skill is trashed (J, 2026-10-21): it no longer holds its
+				// source, and keeps naming it once the source is deleted.
 				const [inUse] = await tx
 					.select({ id: skill.id })
 					.from(skill)
-					.where(and(eq(skill.sourceId, params.id), live(skill)))
+					.where(
+						and(
+							eq(skill.sourceId, params.id),
+							live(skill),
+							ne(skill.status, "retired"),
+						),
+					)
 					.limit(1);
 				if (inUse) {
 					throw new ApiError(

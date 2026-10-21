@@ -99,6 +99,6 @@ export const skillSourceContract = c.router({
 		pathParams: byId,
 		responses: { 200: successEnvelope(removedSchema) },
 		summary:
-			"Soft-deletes the source. Refused while a live skill comes from it (422 skill_source_in_use).",
+			"Soft-deletes the source. Refused while a live draft or approved skill comes from it (422 skill_source_in_use); a retired one does not hold it.",
 	},
 });

@@ -157,6 +157,27 @@ describe.skipIf(!process.env.DATABASE_URL)("skill source writes", () => {
 			]);
 		});
 	});
+
+	it("lets a source go once its only skill is retired, and the skill still names it", async () => {
+		await withApi(async ({ signIn, call, ns }) => {
+			await signIn();
+			const source = await newSource(call, "Retiring");
+			const s = await newSkill(call, knowledgeBody(ns, source.id));
+			expect(
+				(await call(`/api/skills/${s.id}/retire`, { method: "POST" })).status,
+			).toBe(200);
+			const res = await call(`/api/skill-sources/${source.id}`, {
+				method: "DELETE",
+			});
+			expect(res.status).toBe(200);
+			const kept = await call(`/api/skills/${s.id}`);
+			expect(kept.status).toBe(200);
+			expect(((await kept.json()) as { data: unknown }).data).toMatchObject({
+				status: "retired",
+				source: { id: source.id, name: "Retiring" },
+			});
+		});
+	});
 });
 
 describe.skipIf(!process.env.DATABASE_URL)("skill create", () => {

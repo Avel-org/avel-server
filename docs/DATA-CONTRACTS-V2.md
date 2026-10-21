@@ -394,6 +394,8 @@ reviewed_at?
 version · deleted_at · timestamps
 ```
 
+**Retired means trashed.** `[built]` 2026-10-21. A retired skill takes no reason and cannot be edited, and it no longer holds its source: a source is refused delete (`skill_source_in_use`) only while a live draft or approved skill comes from it. A retired skill keeps naming a deleted source.
+
 **Layers decide where a skill is delivered.** `role` skills are part of the identity file and hashed into `agent_version_sha256`. `stack` and `domain` skills are given at dispatch and hashed into `CompletionReport.skills_sha256`. See `SKILLS.md`.
 
 **`type='capability'` is enforced by the room.** The runner provides the tools in `grants` and nothing else. A code check rejects a capability attached to any role whose room cannot hold it — a judge cannot be granted write access to source, and only the delivery room can hold the credential.

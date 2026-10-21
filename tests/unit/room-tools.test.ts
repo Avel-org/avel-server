@@ -179,6 +179,13 @@ describe("readTool", () => {
 		await refused(listTool(room, "src/escape"), "outside_room");
 	});
 
+	it("refuses a link inside the room that leads into .git", async () => {
+		// The path names no .git segment; only where it resolves does.
+		linkDir(path.join(room.root, ".git"), path.join(room.root, "src", "g"));
+		await refused(readTool(room, "src/g/config"), "git_dir");
+		await refused(listTool(room, "src/g"), "git_dir");
+	});
+
 	it("follows a link that stays inside the room", async () => {
 		linkDir(path.join(room.root, "docs"), path.join(room.root, "src", "docs"));
 		expect(await readTool(room, "src/docs/readme.md")).toBe("# Readme\n");
@@ -242,6 +249,15 @@ describe("writeTool", () => {
 			"secret\n",
 		);
 		expect(existsSync(path.join(outside, "new"))).toBe(false);
+	});
+
+	it("refuses to write or edit through a link into .git, existing file or new", async () => {
+		linkDir(path.join(room.root, ".git"), path.join(room.root, "src", "g"));
+		await refused(writeTool(room, "src/g/config", "x"), "git_dir");
+		await refused(writeTool(room, "src/g/hooks/pre-commit", "x"), "git_dir");
+		await refused(editTool(room, "src/g/config", "core", "x"), "git_dir");
+		expect(onDisk(".git/config")).toBe("[core]\n");
+		expect(existsSync(path.join(room.root, ".git", "hooks"))).toBe(false);
 	});
 });
 
