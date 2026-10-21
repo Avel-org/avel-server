@@ -83,4 +83,19 @@ describe("UsageCounter", () => {
 		expect(c.onResult(totals)).toBeNull();
 		expect(c.countedTotal).toEqual(split(115, 55, 30, 4));
 	});
+
+	it("reads the message still streaming, read only, until its stop counts it", () => {
+		const c = new UsageCounter();
+		expect(c.streaming).toEqual(split(0, 0));
+		c.onEvent(start("m1", { input_tokens: 100, output_tokens: 1 }));
+		c.onEvent(delta(30));
+		expect(c.streaming).toEqual(split(100, 30));
+		expect(c.streaming).toEqual(split(100, 30));
+		expect(c.countedTotal).toEqual(split(0, 0));
+		expect(c.onEvent(stop)).toEqual(split(100, 30));
+		expect(c.streaming).toEqual(split(0, 0));
+		// A message already counted is never pending again.
+		c.onEvent(start("m1", { input_tokens: 100, output_tokens: 1 }));
+		expect(c.streaming).toEqual(split(0, 0));
+	});
 });

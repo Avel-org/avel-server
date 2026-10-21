@@ -63,9 +63,35 @@ export type Harness = {
 	has: (dispatchId: string) => Promise<boolean>;
 	/** The session's next event, or null when it has none now. */
 	next: (dispatchId: string) => Promise<HarnessEvent | null>;
+	/**
+	 * Usage the session has reported that the runner has not read yet: its
+	 * queued usage events and the counts so far of a message still
+	 * streaming. Zero for no session. Read only: the queue is left as it is,
+	 * so a close that rolls back loses nothing. A close counts this in its
+	 * own transaction, and after it commits nothing counts on the dispatch.
+	 */
+	pendingUsage: (dispatchId: string) => Promise<TokenSplit>;
 	/** Stops the session. Stopping one that does not exist does nothing. */
 	stop: (dispatchId: string) => Promise<void>;
 };
+
+/** The usage events' splits, summed. */
+export function sumUsage(events: readonly HarnessEvent[]): TokenSplit {
+	const sum: TokenSplit = {
+		tokensIn: 0,
+		tokensOut: 0,
+		cacheReadTokens: 0,
+		cacheWriteTokens: 0,
+	};
+	for (const e of events) {
+		if (e.kind !== "usage") continue;
+		sum.tokensIn += e.split.tokensIn;
+		sum.tokensOut += e.split.tokensOut;
+		sum.cacheReadTokens += e.split.cacheReadTokens;
+		sum.cacheWriteTokens += e.split.cacheWriteTokens;
+	}
+	return sum;
+}
 
 /** The FakeHarness's model id. src/lib/prices.ts prices it at zero. */
 export const FAKE_HARNESS_MODEL = "fake-harness";
@@ -154,6 +180,10 @@ export class FakeHarness implements Harness {
 
 	async next(dispatchId: string): Promise<HarnessEvent | null> {
 		return this.sessions.get(dispatchId)?.events.shift() ?? null;
+	}
+
+	async pendingUsage(dispatchId: string): Promise<TokenSplit> {
+		return sumUsage(this.sessions.get(dispatchId)?.events ?? []);
 	}
 
 	async stop(dispatchId: string): Promise<void> {

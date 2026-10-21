@@ -10,17 +10,19 @@ import {
 import { z } from "zod";
 import type { IdGenerator } from "../lib/ids";
 import type { Logger } from "../lib/logger";
+import type { TokenSplit } from "../lib/prices";
 import {
 	type AgentApi,
 	type AgentTools,
 	agentTools,
 	type ToolResult,
 } from "./agent-tools";
-import type {
-	Harness,
-	HarnessEvent,
-	HarnessSession,
-	HarnessStep,
+import {
+	type Harness,
+	type HarnessEvent,
+	type HarnessSession,
+	type HarnessStep,
+	sumUsage,
 } from "./harness";
 import { SdkStepTrace } from "./sdk-steps";
 import {
@@ -90,7 +92,7 @@ export type AgentSdkHarnessOptions = {
 /** Counts one usage split on a running dispatch; false once it is no longer running. */
 export type UsageSink = (
 	dispatchId: string,
-	split: import("../lib/prices").TokenSplit,
+	split: TokenSplit,
 ) => Promise<boolean>;
 
 /** The runner's writeDispatchStep, for the steps queued when a report closes the run. */
@@ -103,6 +105,7 @@ type Running = {
 	abort: AbortController;
 	events: HarnessEvent[];
 	tools: AgentTools;
+	usage: UsageCounter;
 	reported: boolean;
 	done: Promise<void>;
 };
@@ -340,6 +343,7 @@ export class AgentSdkHarness implements Harness {
 		const running: Running = {
 			abort,
 			events,
+			usage: new UsageCounter(),
 			reported: false,
 			tools: agentTools({
 				dispatchId: session.dispatchId,
@@ -367,7 +371,7 @@ export class AgentSdkHarness implements Harness {
 	/** Reads the session's messages until it ends, turning them into events. */
 	private async run(session: HarnessSession, r: Running): Promise<void> {
 		const log = this.options.logger.child({ dispatchId: session.dispatchId });
-		const usage = new UsageCounter();
+		const { usage } = r;
 		const trace = new SdkStepTrace();
 		const steps = (list: HarnessStep[]) => {
 			for (const step of list) r.events.push({ kind: "step", step });
@@ -429,6 +433,12 @@ export class AgentSdkHarness implements Harness {
 
 	async next(dispatchId: string): Promise<HarnessEvent | null> {
 		return this.sessions.get(dispatchId)?.events.shift() ?? null;
+	}
+
+	async pendingUsage(dispatchId: string): Promise<TokenSplit> {
+		const r = this.sessions.get(dispatchId);
+		if (!r) return sumUsage([]);
+		return sumUsage([...r.events, { kind: "usage", split: r.usage.streaming }]);
 	}
 
 	async stop(dispatchId: string): Promise<void> {
