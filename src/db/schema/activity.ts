@@ -100,6 +100,7 @@ export const activityAction = pgEnum("activity_action", [
 	"client_memory.removed",
 	"client_memory.written",
 	"intake.drafted_by_canon",
+	"mission.spend_ceiling_set",
 ]);
 
 export const activityEntityType = pgEnum("activity_entity_type", [

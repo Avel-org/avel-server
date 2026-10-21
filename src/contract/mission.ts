@@ -18,6 +18,17 @@ export const cutSource = z.enum(["derived", "overridden"]);
 export const exportTargetKind = z.enum(["zip", "github_pr", "github_push"]);
 
 /**
+ * A mission's spend ceiling, in USD, to the cent. The column is
+ * numeric(12, 2); the cap of 1,000,000 is a [hypothesis], far above any
+ * mission this agency runs.
+ */
+export const spendCeilingUsd = z
+	.number()
+	.positive()
+	.max(1_000_000)
+	.multipleOf(0.01);
+
+/**
  * Why a mission needs the operator, derived from its last export's status.
  * A closed vocabulary; extending it is a contract change.
  */
@@ -181,6 +192,11 @@ export const missionDetail = missionListItem.extend({
 
 export type MissionDetail = z.infer<typeof missionDetail>;
 
+/** null clears the ceiling, on a draft only. */
+export const updateMissionBody = z
+	.object({ spendCeilingUsd: spendCeilingUsd.nullable() })
+	.strict();
+
 export const missionContract = c.router({
 	list: {
 		method: "GET",
@@ -194,5 +210,14 @@ export const missionContract = c.router({
 		path: "/api/missions/:id",
 		pathParams: z.object({ id: z.string().uuid() }),
 		responses: { 200: successEnvelope(missionDetail) },
+	},
+	update: {
+		method: "PATCH",
+		path: "/api/missions/:id",
+		pathParams: z.object({ id: z.string().uuid() }),
+		body: updateMissionBody,
+		responses: { 200: successEnvelope(missionDetail) },
+		summary:
+			"Sets or clears the spend ceiling: any value or null on a draft, only higher on an active mission (spend_ceiling_not_raised, which clearing also is), never on a halted, shipped or archived one (mission_not_editable)",
 	},
 });

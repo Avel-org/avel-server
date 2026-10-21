@@ -912,6 +912,15 @@ J decided the first group below on 2026-10-15 to 2026-10-19, before the first mi
   - Open for J: a prior finding has no executable check (`Finding.rule` is free text). It needs either a structured check on Finding or a separate table of checks, and either one is a schema and contract change. Deferred until after the first mission, since mission one has no prior findings.
 - **"Canon cannot draft the plan until it runs as a dispatch"** (*Decided 2026-10-10: the mission planner*) loses its reason. Whether Canon drafts the plan's modules is open. For the first mission, the operator writes the plan.
 
+## Decided 2026-10-20: the spend ceiling is optional
+
+J decided this on 2026-10-20, relayed by FE Main and confirmed by J to BE Main the same day.
+
+- **A mission may run with no spend ceiling.** Approve takes `spendCeilingUsd` as optional, and start no longer refuses `spend_ceiling_missing`. Readiness shows it as a warning instead, in `warnings`, so a mission never runs without a limit unnoticed.
+- **This reverses "the backstop halts the whole mission" for a mission without one.** *Raised: cost governance* called the mission ceiling the mechanical fix for limits enforced by intention, and `DATA-CONTRACTS-V2.md` lists it as the third of three spend levels. With no ceiling, only each dispatch's token ceilings bound spend, and nothing bounds the mission's total. BE Main flagged this before building it.
+- **An active mission's ceiling only goes up, and is never cleared** (BE Main). Lowering it under what is already spent would halt every running dispatch on the next tick, and clearing it would remove the only cap on the total. Both refuse `spend_ceiling_not_raised`. A draft's ceiling may be set, lowered or cleared.
+- **The detail wire keeps `spentUsd` whatever the ceiling.**
+
 ---
 
 ## Open questions

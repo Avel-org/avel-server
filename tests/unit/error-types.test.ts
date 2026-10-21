@@ -98,6 +98,7 @@ describe("the error envelope is a discriminated union on code", () => {
 			"estimate_missing",
 			"spend_ceiling_missing",
 			"spend_ceiling_reached",
+			"spend_ceiling_not_raised",
 			"roster_entry_not_found",
 			"roster_entry_inactive",
 			"agent_identity_missing",

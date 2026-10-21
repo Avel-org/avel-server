@@ -168,6 +168,7 @@ describe.skipIf(!process.env.DATABASE_URL)("mission start and halt", () => {
 				missionId: s.missionId,
 				ready: true,
 				blockers: [],
+				warnings: [],
 			});
 
 			const res = await post(call, s.missionId, "start");
@@ -252,7 +253,9 @@ describe.skipIf(!process.env.DATABASE_URL)("mission start and halt", () => {
 					},
 				],
 			});
-			expect(r.blockers[4]).toEqual({ reason: "spend_ceiling_missing" });
+			// No ceiling is a warning, never a blocker (J, 2026-10-20).
+			expect(r.blockers).toHaveLength(4);
+			expect(r.warnings).toEqual([{ reason: "spend_ceiling_missing" }]);
 
 			const d = await refusal(await post(call, s.missionId, "start"));
 			expect(d).toEqual({

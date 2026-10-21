@@ -16,10 +16,22 @@ export const READINESS_REASONS = [
 	"plan_check_failed",
 	"coherence_blocked",
 	"estimate_missing",
-	"spend_ceiling_missing",
 ] as const;
 
 export const readinessReason = z.enum(READINESS_REASONS);
+
+/**
+ * What readiness shows but start does not refuse. A mission with no spend
+ * ceiling has no mission-wide spend halt, only each dispatch's token
+ * ceilings (J, 2026-10-20: the ceiling is optional).
+ */
+export const READINESS_WARNINGS = ["spend_ceiling_missing"] as const;
+
+export const readinessWarning = z
+	.object({ reason: z.enum(READINESS_WARNINGS) })
+	.strict();
+
+export type ReadinessWarning = z.infer<typeof readinessWarning>;
 
 /**
  * One blocker: the details a refused start would carry for it. Issue paths
@@ -43,6 +55,8 @@ export const missionReadiness = z.object({
 	/** True exactly when blockers is empty. */
 	ready: z.boolean(),
 	blockers: z.array(readinessBlocker),
+	/** Never blocks: ready ignores them. */
+	warnings: z.array(readinessWarning),
 });
 
 export type MissionReadiness = z.infer<typeof missionReadiness>;

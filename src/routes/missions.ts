@@ -20,6 +20,7 @@ import {
 	missionContract,
 	ok,
 } from "../contract";
+import { logActivity } from "../db/activity";
 import { missionSpentUsd } from "../db/dispatch";
 import {
 	activityLog,
@@ -32,13 +33,14 @@ import {
 	rosterEntry,
 	user,
 } from "../db/schema";
-import { live } from "../db/schema/columns";
-import type { Executor } from "../db/tx";
+import { live, touch } from "../db/schema/columns";
+import { type Executor, withTx } from "../db/tx";
 import { ApiError } from "../middleware/errors";
 import { activityActor, actorColumns } from "./activity";
 import {
 	containsPattern,
 	notFound,
+	operatorOf,
 	type RequestContext,
 	type RouteDeps,
 } from "./shared";
@@ -343,6 +345,111 @@ function itemFields(b: ReturnType<typeof base>) {
 	};
 }
 
+/** The mission as GET /api/missions/:id serves it, or 404. */
+async function missionDetailOf(
+	db: Executor,
+	id: string,
+): Promise<MissionDetail> {
+	const b = base(db, id);
+	const roster = db
+		.select({
+			missionId: rosterEntry.missionId,
+			agents: sql<number>`count(*)`.mapWith(Number).as("agents"),
+			active: sql<number>`count(*) filter (where ${rosterEntry.active})`
+				.mapWith(Number)
+				.as("active"),
+		})
+		.from(rosterEntry)
+		.where(and(eq(rosterEntry.missionId, id), live(rosterEntry)))
+		.groupBy(rosterEntry.missionId)
+		.as("roster");
+
+	// Query 1 of 3: the mission with every join.
+	const [row] = await db
+		.select({
+			...itemFields(b),
+			brief: mission.brief,
+			spendCeilingUsd: mission.spendCeilingUsd,
+			cutRationale: mission.cutRationale,
+			repoUrl: mission.repoUrl,
+			rosterAgents: roster.agents,
+			rosterActive: roster.active,
+			playbookType: playbook.missionType,
+			playbookName: playbook.name,
+		})
+		.from(mission)
+		.leftJoin(
+			engagement,
+			and(eq(engagement.id, mission.engagementId), live(engagement)),
+		)
+		.leftJoin(client, and(eq(client.id, engagement.clientId), live(client)))
+		.leftJoin(b.lx, eq(b.lx.missionId, mission.id))
+		.leftJoin(b.la, eq(b.la.missionId, mission.id))
+		.leftJoin(roster, eq(roster.missionId, mission.id))
+		.leftJoin(
+			playbook,
+			and(eq(playbook.missionType, mission.type), live(playbook)),
+		)
+		.where(
+			and(
+				eq(mission.id, id),
+				live(mission),
+				or(
+					eq(mission.origin, "internal"),
+					and(isNotNull(engagement.id), isNotNull(client.id)),
+				),
+			),
+		);
+	if (!row) throw notFound("mission", id);
+
+	// Query 2 of 3: the ten newest activity rows, with their actors,
+	// joined as the activity feed joins them (no live()).
+	const activity = await db
+		.select({
+			action: activityLog.action,
+			entityType: activityLog.entityType,
+			at: activityLog.at,
+			...actorColumns,
+		})
+		.from(activityLog)
+		.leftJoin(user, eq(user.id, activityLog.actorUserId))
+		.leftJoin(rosterEntry, eq(rosterEntry.id, activityLog.actorRosterEntryId))
+		.leftJoin(agentTemplate, eq(agentTemplate.id, rosterEntry.agentTemplateId))
+		.where(eq(activityLog.missionId, id))
+		.orderBy(desc(activityLog.at), desc(activityLog.id))
+		.limit(10);
+
+	// Query 3 of 3: what the mission's dispatches have spent.
+	const spentUsd = await missionSpentUsd(db, id);
+
+	const item = toItem(row as ListRow);
+	const detail: MissionDetail = {
+		...item,
+		brief: (row.brief ?? {}) as Record<string, unknown>,
+		spendCeilingUsd:
+			row.spendCeilingUsd === null ? null : Number(row.spendCeilingUsd),
+		spentUsd,
+		cutRationale: row.cutRationale,
+		repoUrl: row.repoUrl,
+		roster: {
+			agents: row.rosterAgents ?? 0,
+			active: row.rosterActive ?? 0,
+		},
+		playbook:
+			row.playbookType && row.playbookName
+				? { missionType: row.playbookType, name: row.playbookName }
+				: null,
+		lastExport: item.lastExport ? { ...item.lastExport, gates: null } : null,
+		recentActivity: activity.map((a) => ({
+			action: a.action,
+			entityType: a.entityType,
+			at: a.at.toISOString(),
+			actor: activityActor(a),
+		})),
+	};
+	return detail;
+}
+
 export function missionRoutes(deps: RouteDeps) {
 	return tsr.platformContext<RequestContext>().router(missionContract, {
 		list: async ({ query }) => {
@@ -448,114 +555,90 @@ export function missionRoutes(deps: RouteDeps) {
 			};
 		},
 
-		get: async ({ params }) => {
-			const db = deps.db();
-			const b = base(db, params.id);
-			const roster = db
-				.select({
-					missionId: rosterEntry.missionId,
-					agents: sql<number>`count(*)`.mapWith(Number).as("agents"),
-					active: sql<number>`count(*) filter (where ${rosterEntry.active})`
-						.mapWith(Number)
-						.as("active"),
-				})
-				.from(rosterEntry)
-				.where(and(eq(rosterEntry.missionId, params.id), live(rosterEntry)))
-				.groupBy(rosterEntry.missionId)
-				.as("roster");
+		get: async ({ params }) => ({
+			status: 200,
+			body: ok(await missionDetailOf(deps.db(), params.id)),
+		}),
 
-			// Query 1 of 3: the mission with every join.
-			const [row] = await db
-				.select({
-					...itemFields(b),
-					brief: mission.brief,
-					spendCeilingUsd: mission.spendCeilingUsd,
-					cutRationale: mission.cutRationale,
-					repoUrl: mission.repoUrl,
-					rosterAgents: roster.agents,
-					rosterActive: roster.active,
-					playbookType: playbook.missionType,
-					playbookName: playbook.name,
-				})
-				.from(mission)
-				.leftJoin(
-					engagement,
-					and(eq(engagement.id, mission.engagementId), live(engagement)),
-				)
-				.leftJoin(client, and(eq(client.id, engagement.clientId), live(client)))
-				.leftJoin(b.lx, eq(b.lx.missionId, mission.id))
-				.leftJoin(b.la, eq(b.la.missionId, mission.id))
-				.leftJoin(roster, eq(roster.missionId, mission.id))
-				.leftJoin(
-					playbook,
-					and(eq(playbook.missionType, mission.type), live(playbook)),
-				)
-				.where(
-					and(
-						eq(mission.id, params.id),
-						live(mission),
-						or(
-							eq(mission.origin, "internal"),
-							and(isNotNull(engagement.id), isNotNull(client.id)),
+		update: async ({ params, body }, ctx) => {
+			const operator = operatorOf(ctx);
+			const to = body.spendCeilingUsd?.toFixed(2) ?? null;
+			await withTx(deps.db(), async (tx) => {
+				// Locked, so a status change cannot race the rule below. Visible as
+				// GET is: a client mission whose engagement or client is removed is 404.
+				const [m] = await tx
+					.select({
+						status: mission.status,
+						engagementId: mission.engagementId,
+						spendCeilingUsd: mission.spendCeilingUsd,
+					})
+					.from(mission)
+					.leftJoin(
+						engagement,
+						and(eq(engagement.id, mission.engagementId), live(engagement)),
+					)
+					.leftJoin(
+						client,
+						and(eq(client.id, engagement.clientId), live(client)),
+					)
+					.where(
+						and(
+							eq(mission.id, params.id),
+							live(mission),
+							or(
+								eq(mission.origin, "internal"),
+								and(isNotNull(engagement.id), isNotNull(client.id)),
+							),
 						),
-					),
-				);
-			if (!row) throw notFound("mission", params.id);
-
-			// Query 2 of 3: the ten newest activity rows, with their actors,
-			// joined as the activity feed joins them (no live()).
-			const activity = await db
-				.select({
-					action: activityLog.action,
-					entityType: activityLog.entityType,
-					at: activityLog.at,
-					...actorColumns,
-				})
-				.from(activityLog)
-				.leftJoin(user, eq(user.id, activityLog.actorUserId))
-				.leftJoin(
-					rosterEntry,
-					eq(rosterEntry.id, activityLog.actorRosterEntryId),
-				)
-				.leftJoin(
-					agentTemplate,
-					eq(agentTemplate.id, rosterEntry.agentTemplateId),
-				)
-				.where(eq(activityLog.missionId, params.id))
-				.orderBy(desc(activityLog.at), desc(activityLog.id))
-				.limit(10);
-
-			// Query 3 of 3: what the mission's dispatches have spent.
-			const spentUsd = await missionSpentUsd(db, params.id);
-
-			const item = toItem(row as ListRow);
-			const detail: MissionDetail = {
-				...item,
-				brief: (row.brief ?? {}) as Record<string, unknown>,
-				spendCeilingUsd:
-					row.spendCeilingUsd === null ? null : Number(row.spendCeilingUsd),
-				spentUsd,
-				cutRationale: row.cutRationale,
-				repoUrl: row.repoUrl,
-				roster: {
-					agents: row.rosterAgents ?? 0,
-					active: row.rosterActive ?? 0,
-				},
-				playbook:
-					row.playbookType && row.playbookName
-						? { missionType: row.playbookType, name: row.playbookName }
-						: null,
-				lastExport: item.lastExport
-					? { ...item.lastExport, gates: null }
-					: null,
-				recentActivity: activity.map((a) => ({
-					action: a.action,
-					entityType: a.entityType,
-					at: a.at.toISOString(),
-					actor: activityActor(a),
-				})),
+					)
+					.for("update", { of: mission });
+				if (!m) throw notFound("mission", params.id);
+				if (m.status !== "draft" && m.status !== "active") {
+					throw new ApiError(
+						"PRECONDITION_FAILED",
+						`A ${m.status} mission's spend ceiling cannot change`,
+						{ details: { reason: "mission_not_editable" } },
+					);
+				}
+				// The same value again changes nothing, so a retry is safe.
+				if (m.spendCeilingUsd === to) return;
+				// A running mission's ceiling only goes up: lowering it under what
+				// is already spent would halt every dispatch on the next tick, and
+				// clearing it would remove the only cap on the mission's total.
+				if (
+					m.status === "active" &&
+					m.spendCeilingUsd !== null &&
+					(to === null || Number(to) < Number(m.spendCeilingUsd))
+				) {
+					throw new ApiError(
+						"PRECONDITION_FAILED",
+						`An active mission's spend ceiling only goes up, from ${m.spendCeilingUsd}`,
+						{ details: { reason: "spend_ceiling_not_raised" } },
+					);
+				}
+				await tx
+					.update(mission)
+					.set({ spendCeilingUsd: to, ...touch(deps.clock) })
+					.where(eq(mission.id, params.id));
+				await logActivity(tx, deps, {
+					actorKind: "operator",
+					actorUserId: operator.id,
+					action: "mission.spend_ceiling_set",
+					entityType: "mission",
+					entityId: params.id,
+					missionId: params.id,
+					engagementId: m.engagementId,
+					requestId: ctx.requestId,
+					payload: {
+						from: m.spendCeilingUsd === null ? null : Number(m.spendCeilingUsd),
+						to: to === null ? null : Number(to),
+					},
+				});
+			});
+			return {
+				status: 200,
+				body: ok(await missionDetailOf(deps.db(), params.id)),
 			};
-			return { status: 200, body: ok(detail) };
 		},
 	});
 }

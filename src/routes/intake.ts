@@ -457,7 +457,7 @@ export function intakeRoutes(deps: RouteDeps & { repos: RepoSource }) {
 					cutSource: "derived",
 					cutRationale: null,
 					repoUrl: current.repoUrl,
-					spendCeilingUsd: null,
+					spendCeilingUsd: body.spendCeilingUsd?.toFixed(2) ?? null,
 					deletedAt: null,
 					...stamp(deps.clock),
 				});
@@ -470,7 +470,11 @@ export function intakeRoutes(deps: RouteDeps & { repos: RepoSource }) {
 					missionId,
 					engagementId: current.engagementId,
 					requestId: ctx.requestId,
-					payload: { intakeId: current.id, type: body.missionType },
+					payload: {
+						intakeId: current.id,
+						type: body.missionType,
+						spendCeilingUsd: body.spendCeilingUsd ?? null,
+					},
 				});
 				return transition(
 					tx,

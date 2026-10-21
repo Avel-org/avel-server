@@ -54,6 +54,7 @@ const BRIEF: BriefInput = {
 const APPROVE = {
 	missionType: "full-build",
 	repoUrl: "https://github.com/meridian-co/app",
+	spendCeilingUsd: 40,
 };
 
 function withDatabase(base: string, name: string) {

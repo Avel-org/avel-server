@@ -1,6 +1,6 @@
 import { initContract } from "@ts-rest/core";
 import { z } from "zod";
-import { missionCut } from "./mission";
+import { missionCut, spendCeilingUsd } from "./mission";
 import { presetAgentSchema } from "./preset";
 import { boundarySchema, conventionSetSchema } from "./repo-read";
 import { successEnvelope } from "./shared/envelope";
@@ -265,6 +265,11 @@ export const approveIntakeBody = z
 		 * through revise instead. Recorded in the intake.approved ActivityLog row.
 		 */
 		acknowledged: z.array(openQuestion).max(100).default([]),
+		/**
+		 * Written to the mission it creates. Optional (J, 2026-10-20): without
+		 * one the mission has no mission-wide spend halt, and readiness warns.
+		 */
+		spendCeilingUsd: spendCeilingUsd.optional(),
 	})
 	.strict();
 

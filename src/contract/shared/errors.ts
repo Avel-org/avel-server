@@ -109,6 +109,8 @@ export const PRECONDITION_REASONS = [
 	"estimate_missing",
 	"spend_ceiling_missing",
 	"spend_ceiling_reached",
+	// An active mission's ceiling may only go up (PATCH /api/missions/:id).
+	"spend_ceiling_not_raised",
 	// Module 6: dispatches.
 	"roster_entry_not_found",
 	"roster_entry_inactive",

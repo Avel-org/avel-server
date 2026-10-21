@@ -18,11 +18,11 @@
 |---|---|
 | Command Center modules (`COMMAND-CENTER.md`) | **15**, numbered 0–14 |
 | Core entities | **20** + SkillSource (supporting catalog): all 20 built (`Dispatch` with module 6; `File` on 2026-10-19, moved before the first mission for Canon). Plus Canon's **4** supporting entities, built 2026-10-19: CanonSession, CanonMessage, CanonQuestion, ClientMemory. Every one has a field list (`DATA-CONTRACTS-V2.md`). |
-| Database tables built | **32**: the 26 of 2026-10-14, plus `file`, `intake_files`, `canon_session`, `canon_message`, `canon_question` and `client_memory`. Migrations `0000`–`0040` applied on `avel_dev` (41), counted against `information_schema` on 2026-10-19. |
+| Database tables built | **32**: the 26 of 2026-10-14, plus `file`, `intake_files`, `canon_session`, `canon_message`, `canon_question` and `client_memory`. Migrations `0000`–`0040` applied on `avel_dev` (41), counted against `information_schema` on 2026-10-19. `0041` (2026-10-20) adds the `mission.spend_ceiling_set` action; applied on `avel_dev` the same day (42). |
 | Tables under row-level security | **6**, all enabled and forced: `file`, `intake_files` and the four Canon tables. The other 26 are not, by J's ruling (2026-10-19). |
 | SECURITY DEFINER functions | **3**, the Canon client-id lookups (`DATA-CONTRACTS-V2.md`, *Client isolation*). A test asserts there are no others. |
 | Error codes in `src/contract/shared/errors.ts` | **24** — 6 generic · `NOT_OPERATOR` · 2 route · 12 `BLAST-RADIUS.md` · `GITHUB_REJECTED` · `DISPATCH_CLOSED` · `AGENT_NOT_PERMITTED` (counted in the file 2026-10-19; unchanged since 2026-10-14) |
-| Precondition reasons in the same file | **64** (counted 2026-10-19) |
+| Precondition reasons in the same file | **65** (counted 2026-10-20): the 64 of 2026-10-19 plus `spend_ceiling_not_raised` |
 | Roles (`ROLES.md`) | **35** — 23 model · 11 code · 1 human |
 | Model agents — target, horizontal cut (`ROSTER-V2.md`) | **13** in every mission (A 3 · B 5 · C 3 · D 2), plus up to 2: concurrency when required, incident on demand |
 | Model agents — `template-booking` (`TEMPLATE-BOOKING.md`) | **10**, plus the operator |

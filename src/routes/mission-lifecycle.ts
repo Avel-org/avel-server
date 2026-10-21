@@ -7,6 +7,7 @@ import {
 	missionLifecycleContract,
 	ok,
 	type ReadinessBlocker,
+	type ReadinessWarning,
 	resolveWritablePaths,
 } from "../contract";
 import { logActivity } from "../db/activity";
@@ -192,11 +193,14 @@ async function blockersFor(
 		});
 	}
 
-	if (m.spendCeilingUsd === null) {
-		blockers.push({ reason: "spend_ceiling_missing" });
-	}
-
 	return blockers;
+}
+
+/** What readiness shows without blocking start. */
+function warningsFor(m: MissionRow): ReadinessWarning[] {
+	return m.spendCeilingUsd === null
+		? [{ reason: "spend_ceiling_missing" }]
+		: [];
 }
 
 const MESSAGES: Record<ReadinessBlocker["reason"], string> = {
@@ -205,7 +209,6 @@ const MESSAGES: Record<ReadinessBlocker["reason"], string> = {
 	plan_check_failed: "The mission's plan does not pass its check",
 	coherence_blocked: "The roster cannot staff the playbook's first wave",
 	estimate_missing: "An active agent has no token estimate",
-	spend_ceiling_missing: "The mission has no spend ceiling",
 };
 
 export function missionLifecycleRoutes(deps: RouteDeps & RunnerDeps) {
@@ -250,7 +253,12 @@ export function missionLifecycleRoutes(deps: RouteDeps & RunnerDeps) {
 				const blockers = await blockersFor(db, m, false);
 				return {
 					status: 200,
-					body: ok({ missionId: m.id, ready: blockers.length === 0, blockers }),
+					body: ok({
+						missionId: m.id,
+						ready: blockers.length === 0,
+						blockers,
+						warnings: warningsFor(m),
+					}),
 				};
 			},
 

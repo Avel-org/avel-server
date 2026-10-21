@@ -79,6 +79,7 @@ export const activityAction = z.enum([
 	"client_memory.removed",
 	"client_memory.written",
 	"intake.drafted_by_canon",
+	"mission.spend_ceiling_set",
 ]);
 
 /** Must equal the activity_entity_type pgEnum; tests/api/activity.test.ts checks it. */

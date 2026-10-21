@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import {
 	type BriefInput,
@@ -45,6 +45,7 @@ const BRIEF: BriefInput = {
 const APPROVE = {
 	missionType: "full-build",
 	repoUrl: "https://github.com/meridian-co/app",
+	spendCeilingUsd: 40,
 };
 
 type Call = ApiHarness["call"];
@@ -259,6 +260,11 @@ describe.skipIf(!url)("/api/intakes", () => {
 				{ ...APPROVE, repoUrl: "http://github.com/meridian-co/app" },
 				{ ...APPROVE, repoUrl: "not a url" },
 				{ repoUrl: APPROVE.repoUrl },
+				{ ...APPROVE, spendCeilingUsd: 0 },
+				{ ...APPROVE, spendCeilingUsd: -5 },
+				{ ...APPROVE, spendCeilingUsd: 0.001 },
+				{ ...APPROVE, spendCeilingUsd: "40" },
+				{ ...APPROVE, spendCeilingUsd: 1_000_000.01 },
 			]) {
 				const res = await post(call, `/api/intakes/${id}/approve`, body);
 				expect(res.status, JSON.stringify(body)).toBe(400);
@@ -690,12 +696,14 @@ describe.skipIf(!url)("/api/intakes", () => {
 				repoUrl: APPROVE.repoUrl,
 				brief: BRIEF,
 				engagement: { id: h.engagementId },
+				spendCeilingUsd: 40,
 			});
 
 			const rows = await h.tx
 				.select()
 				.from(activityLog)
-				.where(eq(activityLog.engagementId, h.engagementId));
+				.where(eq(activityLog.engagementId, h.engagementId))
+				.orderBy(asc(activityLog.at), asc(activityLog.id));
 			const tail = rows
 				.filter((r) => r.entityId === id || r.entityId === missionId)
 				.slice(-2);
@@ -705,7 +713,7 @@ describe.skipIf(!url)("/api/intakes", () => {
 					entityType: "mission",
 					entityId: missionId,
 					missionId,
-					payload: { intakeId: id, type: "full-build" },
+					payload: { intakeId: id, type: "full-build", spendCeilingUsd: 40 },
 				},
 				{
 					action: "intake.approved",

@@ -288,6 +288,13 @@
       "when": 1792460035878,
       "tag": "0040_canon_client_lookups",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1792539179668,
+      "tag": "0041_activity_spend_ceiling_vocabulary",
+      "breakpoints": true
     }
   ]
 }

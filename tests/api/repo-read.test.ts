@@ -355,6 +355,7 @@ describe.skipIf(!url)("approving a read intake", () => {
 		h.post(`/api/intakes/${h.intakeId}/approve`, {
 			missionType: "full-build",
 			repoUrl,
+			spendCeilingUsd: 40,
 		});
 
 	it("builds the Mission on the repository that was read", async () => {
