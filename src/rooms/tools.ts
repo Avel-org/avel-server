@@ -101,12 +101,26 @@ export function isGitSegment(segment: string): boolean {
 const DEVICE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
 
 /**
+ * An 8.3 short name: `~` and digits ending the base name, like GIT~1 or
+ * PROGRA~1.TXT. NTFS can resolve one to a different long name, so GIT~1
+ * may be .git, and any short name can dodge the writable-glob check.
+ * Git refuses git~1 under core.protectNTFS; this refuses the whole shape.
+ */
+const SHORT_NAME = /~\d+(\.[^.]*)?$/;
+
+/**
  * A segment Win32 would not take literally, refused on every platform:
  * a trailing dot or space (stripped, so `.git.` is `.git`), a colon (an
- * NTFS alternate data stream, which git never sees), or a device name.
+ * NTFS alternate data stream, which git never sees), a device name, or an
+ * 8.3 short name.
  */
 function windowsAlias(segment: string): boolean {
-	return /[. ]$/.test(segment) || segment.includes(":") || DEVICE.test(segment);
+	return (
+		/[. ]$/.test(segment) ||
+		segment.includes(":") ||
+		DEVICE.test(segment) ||
+		SHORT_NAME.test(segment)
+	);
 }
 
 function within(root: string, target: string): boolean {

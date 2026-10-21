@@ -345,6 +345,34 @@ describe.skipIf(!process.env.DATABASE_URL)("mission start and halt", () => {
 		});
 	});
 
+	it("refuses to start with a Firm template on the roster, which only a race with a roster add could put there", async () => {
+		await withApi(async ({ signIn, call, tx, ns }) => {
+			await signIn();
+			const s = await seed(tx, ns);
+			await tx
+				.update(agentTemplate)
+				.set({ roles: ["strategy"] })
+				.where(eq(agentTemplate.id, s.templateId));
+			const d = await refusal(await post(call, s.missionId, "start"));
+			expect(d).toEqual({
+				reason: "template_not_rosterable",
+				missionId: s.missionId,
+				rosterEntryIds: [s.entryId],
+			});
+			const [m] = await tx
+				.select({ status: mission.status })
+				.from(mission)
+				.where(eq(mission.id, s.missionId));
+			expect(m?.status).toBe("draft");
+			expect(
+				await tx
+					.select()
+					.from(activityLog)
+					.where(eq(activityLog.entityId, s.missionId)),
+			).toEqual([]);
+		});
+	});
+
 	it("refuses to start twice, and halts only an active mission", async () => {
 		await withApi(async ({ signIn, call, tx, ns }) => {
 			await signIn();

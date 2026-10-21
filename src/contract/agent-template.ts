@@ -320,7 +320,7 @@ export const agentTemplateContract = c.router({
 		body: updateAgentTemplateBody,
 		responses: { 200: successEnvelope(agentTemplateSchema) },
 		summary:
-			"Edits title, description, roles, waveDefaults or writablePaths. Refused (422 agent_roles_cross_sides, agent_role_not_assignable). A missing or deleted template is 404",
+			"Edits title, description, roles, waveDefaults or writablePaths. Refused (422 agent_roles_cross_sides, agent_role_not_assignable, and template_not_rosterable for a Firm role on a template rostered on a draft, active or halted mission). A missing or deleted template is 404",
 	},
 	dispatches: {
 		method: "GET",

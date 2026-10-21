@@ -14,6 +14,7 @@ import {
 	sha256Of,
 } from "../../src/gateways/blob";
 import { sequentialIds } from "../../src/lib/ids";
+import { MAX_BODY_BYTES } from "../../src/middleware/body-limit";
 import { DEFAULT_UPLOAD_MAX_BYTES, detectMime } from "../../src/routes/files";
 import { seedTenants } from "../db/app-role";
 import { BASE_URL } from "../unit/support";
@@ -330,6 +331,19 @@ describe.skipIf(!process.env.DATABASE_URL)("the Drive's byte routes", () => {
 				await uploaded(await upload(a.intakeId, "max.md", over.slice(0, 16)));
 			},
 			{ asApp: true, drive: { blobs, maxBytes: 16 } },
+		);
+	});
+
+	it("takes an upload over the app's body cap, which leaves uploads to the Drive's", async () => {
+		const blobs = memoryBlobs();
+		await withApi(
+			async (h) => {
+				const { a, upload } = await setUp(h);
+				const big = text("x".repeat(MAX_BODY_BYTES + 1));
+				const data = await uploaded(await upload(a.intakeId, "big.md", big));
+				expect(data.bytes).toBe(big.byteLength);
+			},
+			{ asApp: true, drive: { blobs, maxBytes: DEFAULT_UPLOAD_MAX_BYTES } },
 		);
 	});
 
