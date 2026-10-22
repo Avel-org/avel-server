@@ -1001,6 +1001,8 @@ J decided this on 2026-10-21, while settling render and delivery. A run, and eac
 - **`pass`:** anything else.
 - **Only `verified` work is delivered,** to every target. An override can lift `fail` to `pass` and never further, so overridden work never ships. This supersedes *Resolved 2026-08-21: `gate_override` renders into the package and PR body*, and `EXPORT-ENGINE.md` §4's operator override at export.
 - **Why.** The earlier pair, a verdict (`pass`, `warn`, `overridden`, `block`) and an assurance (`verified`, `not_fully_checked`), gave eight combinations for one question: can this ship. J found that ambiguous.
+- **No exception for prototypes or spikes** (J, the same day). *Making the gate judge real work* (2026-10-20) recommended letting a not-fully-checked run ship as a labelled prototype. Rejected: only `verified` ships, whatever the label.
+- **Overrides stay, as a record** (J, the same day). An override no longer makes work deliverable, but it records which blocker the operator accepted at which commit, and why, in the receipt.
 - **A fail on a warn gate is a `pass`.** The check ran, so nothing is unchecked, but a failed check is not verified work.
 - **No reasons is a `pass`.** A playbook that lists no gate checked nothing.
 - **Old runs.** A stored run of decide() version 1 or 2 gets its result from its receipt's reasons, the same rule, so its result does not depend on which version wrote it. Canon's fetch tool reads no receipt, so it reads an old run's verdict `block` as `fail` and `pass` as `pass`, never `verified`.
