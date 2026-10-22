@@ -568,9 +568,9 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 					expect(d.status).toBe("complete");
 					const run = await ok(gateRes, 201, successEnvelope(gateRunSchema));
 					console.log(
-						"VERDICT",
-						run.verdict,
-						JSON.stringify(run.gates.map((g) => [g.gate, g.verdict])),
+						"RESULT",
+						run.result,
+						JSON.stringify(run.gates.map((g) => [g.gate, g.result])),
 						run.receiptSha256,
 						run.commitSha,
 					);

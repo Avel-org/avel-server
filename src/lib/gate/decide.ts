@@ -9,13 +9,12 @@ import {
 	type DecideConfig,
 	type DecideRule,
 	type Decision,
-	type GateAssurance,
 	type GateDecision,
 	type GateFinding,
 	type GateOutcome,
 	type GateOverride,
 	type GateReason,
-	type GateVerdict,
+	type GateResult,
 	type IgnoredOverride,
 	type NotChecked,
 	type ReasonEffect,
@@ -24,8 +23,10 @@ import {
 /**
  * Bumped whenever the same inputs could give a different Decision.
  * 2 (2026-10-21): assurance and notChecked.
+ * 3 (2026-10-21): one result (verified, pass, fail) replaces verdict and
+ * assurance, for the run and for each gate.
  */
-export const DECIDE_VERSION = 2;
+export const DECIDE_VERSION = 3;
 
 type Classified = {
 	rule: DecideRule;
@@ -35,7 +36,7 @@ type Classified = {
 };
 
 /**
- * Turns gate findings into ship or block (COMMAND-CENTER module 9). Pure: no
+ * Turns gate findings into a result (COMMAND-CENTER module 9). Pure: no
  * clock, no ids, and any order of the same inputs gives the same Decision.
  *
  * Each finding gets the first rule that matches:
@@ -57,10 +58,11 @@ type Classified = {
  * evidence) gets a synthesized not_run, which no override clears. An override
  * clears one blocking finding at one commit, with a written rationale.
  *
- * Assurance: every finding decide() counts (any effect but ignored) whose
- * check did not run or broke (not_run, error), and every synthesized
- * not_run, is listed in notChecked; the run is verified only when none is.
- * An override clears a block, never the gap.
+ * Every finding decide() counts (any effect but ignored) whose check did
+ * not run or broke (not_run, error), and every synthesized not_run, is
+ * listed in notChecked. The result is resultOf the counted reasons, and
+ * every notChecked entry has a reason that did not pass, so a run with a
+ * gap is never verified. An override clears a block, never the gap.
  */
 export function decide(
 	findings: readonly GateFinding[],
@@ -189,7 +191,7 @@ export function decide(
 		gates.push({
 			gate,
 			policy: gatePolicy,
-			verdict: verdictOf(own),
+			result: resultOf(own),
 			reasons: own,
 		});
 	}
@@ -201,11 +203,17 @@ export function decide(
 			cmp(JSON.stringify(a), JSON.stringify(b)),
 	);
 
+	const result = resultOf(reasons.filter((r) => r.effect !== "ignored"));
+	if (result === "verified" && notChecked.length > 0) {
+		throw new Error(
+			`decide: verified with ${notChecked.length} unchecked: ${notChecked[0]?.findingId}`,
+		);
+	}
+
 	return {
 		version: DECIDE_VERSION,
 		commitSha: config.commitSha,
-		verdict: reasons.some((r) => r.effect === "block") ? "block" : "pass",
-		assurance: notChecked.length === 0 ? "verified" : "not_fully_checked",
+		result,
 		notChecked,
 		gates,
 		reasons,
@@ -213,31 +221,21 @@ export function decide(
 	};
 }
 
-/** The rules a reason that did not check carries, as decide() version 1 wrote them. */
-const NOT_CHECKED_RULES: readonly DecideRule[] = [
-	"checkpoint_unproven",
-	"mandatory_not_run",
-	"degraded_not_run",
-	"warn_not_run",
-];
-
 /**
- * A stored decision's assurance. From version 2 it is stored; a version 1
- * decision predates it, so it is read from the reasons: any reason whose
- * rule says it did not run. Version 1 reasons do not tell an error
- * from a fail, so a version 1 run whose only gap was an erroring check
- * reads as verified.
+ * The result counted reasons give (GATE_RESULTS): fail if one blocks;
+ * verified if there is at least one and every one passed; otherwise pass.
+ * No reasons is pass, because nothing was checked. It reads effects only,
+ * so a stored run of any decide() version gets its result the same way.
  */
-export function storedAssurance(decision: {
-	assurance?: GateAssurance;
-	reasons: readonly Pick<GateReason, "rule">[];
-}): GateAssurance {
-	if (decision.assurance !== undefined) return decision.assurance;
-	// Only stale_commit and unlisted_gate reasons are ignored, and neither is
-	// one of these rules, so the rule alone says whether a reason counts.
-	return decision.reasons.some((r) => NOT_CHECKED_RULES.includes(r.rule))
-		? "not_fully_checked"
-		: "verified";
+export function resultOf(
+	reasons: readonly Pick<GateReason, "effect">[],
+): GateResult {
+	const counted = reasons.filter((r) => r.effect !== "ignored");
+	if (counted.some((r) => r.effect === "block")) return "fail";
+	if (counted.length > 0 && counted.every((r) => r.effect === "pass")) {
+		return "verified";
+	}
+	return "pass";
 }
 
 /** What the finding's check reported; null for a judge's finding, which is a defect, not a check. */
@@ -357,22 +355,6 @@ function messageFor(rule: DecideRule, subject: string): string {
 		case "passed":
 			return `${subject}: passed`;
 	}
-}
-
-const VERDICT_RANK: Record<GateVerdict, number> = {
-	pass: 0,
-	warn: 1,
-	overridden: 2,
-	block: 3,
-};
-
-function verdictOf(reasons: readonly GateReason[]): GateVerdict {
-	let verdict: GateVerdict = "pass";
-	for (const r of reasons) {
-		const v: GateVerdict = r.effect === "ignored" ? "pass" : r.effect;
-		if (VERDICT_RANK[v] > VERDICT_RANK[verdict]) verdict = v;
-	}
-	return verdict;
 }
 
 /** Code-unit order, never locale order (DEV-TIPS §2). */

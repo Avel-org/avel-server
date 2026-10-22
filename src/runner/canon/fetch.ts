@@ -339,9 +339,14 @@ async function read(
 					entityId: activityLog.entityId,
 					missionId: activityLog.missionId,
 					engagementId: activityLog.engagementId,
-					// A gate run's verdict and commit; no other payload is read.
-					verdict: gate
-						? sql<string | null>`${activityLog.payload}->>'verdict'`
+					// A gate run's result and commit; no other payload is read. A run
+					// from before decide() version 3 stored a verdict instead: block
+					// reads as fail and anything else as pass, never as verified,
+					// because telling verified apart needs the receipt's reasons.
+					result: gate
+						? sql<
+								string | null
+							>`coalesce(${activityLog.payload}->>'result', case ${activityLog.payload}->>'verdict' when 'block' then 'fail' when 'pass' then 'pass' end)`
 						: sql<null>`null`,
 					commitSha: gate
 						? sql<string | null>`${activityLog.payload}->>'commitSha'`
@@ -369,17 +374,17 @@ async function read(
 				.limit(limit);
 			return {
 				rows: rows.map((r) => {
-					const { verdict, commitSha, ...rest } = r;
+					const { result, commitSha, ...rest } = r;
 					return {
 						...rest,
 						at: iso(r.at),
-						...(gate ? { verdict, commitSha } : {}),
+						...(gate ? { result, commitSha } : {}),
 					};
 				}),
 				columns: gate
 					? [
 							{ key: "at", label: "Run" },
-							{ key: "verdict", label: "Verdict" },
+							{ key: "result", label: "Result" },
 							{ key: "commitSha", label: "Commit" },
 						]
 					: [

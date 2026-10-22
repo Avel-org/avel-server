@@ -1,2 +1,2 @@
-export { DECIDE_VERSION, decide, storedAssurance } from "./decide";
+export { DECIDE_VERSION, decide, resultOf } from "./decide";
 export * from "./types";

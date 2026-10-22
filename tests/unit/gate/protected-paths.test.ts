@@ -71,7 +71,7 @@ describe("protectedPathFindings", () => {
 			[override("checkpoint:protected:vitest.config.ts")],
 			config,
 		);
-		expect(d.verdict).toBe("block");
+		expect(d.result).toBe("fail");
 		expect(d.ignoredOverrides[0]?.why).toBe("not_overridable");
 	});
 
