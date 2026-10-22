@@ -1,9 +1,12 @@
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { gzipSync } from "node:zlib";
 import type {
 	RepoSource,
 	SnapshotRequest,
 } from "../../src/gateways/repo-source";
 import type { Snapshot } from "../../src/lib/repo-read/snapshot";
+import { snapshotFromTarball } from "../../src/lib/repo-read/tar";
 import { ApiError } from "../../src/middleware/errors";
 
 // The repo-read fixtures: real small trees, snapshotted to JSON by
@@ -22,6 +25,27 @@ export function fixture(name: (typeof FIXTURES)[number]): Snapshot {
 	return JSON.parse(
 		readFileSync(`tests/fixtures/repo-read/${name}.json`, "utf8"),
 	) as Snapshot;
+}
+
+/**
+ * The Snapshot of one commit of a local clone, read the way a GitHub
+ * tarball is: `git archive` under one top-level directory, gzipped, through
+ * snapshotFromTarball. So an intake that reads it records that commit.
+ */
+export function snapshotOfCommit(dir: string, commit: string): Snapshot {
+	const tarball = execFileSync(
+		"git",
+		[
+			"-c",
+			"core.autocrlf=false",
+			"archive",
+			"--format=tar",
+			`--prefix=snapshot-${commit}/`,
+			commit,
+		],
+		{ cwd: dir, windowsHide: true, maxBuffer: 64 * 1024 * 1024 },
+	);
+	return snapshotFromTarball(new Uint8Array(gzipSync(tarball)), commit);
 }
 
 /** For apps that never read a repository. A test that does fails loudly. */

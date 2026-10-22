@@ -13,7 +13,10 @@ import { FakeHarness } from "../../src/runner/harness";
 import { gitIn, makeRepo, removeDir, tempDir } from "../unit/git-fixtures";
 import { seedIds } from "./agent-fixtures";
 import {
+	activeClientMission,
 	activeMission,
+	approvedIntake,
+	type ClientMission,
 	type Mission,
 	queued,
 	row,
@@ -55,7 +58,7 @@ async function refusal(res: Response) {
 	};
 }
 
-/** A mission whose template points at `slug`@`commit`, or at nothing. */
+/** An internal mission whose template points at `slug`@`commit`, or at nothing. */
 async function sourced(
 	tx: Tx,
 	m: Mission,
@@ -71,25 +74,22 @@ async function sourced(
 		.where(eq(mission.id, m.missionId));
 }
 
-async function approvedIntake(
+/** An internal mission pinned to `slug`@`commit`. */
+async function internal(
 	h: ApiHarness,
-	m: Mission,
-	read: { repoUrl: string; commit: string } | null,
-) {
-	await h.tx.insert(intake).values({
-		id: m.ids.next(),
-		engagementId: m.engagementId,
-		status: "approved",
-		sourceMd: "# Ask",
-		openQuestions: [],
-		approvedBy: await h.operatorId(),
-		approvedAt: clock.now(),
-		missionId: m.missionId,
-		repoUrl: read?.repoUrl ?? null,
-		repoCommitSha: read?.commit ?? null,
-		repoReadAt: read ? clock.now() : null,
-		...stamp(clock),
-	});
+	template: { slug: string; commit: string },
+): Promise<Mission> {
+	const m = await activeMission(h.tx, seedIds(h.ns));
+	await sourced(h.tx, m, template);
+	return m;
+}
+
+/** Pins a client mission to the template clone's commit, as its record. */
+async function pinTemplate(tx: Tx, m: ClientMission) {
+	await tx
+		.update(mission)
+		.set({ templateRef: "template-booking", templateVersion: templateCommit })
+		.where(eq(mission.id, m.missionId));
 }
 
 /** Nothing about a refused start was written, and no room was made. */
@@ -111,7 +111,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 	() => {
 		afterAll(closeDb);
 
-		it("checks out the template's pinned commit as a worktree, with the entry's globs, and hands its root to the harness", async () => {
+		it("checks out an internal mission's pinned template commit as a worktree, with the entry's globs, and hands its root to the harness", async () => {
 			const harness = new FakeHarness();
 			const root = roomsRoot();
 			const rooms = worktreeRooms(root);
@@ -143,14 +143,13 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			);
 		});
 
-		it("uses the one approved intake's repository when the mission has no template", async () => {
+		it("uses a client mission's one approved intake's repository", async () => {
 			const root = roomsRoot();
 			const rooms = worktreeRooms(root);
 			await withApi(
 				async (h) => {
 					await h.signIn();
-					const m = await activeMission(h.tx, seedIds(h.ns));
-					await sourced(h.tx, m, null);
+					const m = await activeClientMission(h, seedIds(h.ns), null);
 					await approvedIntake(h, m, {
 						repoUrl: "https://github.com/acme/app",
 						commit: repoCommit,
@@ -194,32 +193,117 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			);
 		});
 
+		it("works a client mission in its repository at the commit read, even when it pins a template", async () => {
+			const root = roomsRoot();
+			const rooms = worktreeRooms(root);
+			await withApi(
+				async (h) => {
+					await h.signIn();
+					const m = await activeClientMission(h, seedIds(h.ns), {
+						repoUrl: "https://github.com/acme/app",
+						commit: repoCommit,
+					});
+					// The pin records which template version the client's code
+					// came from; it is not where the client's rooms come from.
+					await pinTemplate(h.tx, m);
+					expect(templateCommit).not.toBe(repoCommit);
+					const id = await queued(h.tx, m);
+					expect((await start(h, id)).status).toBe(200);
+					const room = await rooms.get(id);
+					expect(room).toMatchObject({
+						repoPath: repoClone,
+						commit: repoCommit,
+					});
+					expect(gitIn(room?.root ?? "", "rev-parse", "HEAD")).toBe(repoCommit);
+				},
+				{ rooms, roomSources: localSources(sources) },
+			);
+		});
+
+		it("works an internal mission in its template, even when an approved intake on it read a repository", async () => {
+			const root = roomsRoot();
+			const rooms = worktreeRooms(root);
+			await withApi(
+				async (h) => {
+					await h.signIn();
+					const m = await activeClientMission(h, seedIds(h.ns), {
+						repoUrl: "https://github.com/acme/app",
+						commit: repoCommit,
+					});
+					// The same mission made internal, with a template pin: its
+					// intake's read no longer names its source.
+					await h.tx
+						.update(mission)
+						.set({
+							engagementId: null,
+							origin: "internal",
+							templateRef: "template-booking",
+							templateVersion: templateCommit,
+						})
+						.where(eq(mission.id, m.missionId));
+					const id = await queued(h.tx, m);
+					expect((await start(h, id)).status).toBe(200);
+					const room = await rooms.get(id);
+					expect(room).toMatchObject({
+						repoPath: templateClone,
+						commit: templateCommit,
+					});
+					expect(gitIn(room?.root ?? "", "rev-parse", "HEAD")).toBe(
+						templateCommit,
+					);
+				},
+				{ rooms, roomSources: localSources(sources) },
+			);
+		});
+
 		it("refuses source_unavailable, never room_unavailable, for every source case, and makes no room", async () => {
 			const cases: Array<{
 				name: string;
 				dir: string | undefined;
-				setup: (h: ApiHarness, m: Mission) => Promise<void>;
+				mission: (h: ApiHarness) => Promise<Mission>;
 				path: unknown[];
 				message: RegExp;
 			}> = [
 				{
-					name: "no template and no intake",
+					name: "an internal mission with no template",
 					dir: sources,
-					setup: async (h, m) => sourced(h.tx, m, null),
+					mission: async (h) => {
+						const m = await activeMission(h.tx, seedIds(h.ns));
+						await sourced(h.tx, m, null);
+						return m;
+					},
+					path: ["source", "template"],
+					message: /^The internal mission pins no template$/,
+				},
+				{
+					name: "a client mission with no intake",
+					dir: sources,
+					mission: async (h) => activeClientMission(h, seedIds(h.ns), null),
+					path: ["intake"],
+					message: /^no approved intake$/,
+				},
+				{
+					name: "a client mission that pins a template, with no intake",
+					dir: sources,
+					mission: async (h) => {
+						const m = await activeClientMission(h, seedIds(h.ns), null);
+						await pinTemplate(h.tx, m);
+						return m;
+					},
 					path: ["intake"],
 					message: /^no approved intake$/,
 				},
 				{
 					name: "two approved intakes",
 					dir: sources,
-					setup: async (h, m) => {
-						await sourced(h.tx, m, null);
+					mission: async (h) => {
 						const read = {
 							repoUrl: "https://github.com/acme/app",
 							commit: repoCommit,
 						};
+						const m = await activeClientMission(h, seedIds(h.ns), read);
 						await approvedIntake(h, m, read);
-						await approvedIntake(h, m, read);
+						return m;
 					},
 					path: ["intake"],
 					message: /^2 approved intakes$/,
@@ -227,9 +311,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				{
 					name: "an approved intake with no repository read",
 					dir: sources,
-					setup: async (h, m) => {
-						await sourced(h.tx, m, null);
+					mission: async (h) => {
+						const m = await activeClientMission(h, seedIds(h.ns), null);
 						await approvedIntake(h, m, null);
+						return m;
 					},
 					path: ["source", "repo"],
 					message: /no repository read/,
@@ -237,22 +322,16 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				{
 					name: "AVEL_SOURCES_DIR unset",
 					dir: undefined,
-					setup: async (h, m) =>
-						sourced(h.tx, m, {
-							slug: "template-booking",
-							commit: templateCommit,
-						}),
+					mission: async (h) =>
+						internal(h, { slug: "template-booking", commit: templateCommit }),
 					path: ["source", "template"],
 					message: /AVEL_SOURCES_DIR is not set/,
 				},
 				{
 					name: "the clone missing",
 					dir: sources,
-					setup: async (h, m) =>
-						sourced(h.tx, m, {
-							slug: "template-audit",
-							commit: templateCommit,
-						}),
+					mission: async (h) =>
+						internal(h, { slug: "template-audit", commit: templateCommit }),
 					path: ["source", "template"],
 					message:
 						/No local clone of template template-audit at .*template-audit/,
@@ -260,32 +339,27 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				{
 					name: "the clone not a git repository",
 					dir: sources,
-					setup: async (h, m) =>
-						sourced(h.tx, m, {
-							slug: "template-empty",
-							commit: templateCommit,
-						}),
+					mission: async (h) =>
+						internal(h, { slug: "template-empty", commit: templateCommit }),
 					path: ["source", "template"],
 					message: /not the root of a git repository/,
 				},
 				{
 					name: "the commit absent from the clone",
 					dir: sources,
-					setup: async (h, m) =>
-						sourced(h.tx, m, { slug: "template-booking", commit: repoCommit }),
+					mission: async (h) =>
+						internal(h, { slug: "template-booking", commit: repoCommit }),
 					path: ["source", "template"],
 					message: new RegExp(`does not hold commit ${repoCommit}`),
 				},
 				{
 					name: "the intake's repository with no clone",
 					dir: sources,
-					setup: async (h, m) => {
-						await sourced(h.tx, m, null);
-						await approvedIntake(h, m, {
+					mission: async (h) =>
+						activeClientMission(h, seedIds(h.ns), {
 							repoUrl: "https://github.com/acme/other",
 							commit: repoCommit,
-						});
-					},
+						}),
 					path: ["source", "repo"],
 					message: /No local clone of repository/,
 				},
@@ -295,8 +369,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				await withApi(
 					async (h) => {
 						await h.signIn();
-						const m = await activeMission(h.tx, seedIds(h.ns));
-						await c.setup(h, m);
+						const m = await c.mission(h);
 						const id = await queued(h.tx, m);
 						const details = await refusal(await start(h, id));
 						expect(details.reason, c.name).toBe("source_unavailable");

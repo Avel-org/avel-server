@@ -5,10 +5,15 @@ import type { Executor } from "../db/tx";
 import type { RoomSource, SourceIssue } from "../rooms/sources";
 
 /**
- * What a mission's rooms are made from (decided 2026-10-13): its template
- * at template_version when it has one; otherwise the repository its one
- * approved intake read, at the commit read. None, or more than one
- * approved intake, is an issue: the runner never guesses.
+ * What a mission's rooms are made from (decided 2026-10-21, J; replaces
+ * the 2026-10-13 rule that any template pin wins). The mission's origin
+ * decides. An internal mission works in the template repo: its template
+ * at template_version. An internal mission with no template pin has no
+ * source, an issue. A client mission always works in the client's
+ * repository: the repository its one approved intake read, at the commit
+ * read, even when it pins a template; that pin only records which template
+ * version the client's code came from. None, or more than one, approved
+ * intake is an issue: the runner never guesses.
  */
 export async function missionRoomSource(
 	db: Executor,
@@ -16,17 +21,26 @@ export async function missionRoomSource(
 ): Promise<{ source: RoomSource } | { issue: SourceIssue }> {
 	const [m] = await db
 		.select({
+			origin: mission.origin,
 			templateRef: mission.templateRef,
 			templateVersion: mission.templateVersion,
 		})
 		.from(mission)
 		.where(eq(mission.id, missionId));
-	if (m?.templateRef && m.templateVersion) {
+	if (m?.origin === "internal") {
+		if (m.templateRef && m.templateVersion) {
+			return {
+				source: {
+					kind: "template",
+					slug: m.templateRef,
+					commit: m.templateVersion,
+				},
+			};
+		}
 		return {
-			source: {
-				kind: "template",
-				slug: m.templateRef,
-				commit: m.templateVersion,
+			issue: {
+				path: ["source", "template"],
+				message: "The internal mission pins no template",
 			},
 		};
 	}

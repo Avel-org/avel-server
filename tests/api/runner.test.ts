@@ -9,6 +9,7 @@ import { applyUsage, sweep, tick } from "../../src/runner/runner";
 import { dispatchValues, insertDispatchRow } from "../db/dispatch-fixtures";
 import { bearer, seedIds } from "./agent-fixtures";
 import {
+	activeClientMission,
 	activeMission,
 	expectReportsMatchDispatches,
 	expectSystemReport,
@@ -115,7 +116,8 @@ describe.skipIf(!process.env.DATABASE_URL)("the runner", () => {
 		await withApi(
 			async (h) => {
 				await h.signIn();
-				const m = await activeMission(h.tx, seedIds(h.ns));
+				// A client mission, so the crossing logs its engagement.
+				const m = await activeClientMission(h, seedIds(h.ns));
 				const run = await started(
 					h,
 					harness,

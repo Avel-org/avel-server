@@ -21,14 +21,21 @@ import { stamp } from "../../src/db/schema/columns";
 import type { Tx } from "../../src/db/tx";
 import { worktreeRooms } from "../../src/rooms/provider";
 import { snapshotDispatch } from "../../src/rooms/snapshot";
-import type { RoomSourceResolver } from "../../src/rooms/sources";
+import type { RoomSource, RoomSourceResolver } from "../../src/rooms/sources";
 import {
 	dispatchValues,
 	insertDispatchRow,
 	reportValues,
 } from "../db/dispatch-fixtures";
 import { makeRepo, removeDir, tempDir, writeFiles } from "../unit/git-fixtures";
-import { activeMission, type Mission, runnerIds } from "./runner-fixtures";
+import {
+	activeClientMission,
+	activeMission,
+	CLIENT_REPO,
+	type Mission,
+	runnerIds,
+	TEMPLATE_COMMIT,
+} from "./runner-fixtures";
 import { type ApiHarness, clock, withApi } from "./support";
 
 // POST /api/missions/:id/gate and its reads (module 9, decided 2026-10-19):
@@ -50,15 +57,22 @@ const FILES = {
 
 let n = 0;
 
-/** A repository at its pinned commit, and a source resolver that finds it. */
+/**
+ * A repository at its pinned commit, and a source resolver that finds it
+ * for any source and records each source it was asked for.
+ */
 function repo() {
 	const dir = path.join(base, `repo-${++n}`);
 	const [pinned] = makeRepo(dir, FILES) as [string];
 	const rooms = worktreeRooms(path.join(base, `rooms-${n}`));
+	const asked: RoomSource[] = [];
 	const roomSources: RoomSourceResolver = {
-		resolve: async () => ({ ok: true, repoPath: dir, commit: pinned }),
+		resolve: async (source) => {
+			asked.push(source);
+			return { ok: true, repoPath: dir, commit: pinned };
+		},
 	};
-	return { dir, pinned, rooms, roomSources };
+	return { dir, pinned, rooms, roomSources, asked };
 }
 
 type Repo = ReturnType<typeof repo>;
@@ -186,6 +200,10 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 				await res.json(),
 			).data;
 			expect(posted.baseSha).toBe(r.pinned);
+			// An internal mission is judged on its template at the pin.
+			expect(r.asked).toEqual([
+				{ kind: "template", slug: "template-booking", commit: r.pinned },
+			]);
 			expect(posted.commitSha).toMatch(/^[0-9a-f]{40}$/);
 			expect(posted.commitSha).not.toBe(r.pinned);
 			expect(posted.receiptSha256).toBe(
@@ -221,6 +239,39 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 				);
 			expect(logged?.id).toBe(posted.id);
 		});
+	});
+
+	it("judges a client mission on its intake's read commit, never its template pin", async () => {
+		const r = repo();
+		await withApi(
+			async (h) => {
+				await h.signIn();
+				const m = await activeClientMission(h, runnerIds(h.ns), {
+					repoUrl: CLIENT_REPO,
+					commit: r.pinned,
+				});
+				// The pin only records which template version the code came from.
+				await h.tx
+					.update(mission)
+					.set({
+						templateRef: "template-booking",
+						templateVersion: TEMPLATE_COMMIT,
+					})
+					.where(eq(mission.id, m.missionId));
+				expect(TEMPLATE_COMMIT).not.toBe(r.pinned);
+				await closedDispatch(h, m, r, { "src/b.ts": "export const b = 2;\n" });
+				const res = await run(h, m.missionId);
+				expect(res.status, await res.clone().text()).toBe(201);
+				const posted = successEnvelope(gateRunSchema).parse(
+					await res.json(),
+				).data;
+				expect(posted.baseSha).toBe(r.pinned);
+				expect(r.asked).toEqual([
+					{ kind: "repo", repoUrl: CLIENT_REPO, commit: r.pinned },
+				]);
+			},
+			{ roomSources: r.roomSources },
+		);
 	});
 
 	it("blocks, with no override, when a builder wrote a test file", async () => {
