@@ -6,8 +6,10 @@ import {
 	activityLog,
 	completionReport,
 	dispatch,
+	intake,
 	mission,
 } from "../../src/db/schema";
+import { stamp } from "../../src/db/schema/columns";
 import type { Tx } from "../../src/db/tx";
 import type { Clock } from "../../src/lib/clock";
 import type { IdGenerator } from "../../src/lib/ids";
@@ -21,7 +23,7 @@ import {
 } from "../db/dispatch-fixtures";
 import { anySource, memoryRooms } from "../unit/room-fixtures";
 import { type Seeded, seedRosteredAgent } from "./agent-fixtures";
-import type { ApiHarness } from "./support";
+import { type ApiHarness, clock } from "./support";
 
 // Missions, dispatches and a priced book for the runner's API tests.
 // Not collected as a test file.
@@ -62,30 +64,106 @@ export function runnerIds(ns: string): IdGenerator {
 	};
 }
 
-export type Mission = Seeded & { ids: IdGenerator };
+/**
+ * A seeded mission as the runner tests use it. engagementId is the
+ * mission's own: null for an internal mission, whose seeded engagement
+ * row is left unused.
+ */
+export type Mission = Omit<Seeded, "engagementId"> & {
+	ids: IdGenerator;
+	engagementId: string | null;
+};
+export type ClientMission = Mission & { engagementId: string };
 
 /** The template commit activeMission's missions record. */
 export const TEMPLATE_COMMIT = "a".repeat(40);
 
-/** An active mission with a spend ceiling, and one model agent on its roster. */
-export async function activeMission(
+/** The client repository activeClientMission's intake reads, and its commit. */
+export const CLIENT_REPO = "https://github.com/meridian-co/app";
+export const CLIENT_COMMIT = "c".repeat(40);
+
+async function activate(
 	tx: Tx,
-	ids: IdGenerator,
-	spendCeilingUsd = "100.00",
-): Promise<Mission> {
-	const seeded = await seedRosteredAgent(tx, ids, ["domain", "api-surface"]);
+	missionId: string,
+	spendCeilingUsd: string,
+	set: Partial<typeof mission.$inferInsert>,
+) {
 	await tx
 		.update(mission)
 		.set({
 			status: "active",
 			brief: DISPATCH_PLAN,
 			spendCeilingUsd,
-			// A source for its rooms: start refuses a mission without one.
-			templateRef: "template-booking",
-			templateVersion: TEMPLATE_COMMIT,
+			...set,
 		})
-		.where(eq(mission.id, seeded.missionId));
-	return { ...seeded, ids };
+		.where(eq(mission.id, missionId));
+}
+
+/**
+ * An active internal mission (a template build by AVEL's own roster) with
+ * a spend ceiling, and one model agent on its roster. Its rooms come from
+ * its template pin (decided 2026-10-21, J): the source start needs.
+ */
+export async function activeMission(
+	tx: Tx,
+	ids: IdGenerator,
+	spendCeilingUsd = "100.00",
+): Promise<Mission & { engagementId: null }> {
+	const seeded = await seedRosteredAgent(tx, ids, ["domain", "api-surface"]);
+	await activate(tx, seeded.missionId, spendCeilingUsd, {
+		engagementId: null,
+		origin: "internal",
+		templateRef: "template-booking",
+		templateVersion: TEMPLATE_COMMIT,
+	});
+	return { ...seeded, ids, engagementId: null };
+}
+
+/**
+ * An active client mission with a spend ceiling and one model agent on its
+ * roster, and no template pin. Its rooms come from its one approved
+ * intake's repository read, so `read` adds that intake (CLIENT_REPO at
+ * CLIENT_COMMIT by default); null adds none, for a test that adds its own.
+ */
+export async function activeClientMission(
+	h: Pick<ApiHarness, "tx" | "operatorId">,
+	ids: IdGenerator,
+	read: { repoUrl: string; commit: string } | null = {
+		repoUrl: CLIENT_REPO,
+		commit: CLIENT_COMMIT,
+	},
+	spendCeilingUsd = "100.00",
+): Promise<ClientMission> {
+	const seeded = await seedRosteredAgent(h.tx, ids, ["domain", "api-surface"]);
+	await activate(h.tx, seeded.missionId, spendCeilingUsd, {});
+	const m = { ...seeded, ids };
+	if (read) await approvedIntake(h, m, read);
+	return m;
+}
+
+/** An approved intake on the client mission, with this repository read or none. */
+export async function approvedIntake(
+	h: Pick<ApiHarness, "tx" | "operatorId">,
+	m: ClientMission,
+	read: { repoUrl: string; commit: string } | null,
+	sourceMd = "# Ask",
+): Promise<string> {
+	const id = m.ids.next();
+	await h.tx.insert(intake).values({
+		id,
+		engagementId: m.engagementId,
+		status: "approved",
+		sourceMd,
+		openQuestions: [],
+		approvedBy: await h.operatorId(),
+		approvedAt: clock.now(),
+		missionId: m.missionId,
+		repoUrl: read?.repoUrl ?? null,
+		repoCommitSha: read?.commit ?? null,
+		repoReadAt: read ? clock.now() : null,
+		...stamp(clock),
+	});
+	return id;
 }
 
 /** A queued dispatch of the mission's agent. */

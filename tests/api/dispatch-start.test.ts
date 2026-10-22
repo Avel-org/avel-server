@@ -27,6 +27,7 @@ import {
 } from "../db/dispatch-fixtures";
 import { bearer, seedIds } from "./agent-fixtures";
 import {
+	activeClientMission,
 	activeMission,
 	expectReportsMatchDispatches,
 	expectSystemReport,
@@ -86,7 +87,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			await withApi(
 				async (h) => {
 					await h.signIn();
-					const m = await activeMission(h.tx, seedIds(h.ns));
+					// A client mission, so the log carries its engagement.
+					const m = await activeClientMission(h, seedIds(h.ns));
 					const id = await queued(h.tx, m);
 					const res = await start(h, id);
 					expect(res.status).toBe(200);
