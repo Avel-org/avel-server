@@ -2,7 +2,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { MANIFEST_PATH } from "../../gateways/template-source";
-import { DEV_TEMPLATE_READS } from "../../lib/templates";
+import { type RepoRead, readRepo } from "../../lib/repo-read";
+import { SnapshotBuilder } from "../../lib/repo-read/snapshot";
+import { DEV_BOOKING_SHA, DEV_TEMPLATE_READS } from "../../lib/templates";
 import { git, gitOk } from "../../rooms/git";
 
 /**
@@ -82,6 +84,25 @@ export function devTemplateBookingFiles(): Record<string, Uint8Array> {
 		);
 	}
 	return out;
+}
+
+let read: RepoRead | undefined;
+
+/**
+ * The repository read of the fixture at DEV_BOOKING_SHA: readRepo over the
+ * fixture's own files, so a seeded intake's derived cut, evidence,
+ * conventions and boundaries are what a read of a clone of it derives.
+ */
+export function devTemplateBookingRead(): RepoRead {
+	if (!read) {
+		const builder = new SnapshotBuilder();
+		const files = devTemplateBookingFiles();
+		for (const p of Object.keys(files).sort()) {
+			builder.add(p, files[p] as Uint8Array);
+		}
+		read = readRepo(builder.build(DEV_BOOKING_SHA));
+	}
+	return read;
 }
 
 /**
