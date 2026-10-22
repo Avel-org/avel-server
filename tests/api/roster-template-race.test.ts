@@ -212,7 +212,6 @@ describe.skipIf(!url)(
 					auth,
 					db: () => gate.db,
 					webOrigins: [],
-					preview: false,
 					repos: noRepos,
 					templates: noTemplates,
 					dispatchByToken: noDispatches,
