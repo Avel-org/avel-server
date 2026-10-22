@@ -1,11 +1,10 @@
 import { existsSync } from "node:fs";
-import path from "node:path";
-import { DEV_BOOKING_SHA } from "../../lib/templates";
-import { buildDevTemplateBooking } from "./dev-template";
+import { buildDevSources } from "./dev-sources";
 
-// `pnpm dev:sources`: builds the template-booking dev fixture under
-// AVEL_SOURCES_DIR (from .env when present), so dispatch rooms on avel_dev
-// open on the commit the seeded missions pin.
+// `pnpm dev:sources`: builds the dev seed's clones under AVEL_SOURCES_DIR
+// (from .env when present): the template-booking dev fixture, and each
+// seeded client mission's repository at the commit its intake read, so
+// dispatch rooms on avel_dev open on a commit a clone really holds.
 if (existsSync(".env")) process.loadEnvFile(".env");
 
 const dir = process.env.AVEL_SOURCES_DIR;
@@ -14,16 +13,19 @@ if (!dir) {
 	process.exit(1);
 }
 
-const target = path.join(dir, "templates", "template-booking");
 try {
-	const head = await buildDevTemplateBooking(target);
-	if (head !== DEV_BOOKING_SHA) {
-		console.error(
-			`${target} is at ${head}, not the fixture's ${DEV_BOOKING_SHA}. Move it aside and run this again.`,
-		);
-		process.exit(1);
+	let wrong = false;
+	for (const s of await buildDevSources(dir)) {
+		if (s.head !== s.want) {
+			wrong = true;
+			console.error(
+				`${s.path} is at ${s.head}, not ${s.want}. Move it aside and run this again.`,
+			);
+		} else {
+			console.log(`${s.head} in ${s.path}`);
+		}
 	}
-	console.log(`template-booking at ${head} in ${target}`);
+	if (wrong) process.exit(1);
 } catch (e) {
 	console.error(e instanceof Error ? e.message : e);
 	process.exit(1);
