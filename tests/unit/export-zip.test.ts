@@ -17,16 +17,35 @@ afterAll(() => removeDir(base));
 
 const text = (s: string) => new Uint8Array(Buffer.from(s, "utf8"));
 
+/**
+ * About 370 KB of lines from a fixed linear congruential sequence: long
+ * enough that changing any one deflate setting (level, memLevel,
+ * windowBits, strategy) changes the compressed bytes, which the small
+ * entries alone do not.
+ */
+function lines(): Uint8Array {
+	const words = ["alpha", "beta", "gamma", "delta"];
+	let x = 1;
+	let s = "";
+	for (let i = 0; i < 20_000; i++) {
+		x = (x * 1103515245 + 12345) % 2147483648;
+		s += `line ${x % 9973} of ${words[x % 4]}\n`;
+	}
+	return text(s);
+}
+
 const ENTRIES: ZipEntry[] = [
 	{ path: "src/😀.ts", mode: "100644", bytes: Uint8Array.from([0, 1, 0xff]) },
 	{ path: "bin/run", mode: "100755", bytes: text("#!/bin/sh\necho hi\n") },
 	{ path: ".avel/receipt.json", mode: "100644", bytes: text('{"a":1}') },
 	{ path: "empty.txt", mode: "100644", bytes: new Uint8Array() },
+	{ path: "data/lines.txt", mode: "100644", bytes: lines() },
 	{ path: "src/ü.ts", mode: "100644", bytes: text("a\r\nb\r\n".repeat(50)) },
 ];
 const ORDER = [
 	".avel/receipt.json",
 	"bin/run",
+	"data/lines.txt",
 	"empty.txt",
 	"src/ü.ts",
 	"src/😀.ts",
@@ -34,7 +53,7 @@ const ORDER = [
 
 /** The sha256 of writeZip(ENTRIES). It moves if any byte of the archive moves. */
 const PINNED =
-	"d1cf96b44bc6e1cae83c05913017a32e9358a72b84143031eb64fab2831e5984";
+	"17fd98813a39d4a97e90c06dc2d4e3bb302d608a1ea4620b5b5799baa905866d";
 
 type Read = {
 	path: string;

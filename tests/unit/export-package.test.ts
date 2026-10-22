@@ -142,7 +142,7 @@ describe("packageSha256", () => {
 		expect(swap([file(first.path, "# Salon\r\n", "100755"), ...rest])).not.toBe(
 			h,
 		);
-		expect(swap([{ ...first, path: "readme.md" }, ...rest])).not.toBe(h);
+		expect(swap([{ ...first, path: "README.txt" }, ...rest])).not.toBe(h);
 		expect(swap(READ.files, ["old/a.ts"])).not.toBe(h);
 		expect(swap(READ.files, [...READ.deletes, "old/c.ts"])).not.toBe(h);
 	});
