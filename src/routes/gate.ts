@@ -47,6 +47,7 @@ import {
 import { buildReceipt, RECEIPT_VERSION } from "../lib/gate/receipt";
 import { ApiError } from "../middleware/errors";
 import type { FileChange } from "../rooms/checkpoint";
+import { git } from "../rooms/git";
 import {
 	buildIntegrationCommit,
 	dispatchChanges,
@@ -281,6 +282,19 @@ export function gateRoutes(deps: GateDeps) {
 				);
 			}
 			throw e;
+		}
+		// Complete dispatches that changed nothing in total leave the base's
+		// tree: judging it would be a receipt for work that was never done.
+		const [baseTree, headTree] = await Promise.all(
+			[baseSha, commitSha].map(async (sha) =>
+				(await git(["rev-parse", `${sha}^{tree}`], { cwd: source })).trim(),
+			),
+		);
+		if (baseTree === headTree) {
+			throw refuse(
+				"The complete dispatches changed nothing: the integration commit's tree is the base's",
+				{ reason: "nothing_to_judge", missionId: m.id },
+			);
 		}
 
 		const [base, head, baseScripts, headScripts] = await Promise.all([

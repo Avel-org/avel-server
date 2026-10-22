@@ -383,6 +383,17 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 		});
 	});
 
+	it("refuses nothing_to_judge when the complete dispatches changed nothing", async () => {
+		const r = repo();
+		await gated(r, async (h, m) => {
+			// A complete dispatch whose room was left as it was pinned: one
+			// integration step with no ops, so a tree equal to the base's.
+			await closedDispatch(h, m, r, {});
+			const refused = await refusal(await run(h, m.missionId));
+			expect(refused.reason).toBe("nothing_to_judge");
+		});
+	});
+
 	it("answers 404 for an unknown mission or run", async () => {
 		const r = repo();
 		await gated(r, async (h, m) => {

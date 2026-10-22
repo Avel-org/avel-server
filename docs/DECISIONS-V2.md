@@ -891,7 +891,7 @@ J decided the first group below on 2026-10-15 to 2026-10-19, before the first mi
   - The receipt is stored as a string, so its hash still reproduces byte for byte.
   - There is no GateRun table until the first mission shows what one needs.
 - **Mission one is gated without a test runner** (J, 2026-10-19). Test, typecheck and command checks report `not_run` from a source that is not installed, so each one is a warn tagged `degraded` and shown on the receipt. A mandatory acceptance gate can then pass on `file_exists` and the checkpoints alone. Adding `runner` to `GATE_CONFIG.availableSources` turns those warns back into blocks.
-- **A gate run with no complete dispatch is refused** (`nothing_to_judge`). This was BE Main's call, because J's answers did not cover it. Judging the unchanged base commit would produce a receipt for work that was never done.
+- **A gate run with no complete dispatch is refused** (`nothing_to_judge`). This was BE Main's call, because J's answers did not cover it. Judging the unchanged base commit would produce a receipt for work that was never done. So is a run whose complete dispatches changed nothing in total, where the integration commit's tree is the base's (2026-10-21, the gate audit's H1): a complete dispatch that wrote nothing still made a step, and its run passed on the base's files.
 
 ### Proposed by BE Main, for J to finalize
 
