@@ -587,10 +587,9 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 		name: "Booking template",
 		wavesApplicable: ["A", "B", "C", "D", "E"],
 		gates: [
-			// No phase1-close until something produces its evidence, and no
-			// security until a producer feeds it: a listed gate with no evidence
-			// keeps every run from verified (J, 2026-10-21).
+			// No phase1-close until something produces its evidence (J, 2026-10-21).
 			{ gate: "qa", policy: "mandatory" },
+			{ gate: "security", policy: "warn" },
 			{ gate: "acceptance", policy: "mandatory" },
 		],
 		deliverable: "pr",

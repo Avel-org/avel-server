@@ -958,7 +958,7 @@ J decided both on 2026-10-21, in a BE Main session.
 
 - **`template-booking` lists no `phase1-close` until something produces its evidence.** A mandatory gate with no evidence blocks, and no override clears it, so the seeded playbook could never pass. A producer waits on the client-conformance artifact (`CLIENT-CONTRACT-CONFORMANCE.md`), which is unspecified. `tests/unit/seed-playbook.test.ts` refuses any seeded mandatory gate that no producer feeds.
 - **The spec check reports on `qa`, not `alignment`.** `alignment` keeps the meaning the docs give it: phase 2 conforms to the phase-1 interface. The spec check asks whether every requirement has a criterion and a check, which is a quality-of-the-plan question. The Booking playbook does not list `alignment`, so the spec check's results were being ignored.
-- **`template-booking` lists no `security` gate for now** (J, later the same day). Nothing produces security evidence, so the warn gate had a synthesized not-run on every run, and J ruled the same day that only work whose every gate ran and passed ships. It returns with a producer that only reads code. `tests/unit/seed-playbook.test.ts` now refuses any seeded gate, mandatory or warn, that no producer feeds.
+- **`security` stays on `template-booking`** (J, later the same day). It was taken off only to try a seeded mission, and doing so let an empty run reach `verified` (the gate audit, 2026-10-21). A listed gate that nothing feeds is to be refused before the run, not removed from the playbook.
 
 ---
 
