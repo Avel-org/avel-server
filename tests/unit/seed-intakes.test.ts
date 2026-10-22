@@ -100,7 +100,15 @@ describe("seed intakes", () => {
 			.filter((id) => !added.has(id))
 			.map(seq);
 		const lowest = Math.min(...[...added].map(seq));
-		expect(Math.max(...others)).toBe(lowest - 1);
+		// The other rows hold every id from 1 up to the first intake's, with
+		// no gap: an id drawn or skipped earlier would leave one, or move them.
+		expect(others.sort((a, b) => a - b)).toEqual(
+			Array.from({ length: lowest - 1 }, (_, k) => k + 1),
+		);
+		// And the intakes and their rows hold the rest, with no gap either.
+		expect([...added].map(seq).sort((a, b) => a - b)).toEqual(
+			Array.from({ length: added.size }, (_, k) => lowest + k),
+		);
 		expect(added.size).toBe(2 * rows.intake.length);
 	});
 });
