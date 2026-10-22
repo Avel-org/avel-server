@@ -16,6 +16,8 @@ export const EXPORT_REFUSALS = [
 	"path_not_utf8",
 	/** The integration commit itself wrote or deleted .avel/receipt.json. */
 	"receipt_path_written",
+	/** The integration commit itself wrote or deleted .avel/deletes.json. */
+	"deletes_path_written",
 	/** The integration commit rebuilt from its inputs is not the one recorded. */
 	"integration_commit_moved",
 	/** A zip entry path that could write outside the extraction directory. */

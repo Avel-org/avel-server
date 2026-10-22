@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
+	DELETES_PATH,
 	ExportRefused,
 	gitBlobSha,
 	PACKAGE_HASH_VERSION,
@@ -10,6 +11,7 @@ import {
 	packageSha256,
 	RECEIPT_PATH,
 	renderPackage,
+	zipEntries,
 } from "../../src/lib/export";
 
 const file = (
@@ -84,6 +86,56 @@ describe("renderPackage", () => {
 				}),
 			),
 		).toEqual({ reason: "receipt_path_written", path: RECEIPT_PATH });
+	});
+});
+
+describe("the deletes list", () => {
+	const text = (bytes: Uint8Array) => Buffer.from(bytes).toString("utf8");
+
+	it("is in every zip at .avel/deletes.json, a sorted JSON array, empty when nothing is deleted", () => {
+		// Unsorted on purpose: zipEntries sorts what it is given.
+		const pkg = {
+			...renderPackage({ read: READ, receipt: RECEIPT }),
+			deletes: ["old/b.ts", "old/a.ts"],
+		};
+		const entries = zipEntries(pkg);
+		expect(entries.map((e) => e.path)).toEqual([
+			DELETES_PATH,
+			RECEIPT_PATH,
+			"README.md",
+			"bin/run",
+			"src/ü.ts",
+			"src/😀.ts",
+		]);
+		const list = entries[0];
+		expect(list?.mode).toBe("100644");
+		expect(text(list?.bytes as Uint8Array)).toBe(
+			'[\n  "old/a.ts",\n  "old/b.ts"\n]\n',
+		);
+		const none = zipEntries(
+			renderPackage({ read: { ...READ, deletes: [] }, receipt: RECEIPT }),
+		);
+		expect(
+			text(none.find((e) => e.path === DELETES_PATH)?.bytes as Uint8Array),
+		).toBe("[]\n");
+	});
+
+	it("is not a package file, so the hash does not see it", () => {
+		const pkg = renderPackage({ read: READ, receipt: RECEIPT });
+		expect(pkg.files.map((f) => f.path)).not.toContain(DELETES_PATH);
+		expect(packageSha256(pkg)).toBe(PINNED);
+	});
+
+	it("refuses when the integration commit wrote or deleted its path", () => {
+		for (const read of [
+			{ ...READ, files: [...READ.files, file(DELETES_PATH, "[]\n")] },
+			{ ...READ, deletes: [DELETES_PATH] },
+		]) {
+			expect(refusal(() => renderPackage({ read, receipt: RECEIPT }))).toEqual({
+				reason: "deletes_path_written",
+				path: DELETES_PATH,
+			});
+		}
 	});
 });
 
