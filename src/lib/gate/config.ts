@@ -24,7 +24,8 @@ export type GateConfig = {
  * of it. Bump `version` with any change.
  *
  * No runner is installed, so test, typecheck and command checks are not_run
- * from `runner` and degrade to warns until one is.
+ * from `runner`. They degrade to warns, and the run lists them as not
+ * checked, so it cannot be verified until a runner is installed.
  */
 export const GATE_CONFIG: GateConfig = Object.freeze({
 	version: 1,

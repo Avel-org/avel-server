@@ -4,6 +4,7 @@ import {
 	type GatePolicy,
 	type PlaybookGate,
 } from "../../contract/playbook";
+import { BRIEF_CHECK_SOURCES } from "./producers/brief-checks";
 import {
 	DECIDE_RULES,
 	type DecideConfig,
@@ -25,8 +26,9 @@ import {
  * 2 (2026-10-21): assurance and notChecked.
  * 3 (2026-10-21): one result (verified, pass, fail) replaces verdict and
  * assurance, for the run and for each gate.
+ * 4 (2026-10-21): the brief's own checks count on an unlisted gate.
  */
-export const DECIDE_VERSION = 3;
+export const DECIDE_VERSION = 4;
 
 type Classified = {
 	rule: DecideRule;
@@ -48,7 +50,9 @@ type Classified = {
  *    cleared by confirming or dismissing it, never by an override. A confirmed
  *    one blocks on any gate too, and an override can clear it. A dismissed
  *    one is a pass, from here on.
- * f. A finding on a gate the playbook does not list is ignored.
+ * f. A finding on a gate the playbook does not list is ignored, except the
+ *    brief's own checks (BRIEF_CHECK_SOURCES), which count as on a mandatory
+ *    gate: a requirement's check is not dropped by leaving its gate out.
  * d. A fail or error blocks on a mandatory gate and warns on a warn gate.
  * e. A not_run blocks on a mandatory gate and warns on a warn gate. A not_run
  *    from a source that is not installed warns instead, tagged degraded.
@@ -137,7 +141,7 @@ export function decide(
 			overridable: false,
 			severity: null,
 			overrides: [],
-			message: `The ${gate} gate has no evidence from this commit`,
+			message: `Not checked: nothing reported on the ${gate} gate at this commit`,
 		};
 		reasons.push(reason);
 		notChecked.push({
@@ -304,8 +308,13 @@ function classify(
 	}
 
 	// Rule f.
-	if (gatePolicy === null) return result("unlisted_gate", "ignored");
-	const mandatory = gatePolicy === "mandatory";
+	const briefCheck =
+		f.kind === "check" &&
+		(BRIEF_CHECK_SOURCES as readonly string[]).includes(f.source);
+	if (gatePolicy === null && !briefCheck) {
+		return result("unlisted_gate", "ignored");
+	}
+	const mandatory = gatePolicy === "mandatory" || gatePolicy === null;
 	switch (outcome) {
 		// Rule d.
 		case "fail":
