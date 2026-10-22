@@ -980,6 +980,34 @@ J decided these on 2026-10-21, before modules 10 and 11 were built. Each superse
 - **GitHub write access** is one fine-grained token per Connection, one repository, contents and pull requests write only, in an environment variable that `credential_ref` names. A GitHub App replaces it when there is more than one client `[specced]`.
 - **The receipt goes in the PR** as `.avel/receipt.json`, and the PR body carries a fixed summary built from it: the result, the counts and the package hash `[specced]`.
 
+## Decided 2026-10-21: Canon's sources ride on the brief
+
+J decided this on 2026-10-21, after the first live Canon turn returned no citations.
+
+- **Why none came back.** Probes showed the Agent SDK passes `search_result` blocks in and citations out unchanged, so that hypothesis held. The loss was the turn's shape: the brief travels as `draft_brief`'s tool input, and a tool input cannot carry API citations. The only text that could was Canon's closing recap, which named sections in prose and cited nothing. Unprompted, Claude also put a `source` on each requirement inside the tool input, which the strict brief schema refused.
+- **Option 1, built: sources on the brief.** Each requirement and criterion takes `sources`, chunk ids of the Intake's files, checked on every write (`DATA-CONTRACTS-V2.md`, *Sources*). The server checks the ids; the model only chooses them. This follows `ask_operator`'s `sourceChunkIds`.
+- **Option 3, built: a cited reply.** Instructions version 3 asks Canon to answer with each requirement and the passage behind it, so the chat reply carries API citations too.
+- **Rejected for now.** A second, tool-free citing call after the draft (it costs a call, and its citations land on a message, not the brief). Reading citations from every top-level text block of the turn (Canon's working talk rarely cites).
+- **Measured, one live run.** 6 of 6 brief items carried sources inside the notes, and 3 of 3 reply citations resolved to the notes (`COST-LOG.md`). One run is a sample of one.
+- **The operator confirms each source** (J, the same day). A source is the model's claim that a passage supports an item, so approval waits until the operator has confirmed or rejected every one. Rejected: judging support with `spec-judgment` at the gate (a model call that advises, and comes after approval), and leaving it unspecified. Confirmation is per source, not per item, and an edit to an item's text clears it, because the passage was confirmed for other words.
+
+
+## Decided 2026-10-21: the gate answers verified, pass or fail
+
+J decided this on 2026-10-21, while settling render and delivery. A run, and each gate in it, has one result, read from its counted reasons (`resultOf`, `src/lib/gate/decide.ts`, `DECIDE_VERSION` 3, receipt version 3).
+
+- **`fail`:** a reason still blocks.
+- **`verified`:** at least one reason, and every one passed. Nothing warned, nothing was overridden, and every check ran.
+- **`pass`:** anything else.
+- **Only `verified` work is delivered,** to every target. An override can lift `fail` to `pass` and never further, so overridden work never ships. This supersedes *Resolved 2026-08-21: `gate_override` renders into the package and PR body*, and `EXPORT-ENGINE.md` §4's operator override at export.
+- **Why.** The earlier pair, a verdict (`pass`, `warn`, `overridden`, `block`) and an assurance (`verified`, `not_fully_checked`), gave eight combinations for one question: can this ship. J found that ambiguous.
+- **No exception for prototypes or spikes** (J, the same day). *Making the gate judge real work* (2026-10-20) recommended letting a not-fully-checked run ship as a labelled prototype. Rejected: only `verified` ships, whatever the label.
+- **Overrides stay, as a record** (J, the same day). An override no longer makes work deliverable, but it records which blocker the operator accepted at which commit, and why, in the receipt.
+- **A fail on a warn gate is a `pass`.** The check ran, so nothing is unchecked, but a failed check is not verified work.
+- **No reasons is a `pass`.** A playbook that lists no gate checked nothing.
+- **Old runs.** A stored run of decide() version 1 or 2 gets its result from its receipt's reasons, the same rule, so its result does not depend on which version wrote it. Canon's fetch tool reads no receipt, so it reads an old run's verdict `block` as `fail` and `pass` as `pass`, never `verified`.
+- **Consequence.** Today the Booking playbook's `security` gate has no producer and its test checks have no runner, so no Booking mission can reach `verified`. Shipping needs both, or a playbook change.
+
 ---
 
 ## Open questions

@@ -382,6 +382,123 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 		});
 	});
 
+	it("stores a draft's sources as chunk ids, and refuses a passage it was not shown", async () => {
+		await asApp(async (tx) => {
+			const s = await seed(tx);
+			const [booking] = s.chunksOf(s.a);
+			const [other] = s.chunksOf(s.b);
+			if (!booking || !other) throw new Error("no chunk");
+			const cited = {
+				...brief,
+				// Canon copies a search result's source; a bare chunk id also works.
+				requirements: [
+					{ ...brief.requirements[0], sources: [sourceFor(booking)] },
+				],
+				acceptanceCriteria: [
+					{
+						...brief.acceptanceCriteria[0],
+						// Canon cannot confirm a passage, even by writing one.
+						sources: [
+							{
+								chunkId: booking.chunkId,
+								confirmed: { by: s.userId, at: clock.now().toISOString() },
+							},
+						],
+					},
+				],
+			};
+			s.model.script(s.a.sessionId, [
+				{ tool: "draft_brief", input: { brief: cited } },
+				{
+					tool: "draft_brief",
+					input: {
+						brief: {
+							...cited,
+							// Another client's passage: never shown to this turn.
+							requirements: [
+								{ ...brief.requirements[0], sources: [other.chunkId] },
+							],
+						},
+					},
+				},
+				{ reply: "R1: a client books a slot.", citations: [] },
+			]);
+			await runCanonTurn(s.deps, inClient(s.a.scope), s.a.sessionId);
+			const [first, second] = s.model.toolCalls;
+			expect(first?.result.isError ?? false).toBe(false);
+			expect(second?.result).toMatchObject({
+				isError: true,
+				text: expect.stringContaining("Cite only the passages you were given"),
+			});
+			const row = one(
+				await tx.select().from(intake).where(eq(intake.id, s.a.intakeId)),
+			);
+			expect(row.proposedBrief).toMatchObject({
+				requirements: [
+					{
+						id: "R1",
+						sources: [{ chunkId: booking.chunkId, confirmed: null }],
+					},
+				],
+				acceptanceCriteria: [
+					{
+						id: "AC1",
+						sources: [{ chunkId: booking.chunkId, confirmed: null }],
+					},
+				],
+			});
+		});
+	});
+
+	it("keeps the operator's confirmation when Canon redrafts an item unchanged", async () => {
+		await asApp(async (tx) => {
+			const s = await seed(tx);
+			const [booking] = s.chunksOf(s.a);
+			if (!booking) throw new Error("no chunk");
+			const confirmed = { by: s.userId, at: clock.now().toISOString() };
+			const item = (text: string, c: typeof confirmed | null) => ({
+				id: "R1",
+				text,
+				sources: [{ chunkId: booking.chunkId, confirmed: c }],
+			});
+			await tx
+				.update(intake)
+				.set({
+					proposedBrief: {
+						...brief,
+						requirements: [item("A client books a slot", confirmed)],
+					},
+				})
+				.where(eq(intake.id, s.a.intakeId));
+			s.model.script(s.a.sessionId, [
+				{
+					tool: "draft_brief",
+					input: {
+						brief: {
+							...brief,
+							requirements: [item("A client books a slot", null)],
+							acceptanceCriteria: [
+								{
+									...brief.acceptanceCriteria[0],
+									sources: [sourceFor(booking)],
+								},
+							],
+						},
+					},
+				},
+				{ reply: "Redrafted.", citations: [] },
+			]);
+			await runCanonTurn(s.deps, inClient(s.a.scope), s.a.sessionId);
+			const kept = one(
+				await tx.select().from(intake).where(eq(intake.id, s.a.intakeId)),
+			);
+			expect(kept.proposedBrief).toMatchObject({
+				requirements: [{ sources: [{ confirmed }] }],
+				acceptanceCriteria: [{ sources: [{ confirmed: null }] }],
+			});
+		});
+	});
+
 	it("refuses a draft with modules, or once the intake is no longer a draft", async () => {
 		await asApp(async (tx) => {
 			const s = await seed(tx);

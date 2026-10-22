@@ -4,6 +4,7 @@ import {
 	DECIDE_VERSION,
 	decide,
 	type GateFinding,
+	resultOf,
 } from "../../../src/lib/gate";
 import { check, config, finding, OLD_SHA, override } from "./fixtures";
 
@@ -29,12 +30,12 @@ describe("decide", () => {
 
 	it("g. passes a mandatory gate whose checks pass", () => {
 		const d = run([check("t1", "qa", "pass")]);
-		expect(d.verdict).toBe("pass");
+		expect(d.result).toBe("verified");
 		expect(d.gates).toEqual([
 			expect.objectContaining({
 				gate: "qa",
 				policy: "mandatory",
-				verdict: "pass",
+				result: "verified",
 			}),
 		]);
 	});
@@ -48,7 +49,7 @@ describe("decide", () => {
 
 		it("a fail blocks, even on a gate the playbook does not list", () => {
 			const d = run([check("t1", "qa", "pass"), violation]);
-			expect(d.verdict).toBe("block");
+			expect(d.result).toBe("fail");
 			expect(rules(d)).toContain("cp1:checkpoint_violation:block");
 		});
 
@@ -56,7 +57,7 @@ describe("decide", () => {
 			const d = run([check("t1", "qa", "pass"), violation], qaMandatory, [
 				override("cp1"),
 			]);
-			expect(d.verdict).toBe("block");
+			expect(d.result).toBe("fail");
 			expect(d.ignoredOverrides).toEqual([
 				expect.objectContaining({ findingId: "cp1", why: "not_overridable" }),
 			]);
@@ -68,7 +69,7 @@ describe("decide", () => {
 				const d = run([check("t1", "qa", "pass"), cp], qaMandatory, [
 					override("cp2"),
 				]);
-				expect(d.verdict).toBe("block");
+				expect(d.result).toBe("fail");
 				expect(rules(d)).toContain("cp2:checkpoint_unproven:block");
 			}
 		});
@@ -79,7 +80,7 @@ describe("decide", () => {
 				gate: "qa",
 				outcome: "pass",
 			});
-			expect(run([cp]).verdict).toBe("pass");
+			expect(run([cp]).result).toBe("verified");
 		});
 	});
 
@@ -90,13 +91,13 @@ describe("decide", () => {
 				gate: "rollback",
 				outcome: "fail",
 			});
-			expect(run([check("t1", "qa", "pass"), prior]).verdict).toBe("block");
+			expect(run([check("t1", "qa", "pass"), prior]).result).toBe("fail");
 			const onWarn = finding("prior_finding", {
 				id: "p2",
 				gate: "qa",
 				outcome: "fail",
 			});
-			expect(run([onWarn], qaWarn).verdict).toBe("block");
+			expect(run([onWarn], qaWarn).result).toBe("fail");
 		});
 
 		it("a fail can be overridden at this commit", () => {
@@ -108,8 +109,9 @@ describe("decide", () => {
 			const d = run([prior], qaMandatory, [
 				override("p1", { rationale: "Client accepted" }),
 			]);
-			expect(d.verdict).toBe("pass");
-			expect(d.gates[0]?.verdict).toBe("overridden");
+			// Overridden work is never verified, so it never ships (J, 2026-10-21).
+			expect(d.result).toBe("pass");
+			expect(d.gates[0]?.result).toBe("pass");
 			expect(d.reasons[0]?.overrides).toEqual(["Client accepted"]);
 		});
 	});
@@ -139,7 +141,7 @@ describe("decide", () => {
 						operatorSeverity,
 					});
 					const d = run([check("t1", "qa", "pass"), j]);
-					expect(d.verdict).toBe("block");
+					expect(d.result).toBe("fail");
 					expect(rules(d)).toContain("j1:judge_open:block");
 				}
 			}
@@ -153,14 +155,14 @@ describe("decide", () => {
 				severity: "high",
 				operatorSeverity: "low",
 			});
-			expect(run([check("t1", "qa", "pass"), j]).verdict).toBe("block");
+			expect(run([check("t1", "qa", "pass"), j]).result).toBe("fail");
 		});
 
 		it("an open finding is not cleared by an override", () => {
 			const d = run([check("t1", "qa", "pass"), judge("open")], qaMandatory, [
 				override("j-open"),
 			]);
-			expect(d.verdict).toBe("block");
+			expect(d.result).toBe("fail");
 			expect(d.ignoredOverrides[0]?.why).toBe("not_overridable");
 		});
 
@@ -180,12 +182,12 @@ describe("decide", () => {
 		});
 
 		it("a confirmed finding blocks on any gate; a dismissed one is a pass", () => {
-			expect(run([check("t1", "qa", "pass"), judge("confirmed")]).verdict).toBe(
-				"block",
+			expect(run([check("t1", "qa", "pass"), judge("confirmed")]).result).toBe(
+				"fail",
 			);
 			expect(
-				run([check("t1", "qa", "pass"), judge("confirmed")], qaWarn).verdict,
-			).toBe("block");
+				run([check("t1", "qa", "pass"), judge("confirmed")], qaWarn).result,
+			).toBe("fail");
 			const unlisted = finding("judge", {
 				id: "j-unlisted",
 				gate: "security",
@@ -194,10 +196,10 @@ describe("decide", () => {
 				operatorSeverity: null,
 			});
 			const d = run([check("t1", "qa", "pass"), unlisted]);
-			expect(d.verdict).toBe("block");
+			expect(d.result).toBe("fail");
 			expect(rules(d)).toContain("j-unlisted:judge_confirmed:block");
-			expect(run([check("t1", "qa", "pass"), judge("dismissed")]).verdict).toBe(
-				"pass",
+			expect(run([check("t1", "qa", "pass"), judge("dismissed")]).result).toBe(
+				"verified",
 			);
 		});
 
@@ -207,13 +209,13 @@ describe("decide", () => {
 				qaMandatory,
 				[override("j-confirmed")],
 			);
-			expect(d.verdict).toBe("pass");
+			expect(d.result).toBe("pass");
 			expect(rules(d)).toContain("j-confirmed:judge_confirmed:overridden");
 		});
 
 		it("a judge finding is not evidence that the gate ran", () => {
 			const d = run([judge("dismissed")]);
-			expect(d.verdict).toBe("block");
+			expect(d.result).toBe("fail");
 			expect(rules(d)).toContain("not_run:qa:mandatory_not_run:block");
 		});
 	});
@@ -221,26 +223,26 @@ describe("decide", () => {
 	describe("d. fail or error on a mandatory gate", () => {
 		it("blocks on mandatory and warns on warn", () => {
 			for (const outcome of ["fail", "error"] as const) {
-				expect(run([check("t1", "qa", outcome)]).verdict).toBe("block");
+				expect(run([check("t1", "qa", outcome)]).result).toBe("fail");
 				const warned = run([check("t1", "qa", outcome)], qaWarn);
-				expect(warned.verdict).toBe("pass");
-				expect(warned.gates[0]?.verdict).toBe("warn");
+				expect(warned.result).toBe("pass");
+				expect(warned.gates[0]?.result).toBe("pass");
 			}
 		});
 
 		it("one fail among passes blocks", () => {
 			const d = run([check("t1", "qa", "pass"), check("t2", "qa", "fail")]);
-			expect(d.verdict).toBe("block");
+			expect(d.result).toBe("fail");
 		});
 
 		it("an override at this commit clears it; at another commit it does not", () => {
 			expect(
-				run([check("t1", "qa", "fail")], qaMandatory, [override("t1")]).verdict,
+				run([check("t1", "qa", "fail")], qaMandatory, [override("t1")]).result,
 			).toBe("pass");
 			const d = run([check("t1", "qa", "fail")], qaMandatory, [
 				override("t1", { commitSha: OLD_SHA }),
 			]);
-			expect(d.verdict).toBe("block");
+			expect(d.result).toBe("fail");
 			expect(d.ignoredOverrides[0]?.why).toBe("wrong_commit");
 		});
 
@@ -248,7 +250,7 @@ describe("decide", () => {
 			const d = run([check("t1", "qa", "fail")], qaMandatory, [
 				override("t1", { rationale: " \n " }),
 			]);
-			expect(d.verdict).toBe("block");
+			expect(d.result).toBe("fail");
 			expect(d.ignoredOverrides[0]?.why).toBe("no_rationale");
 		});
 
@@ -261,14 +263,14 @@ describe("decide", () => {
 	describe("e. not_run on a mandatory gate", () => {
 		it("blocks when the source is installed", () => {
 			const d = run([check("t1", "qa", "not_run", { source: "stryker" })]);
-			expect(d.verdict).toBe("block");
+			expect(d.result).toBe("fail");
 			expect(rules(d)).toEqual(["t1:mandatory_not_run:block"]);
 		});
 
 		it("warns, tagged degraded, when the source is not installed", () => {
 			const d = run([check("t1", "qa", "not_run", { source: "axe" })]);
-			expect(d.verdict).toBe("pass");
-			expect(d.gates[0]?.verdict).toBe("warn");
+			expect(d.result).toBe("pass");
+			expect(d.gates[0]?.result).toBe("pass");
 			expect(d.reasons[0]).toMatchObject({
 				rule: "degraded_not_run",
 				degraded: true,
@@ -276,27 +278,27 @@ describe("decide", () => {
 		});
 
 		it("warns on a warn gate", () => {
-			expect(
-				run([check("t1", "qa", "not_run")], qaWarn).gates[0]?.verdict,
-			).toBe("warn");
+			expect(run([check("t1", "qa", "not_run")], qaWarn).gates[0]?.result).toBe(
+				"pass",
+			);
 		});
 	});
 
 	describe("leak a: a listed gate with no findings", () => {
 		it("blocks when mandatory, and no override clears it", () => {
 			const d = run([], qaMandatory, [override("not_run:qa")]);
-			expect(d.verdict).toBe("block");
+			expect(d.result).toBe("fail");
 			expect(rules(d)).toEqual(["not_run:qa:mandatory_not_run:block"]);
 			expect(d.ignoredOverrides[0]?.why).toBe("not_overridable");
 		});
 
 		it("warns when warn", () => {
-			expect(run([], qaWarn).gates[0]?.verdict).toBe("warn");
+			expect(run([], qaWarn).gates[0]?.result).toBe("pass");
 		});
 
 		it("counts evidence from another commit as none", () => {
 			const d = run([check("t1", "qa", "pass", { commitSha: OLD_SHA })]);
-			expect(d.verdict).toBe("block");
+			expect(d.result).toBe("fail");
 			expect(rules(d)).toEqual([
 				"t1:stale_commit:ignored",
 				"not_run:qa:mandatory_not_run:block",
@@ -310,7 +312,8 @@ describe("decide", () => {
 				check("t1", "qa", "pass"),
 				check("t2", "security", "fail"),
 			]);
-			expect(d.verdict).toBe("pass");
+			// An ignored reason is not counted, so qa's pass is verified.
+			expect(d.result).toBe("verified");
 			expect(d.gates.map((g) => g.gate)).toEqual(["qa"]);
 			expect(rules(d)).toContain("t2:unlisted_gate:ignored");
 		});
@@ -325,7 +328,7 @@ describe("decide", () => {
 				reportStatus: "complete",
 				openFindings: 0,
 			});
-			expect(run([ok]).verdict).toBe("pass");
+			expect(run([ok]).result).toBe("verified");
 			const notRun = finding("judge_coverage", {
 				id: "jc2",
 				gate: "qa",
@@ -333,7 +336,7 @@ describe("decide", () => {
 				reportStatus: null,
 				openFindings: 0,
 			});
-			expect(run([notRun]).verdict).toBe("block");
+			expect(run([notRun]).result).toBe("fail");
 		});
 
 		it("holds a pass that its own fields contradict to not_run", () => {
@@ -357,9 +360,9 @@ describe("decide", () => {
 			{ gate: "qa", policy: "warn" },
 			{ gate: "qa", policy: "mandatory" },
 		];
-		expect(run([check("t1", "qa", "fail")], twice).verdict).toBe("block");
-		expect(run([check("t1", "qa", "fail")], [...twice].reverse()).verdict).toBe(
-			"block",
+		expect(run([check("t1", "qa", "fail")], twice).result).toBe("fail");
+		expect(run([check("t1", "qa", "fail")], [...twice].reverse()).result).toBe(
+			"fail",
 		);
 	});
 
@@ -385,5 +388,186 @@ describe("decide", () => {
 		const before = JSON.stringify([findings, overrides]);
 		run(findings, qaMandatory, overrides);
 		expect(JSON.stringify([findings, overrides])).toBe(before);
+	});
+
+	describe("result: verified, pass or fail (J, 2026-10-21)", () => {
+		const notChecked = (d: ReturnType<typeof decide>) =>
+			d.notChecked.map((n) => `${n.findingId}:${n.kind}:${n.outcome}`);
+
+		it("is verified only when every counted reason passed", () => {
+			const both = [
+				...qaMandatory,
+				{ gate: "acceptance", policy: "warn" },
+			] as PlaybookGate[];
+			const d = run(
+				[check("t1", "qa", "pass"), check("t2", "acceptance", "pass")],
+				both,
+			);
+			expect(d.result).toBe("verified");
+			expect(d.gates.map((g) => g.result)).toEqual(["verified", "verified"]);
+			// A fail on a warn gate ran, so nothing is unchecked, but it is not
+			// verified: it is a pass, which does not ship.
+			const warned = run(
+				[check("t1", "qa", "pass"), check("t2", "acceptance", "fail")],
+				both,
+			);
+			expect(warned.result).toBe("pass");
+			expect(warned.gates.map((g) => g.result)).toEqual(["verified", "pass"]);
+			expect(warned.notChecked).toEqual([]);
+		});
+
+		it("is not fully checked when a degraded check passes the run having run nothing", () => {
+			const d = run([
+				check("t1", "qa", "pass", { source: "file_exists" }),
+				check("t2", "qa", "not_run", { source: "runner" }),
+			]);
+			expect(d.result).toBe("pass");
+			expect(d.notChecked).toEqual([
+				{
+					findingId: "t2",
+					gate: "qa",
+					kind: "check",
+					source: "runner",
+					outcome: "not_run",
+				},
+			]);
+		});
+
+		it("is not fully checked for a not_run or an error on a warn gate", () => {
+			for (const outcome of ["not_run", "error"] as const) {
+				const d = run([check("t1", "qa", outcome)], qaWarn);
+				expect(d.result, outcome).toBe("pass");
+				expect(notChecked(d)).toEqual([`t1:check:${outcome}`]);
+			}
+		});
+
+		it("is not fully checked for a warn gate with no evidence at all", () => {
+			const d = run(
+				[check("t1", "qa", "pass")],
+				[...qaMandatory, { gate: "acceptance", policy: "warn" }],
+			);
+			expect(d.result).toBe("pass");
+			expect(d.notChecked).toEqual([
+				{
+					findingId: "not_run:acceptance",
+					gate: "acceptance",
+					kind: "synthesized",
+					source: null,
+					outcome: "not_run",
+				},
+			]);
+		});
+
+		it("counts an overridden error: the override clears the block, not the gap", () => {
+			const d = run([check("t1", "qa", "error")], qaMandatory, [
+				override("t1"),
+			]);
+			expect(d.result).toBe("pass");
+			expect(notChecked(d)).toEqual(["t1:check:error"]);
+		});
+
+		it("lists the gap on a failed run too: a checkpoint that did not complete", () => {
+			const d = run([
+				check("t1", "qa", "pass"),
+				finding("checkpoint", { id: "cp", gate: "qa", outcome: "error" }),
+			]);
+			expect(d.result).toBe("fail");
+			expect(notChecked(d)).toEqual(["cp:checkpoint:error"]);
+		});
+
+		it("counts a judge's coverage that never ran", () => {
+			const d = run([
+				check("t1", "qa", "pass"),
+				finding("judge_coverage", {
+					id: "jc",
+					gate: "qa",
+					outcome: "not_run",
+					reportStatus: null,
+					openFindings: 0,
+				}),
+			]);
+			expect(notChecked(d)).toEqual(["jc:judge_coverage:not_run"]);
+		});
+
+		it("ignores what decide() ignores: another commit, and an unlisted gate", () => {
+			const d = run([
+				check("t1", "qa", "pass"),
+				check("t2", "qa", "not_run", { commitSha: OLD_SHA }),
+				check("t3", "security", "error"),
+			]);
+			expect(d.result).toBe("verified");
+		});
+
+		it("lists what was not checked in gate order, then by id, whatever the input order", () => {
+			const findings = [
+				check("b", "qa", "not_run", { source: "runner" }),
+				check("a", "qa", "not_run", { source: "runner" }),
+				check("z", "acceptance", "not_run", { source: "runner" }),
+			];
+			const policy: PlaybookGate[] = [
+				...qaMandatory,
+				{ gate: "acceptance", policy: "mandatory" },
+			];
+			const one = run(findings, policy);
+			const two = run([...findings].reverse(), policy);
+			expect(notChecked(one)).toEqual(notChecked(two));
+			// GATES order: qa before acceptance.
+			const order = (["qa", "acceptance"] as const).map((g) =>
+				one.notChecked.findIndex((n) => n.gate === g),
+			);
+			expect(order[0]).toBeLessThan(order[1] as number);
+			expect(
+				notChecked(one).filter((x) => x.startsWith("a:") || x.startsWith("b:")),
+			).toEqual(["a:check:not_run", "b:check:not_run"]);
+		});
+	});
+
+	describe("resultOf", () => {
+		it("is pass with no reasons: nothing was checked", () => {
+			expect(resultOf([])).toBe("pass");
+			expect(resultOf([{ effect: "ignored" }])).toBe("pass");
+			expect(run([], []).result).toBe("pass");
+		});
+
+		it("is fail on any block, verified only when every counted effect is pass", () => {
+			expect(resultOf([{ effect: "pass" }, { effect: "ignored" }])).toBe(
+				"verified",
+			);
+			for (const effect of ["warn", "overridden"] as const) {
+				expect(resultOf([{ effect: "pass" }, { effect }]), effect).toBe("pass");
+			}
+			expect(resultOf([{ effect: "overridden" }, { effect: "block" }])).toBe(
+				"fail",
+			);
+		});
+
+		it("gives a stored run of any version the result decide() gives today", () => {
+			for (const d of [
+				run([check("t1", "qa", "pass")]),
+				run([check("t1", "qa", "not_run", { source: "runner" })]),
+				run([check("t1", "qa", "error")], qaWarn),
+				run([check("t1", "qa", "fail")], qaMandatory, [override("t1")]),
+				run([], qaWarn),
+				run([check("t1", "qa", "fail")]),
+			]) {
+				expect(resultOf(d.reasons), rules(d).join()).toBe(d.result);
+				for (const g of d.gates) expect(resultOf(g.reasons)).toBe(g.result);
+			}
+		});
+
+		it("is never verified while something was not checked", () => {
+			for (const d of [
+				run([check("t1", "qa", "not_run", { source: "runner" })]),
+				run([check("t1", "qa", "not_run")], qaWarn),
+				run([check("t1", "qa", "error")], qaMandatory, [override("t1")]),
+				run(
+					[check("t1", "qa", "pass")],
+					[...qaMandatory, { gate: "acceptance", policy: "warn" }],
+				),
+			]) {
+				expect(d.notChecked.length, rules(d).join()).toBeGreaterThan(0);
+				expect(d.result, rules(d).join()).not.toBe("verified");
+			}
+		});
 	});
 });

@@ -50,7 +50,7 @@ describe("specCheckFindings", () => {
 		expect(outcomes(fs)).toEqual(["spec-check:R1:pass", "spec-check:R2:pass"]);
 		expect(fs.every((f) => f.gate === "qa" && f.commitSha === SHA)).toBe(true);
 		const d = decide(fs, [{ gate: "qa", policy: "mandatory" }], [], config);
-		expect(d.verdict).toBe("pass");
+		expect(d.result).toBe("verified");
 	});
 
 	it("fails a requirement with no acceptance criterion", () => {
@@ -241,7 +241,7 @@ describe("testGlobFindings", () => {
 			[override("checkpoint:test-glob:d1:tests/a.test.ts")],
 			config,
 		);
-		expect(d.verdict).toBe("block");
+		expect(d.result).toBe("fail");
 		expect(d.ignoredOverrides[0]?.why).toBe("not_overridable");
 	});
 
@@ -324,13 +324,13 @@ describe("briefCheckFindings", () => {
 		expect(fs.every((f) => f.source === "runner")).toBe(true);
 		const acceptance = [{ gate: "acceptance", policy: "mandatory" } as const];
 		const degraded = decide(fs, acceptance, [], config);
-		expect(degraded.verdict).toBe("pass");
+		expect(degraded.result).toBe("pass");
 		expect(degraded.reasons.every((r) => r.degraded)).toBe(true);
 		const installed = decide(fs, acceptance, [], {
 			...config,
 			availableSources: ["runner"],
 		});
-		expect(installed.verdict).toBe("block");
+		expect(installed.result).toBe("fail");
 	});
 
 	it("does not depend on the tree's key order", () => {
@@ -431,7 +431,7 @@ describe("judgeCoverageFindings", () => {
 			...config,
 			availableSources: ["judge"],
 		});
-		expect(d.verdict).toBe("block");
+		expect(d.result).toBe("fail");
 	});
 });
 

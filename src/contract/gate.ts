@@ -46,7 +46,18 @@ export const REASON_EFFECTS = [
 	"ignored",
 ] as const;
 
-export const GATE_VERDICTS = ["pass", "warn", "overridden", "block"] as const;
+/**
+ * The gate's one answer, for a run and for each gate in it (J, 2026-10-21).
+ * Read from the counted reasons alone (every effect but ignored):
+ * - `fail`: a reason still blocks.
+ * - `verified`: at least one reason, and every one passed. Nothing warned,
+ *   nothing was overridden, and every check ran.
+ * - `pass`: anything else. Nothing blocks, but something warned, was
+ *   overridden, or did not check.
+ * Only `verified` work is delivered, so an override can lift `fail` to
+ * `pass` and never further.
+ */
+export const GATE_RESULTS = ["verified", "pass", "fail"] as const;
 
 export const IGNORED_OVERRIDE_WHYS = [
 	"wrong_commit",
@@ -62,7 +73,7 @@ const uuid = z.string().uuid();
 const text = z.string().trim().min(1);
 
 /**
- * One reason behind a gate's verdict. findingId is a Finding's uuid for a
+ * One reason behind a gate's result. findingId is a Finding's uuid for a
  * judge, `not_run:<gate>` for a gate with no evidence, and otherwise an id
  * derived from content, stable at one commit: `spec-check:R1`,
  * `check:CK1:<n>`, `checkpoint:protected:<path>`,
@@ -106,7 +117,7 @@ export const gateRun = z.object({
 	commitSha: sha40,
 	/** The mission's pinned commit. */
 	baseSha: sha40,
-	verdict: z.enum(["pass", "block"]),
+	result: z.enum(GATE_RESULTS),
 	decideVersion: z.number().int().positive(),
 	receiptVersion: z.number().int().positive(),
 	configSha256: sha256,
@@ -116,7 +127,7 @@ export const gateRun = z.object({
 		z.object({
 			gate,
 			policy: gatePolicy,
-			verdict: z.enum(GATE_VERDICTS),
+			result: z.enum(GATE_RESULTS),
 			reasons: z.array(gateReason),
 		}),
 	),
@@ -143,7 +154,7 @@ export const gateRunSummary = gateRun
 	.pick({
 		id: true,
 		at: true,
-		verdict: true,
+		result: true,
 		commitSha: true,
 		baseSha: true,
 		receiptSha256: true,
@@ -180,7 +191,7 @@ export const gateContract = c.router({
 			200: successEnvelope(gateRun),
 		},
 		summary:
-			"Judge the mission's integration commit: findings in, verdict and receipt out",
+			"Judge the mission's integration commit: findings in, result and receipt out",
 	},
 	runs: {
 		method: "GET",

@@ -137,7 +137,6 @@ describe.skipIf(!url)(
 					auth,
 					db: () => database,
 					webOrigins: [],
-					preview: false,
 					repos: noRepos,
 					templates: noTemplates,
 					dispatchByToken: dispatchByTokenSha256,

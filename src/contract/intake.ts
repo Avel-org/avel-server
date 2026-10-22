@@ -1,5 +1,6 @@
 import { initContract } from "@ts-rest/core";
 import { z } from "zod";
+import { chunkId } from "./canon";
 import { missionCut, spendCeilingUsd } from "./mission";
 import { presetAgentSchema } from "./preset";
 import { boundarySchema, conventionSetSchema } from "./repo-read";
@@ -102,6 +103,28 @@ export const briefCheck = z.discriminatedUnion("kind", [
 export type BriefCheck = z.infer<typeof briefCheck>;
 
 /**
+ * One passage a requirement or criterion stands on: a chunk id of the
+ * intake's own files, which every write checks (src/lib/brief-sources.ts).
+ * A chunk id starts with its file's sha256, which the intake's file list
+ * carries, so a client resolves each to its file with no other read.
+ * `confirmed` is the operator's check that the passage supports the item
+ * (J, 2026-10-21): only POST /api/intakes/:id/sources sets it. A write that
+ * sends one keeps the stored value instead, and editing the item's text
+ * clears it.
+ */
+export const briefSource = z
+	.object({
+		chunkId,
+		confirmed: z.object({ by: uuid, at: iso }).strict().nullable(),
+	})
+	.strict();
+
+export type BriefSource = z.infer<typeof briefSource>;
+
+/** A brief stored before 2026-10-21 has none, and none is the same as empty. */
+const briefSources = z.array(briefSource).max(20).optional();
+
+/**
  * The brief Canon drafts and the operator approves. Held here and nowhere
  * else, so a different shape changes only this schema. Ids are permanent:
  * a criterion cites its requirement by id, never by position.
@@ -119,6 +142,7 @@ export const briefSchema = z
 					.object({
 						id: requirementId,
 						text: z.string().trim().min(1).max(2_000),
+						sources: briefSources,
 					})
 					.strict(),
 			)
@@ -130,6 +154,7 @@ export const briefSchema = z
 						id: criterionId,
 						requirementId,
 						text: z.string().trim().min(1).max(2_000),
+						sources: briefSources,
 					})
 					.strict(),
 			)
@@ -294,6 +319,29 @@ export const readRepoBody = z
 	})
 	.strict();
 
+/**
+ * The operator's decisions on a brief's sources (J, 2026-10-21): confirm that
+ * a passage supports its item, or reject it, which removes it. Each names a
+ * source by its item and chunk id; one that names none refuses the request.
+ */
+export const reviewSourcesBody = z
+	.object({
+		decisions: z
+			.array(
+				z
+					.object({
+						list: z.enum(["requirements", "acceptanceCriteria"]),
+						itemId: z.string().min(1),
+						chunkId,
+						decision: z.enum(["confirm", "reject"]),
+					})
+					.strict(),
+			)
+			.min(1)
+			.max(500),
+	})
+	.strict();
+
 export const rejectIntakeBody = z
 	.object({ reason: z.string().trim().min(1).max(2_000) })
 	.strict();
@@ -373,6 +421,15 @@ export const intakeContract = c.router({
 		responses: { 200: successEnvelope(intakeSchema) },
 		summary:
 			"Draft or proposed. Reads the repository once and writes the cut, conventions and boundaries, with their evidence.",
+	},
+	reviewSources: {
+		method: "POST",
+		path: "/api/intakes/:id/sources",
+		pathParams: byId,
+		body: reviewSourcesBody,
+		responses: { 200: successEnvelope(intakeSchema) },
+		summary:
+			"Draft or proposed. Confirms or rejects brief sources; the server stamps who and when. Status is unchanged.",
 	},
 	reject: {
 		method: "POST",

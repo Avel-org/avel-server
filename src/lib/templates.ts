@@ -25,7 +25,7 @@ export const DEV_BOOKING_SHA = "3c34369fd2c403ec35f1d24760ff183a840842e2";
 
 /**
  * What dev reads when no template credential is configured, so the page
- * works on avel_dev under dev preview. template-booking's sha is the one the
+ * works on avel_dev with no token. template-booking's sha is the one the
  * seeded missions record. template-integration is unreadable on purpose: it
  * has not been built, and the page must show that row too.
  */

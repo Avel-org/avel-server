@@ -13,10 +13,25 @@ import {
 import { logActivity } from "../db/activity";
 import { openCanonQuestions, openCanonSessionIds } from "../db/canon";
 import { clientIdOfIntake } from "../db/client-id";
-import { client, connection, engagement, intake, mission } from "../db/schema";
+import {
+	client,
+	connection,
+	engagement,
+	file,
+	intake,
+	intakeFiles,
+	mission,
+} from "../db/schema";
 import { live, stamp, touch } from "../db/schema/columns";
 import { type Executor, type Tx, withTx } from "../db/tx";
 import type { RepoSource } from "../gateways/repo-source";
+import {
+	applyDecisions,
+	briefSourceIssues,
+	carryConfirmations,
+	inFiles,
+	unconfirmedIssues,
+} from "../lib/brief-sources";
 import { checkIntake } from "../lib/intake-check";
 import { lowConfidenceIssues } from "../lib/repo-read/conventions";
 import { readRepo } from "../lib/repo-read/index";
@@ -31,6 +46,35 @@ import {
 } from "./shared";
 
 type Row = typeof intake.$inferSelect;
+
+/**
+ * Refuses a brief whose sources name no file of the intake: purged files
+ * count, since their rows and hashes stay. A new intake has no files yet, so
+ * on create every source is refused.
+ */
+async function requireKnownSources(
+	tx: Tx,
+	intakeId: string | null,
+	brief: Intake["proposedBrief"] | undefined,
+) {
+	const shas = new Set<string>();
+	if (intakeId !== null) {
+		const rows = await tx
+			.select({ sha256: file.sha256 })
+			.from(file)
+			.innerJoin(intakeFiles, eq(intakeFiles.fileId, file.id))
+			.where(eq(intakeFiles.intakeId, intakeId));
+		for (const r of rows) shas.add(r.sha256);
+	}
+	const issues = briefSourceIssues(brief, inFiles(shas), ["proposedBrief"]);
+	if (issues.length > 0) {
+		throw new ApiError(
+			"VALIDATION_FAILED",
+			"The brief cites passages of files this intake does not have",
+			{ details: { body: issues } },
+		);
+	}
+}
 
 /**
  * Database row (snake_case columns, Dates) to wire shape (camelCase, ISO
@@ -294,6 +338,7 @@ export function intakeRoutes(deps: RouteDeps & { repos: RepoSource }) {
 			const operator = operatorOf(ctx);
 			const row = await withTx(deps.db(), async (tx) => {
 				await requireActiveEngagement(tx, body.engagementId);
+				await requireKnownSources(tx, null, body.proposedBrief);
 				const values = {
 					id: deps.ids.next(),
 					engagementId: body.engagementId,
@@ -326,13 +371,26 @@ export function intakeRoutes(deps: RouteDeps & { repos: RepoSource }) {
 				if (current.status !== "draft" && current.status !== "proposed") {
 					throw wrongState(current, "revised");
 				}
+				await requireKnownSources(tx, current.id, body.proposedBrief);
+				// Only the review route confirms a source: what the body says is
+				// replaced by what is stored, and an edited item loses it.
+				const changes =
+					body.proposedBrief === undefined
+						? body
+						: {
+								...body,
+								proposedBrief: carryConfirmations(
+									current.proposedBrief,
+									body.proposedBrief,
+								),
+							};
 				// The source can run to 100k characters, so the log names the
 				// fields that changed rather than copying them.
 				return transition(
 					tx,
 					ctx,
 					current,
-					{ ...body, status: "draft" },
+					{ ...changes, status: "draft" },
 					"intake.updated",
 					{
 						fields: Object.keys(body).sort(),
@@ -393,6 +451,24 @@ export function intakeRoutes(deps: RouteDeps & { repos: RepoSource }) {
 									path: ["canonQuestions", q.id],
 									message: q.header,
 								})),
+							},
+						},
+					);
+				}
+				// A source is a claim that a passage supports its item, and only
+				// the operator's confirmation stands behind it (J, 2026-10-21).
+				const unconfirmed = unconfirmedIssues(current.proposedBrief, [
+					"proposedBrief",
+				]);
+				if (unconfirmed.length > 0) {
+					throw new ApiError(
+						"PRECONDITION_FAILED",
+						"The brief cites passages no operator has confirmed",
+						{
+							details: {
+								reason: "brief_sources_unconfirmed",
+								engagementId: current.engagementId,
+								issues: unconfirmed,
 							},
 						},
 					);
@@ -571,6 +647,45 @@ export function intakeRoutes(deps: RouteDeps & { repos: RepoSource }) {
 						commitSha: read.commitSha,
 						cut: read.cut,
 						confidence: read.conventions.confidence,
+					},
+				);
+			});
+			return { status: 200, body: ok(await wireOf(deps.db(), row)) };
+		},
+
+		reviewSources: async ({ params, body }, ctx) => {
+			const operator = operatorOf(ctx);
+			const row = await withTx(deps.db(), async (tx) => {
+				const current = await lockIntake(tx, params.id);
+				if (current.status !== "draft" && current.status !== "proposed") {
+					throw wrongState(current, "reviewed");
+				}
+				const { brief, issues } = applyDecisions(
+					current.proposedBrief,
+					body.decisions,
+					{ by: operator.id, at: deps.clock.now().toISOString() },
+				);
+				if (issues.length > 0) {
+					throw new ApiError(
+						"VALIDATION_FAILED",
+						"A decision names a source the brief does not cite",
+						{ details: { body: issues } },
+					);
+				}
+				const count = (d: "confirm" | "reject") =>
+					body.decisions.filter((x) => x.decision === d).length;
+				// Status stays: reviewing sources is not revising the brief.
+				return transition(
+					tx,
+					ctx,
+					current,
+					{ proposedBrief: brief, status: current.status },
+					"intake.updated",
+					{
+						fields: ["proposedBrief.sources"],
+						from: current.status,
+						confirmed: count("confirm"),
+						rejected: count("reject"),
 					},
 				);
 			});

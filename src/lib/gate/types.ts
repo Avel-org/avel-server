@@ -2,7 +2,7 @@ import type { FindingSeverity, FindingStatus } from "../../contract/agent";
 import type {
 	DECIDE_RULES,
 	GATE_FINDING_KINDS,
-	GATE_VERDICTS,
+	GATE_RESULTS,
 	IGNORED_OVERRIDE_WHYS,
 	REASON_EFFECTS,
 } from "../../contract/gate";
@@ -18,7 +18,7 @@ export type GateOutcome = (typeof GATE_OUTCOMES)[number];
 export {
 	DECIDE_RULES,
 	GATE_FINDING_KINDS,
-	GATE_VERDICTS,
+	GATE_RESULTS,
 	IGNORED_OVERRIDE_WHYS,
 	REASON_EFFECTS,
 } from "../../contract/gate";
@@ -139,12 +139,12 @@ export type GateReason = {
 	message: string;
 };
 
-export type GateVerdict = (typeof GATE_VERDICTS)[number];
+export type GateResult = (typeof GATE_RESULTS)[number];
 
 export type GateDecision = {
 	gate: Gate;
 	policy: GatePolicy;
-	verdict: GateVerdict;
+	result: GateResult;
 	reasons: GateReason[];
 };
 
@@ -152,10 +152,22 @@ export type IgnoredOverride = GateOverride & {
 	why: (typeof IGNORED_OVERRIDE_WHYS)[number];
 };
 
+/** A counted finding that did not check: it did not run, or it broke. */
+export type NotChecked = {
+	gate: Gate;
+	findingId: string;
+	kind: GateFindingKind | "synthesized";
+	source: string | null;
+	outcome: "not_run" | "error";
+};
+
 export type Decision = {
 	version: number;
 	commitSha: string;
-	verdict: "pass" | "block";
+	/** resultOf(reasons). Never verified while `notChecked` has an entry. */
+	result: GateResult;
+	/** Every counted finding that did not check, in GATES order, then by id. */
+	notChecked: NotChecked[];
 	/** Listed gates only, in GATES order. */
 	gates: GateDecision[];
 	/** Every reason, unlisted and stale ones included, sorted. */
