@@ -839,7 +839,7 @@ J decided this for module 7. `SANDBOX.md` has the as-built note.
 - **Agents get file tools only:** read, write, edit and list, inside the worktree. No shell, no installs, no network tool.
 - **Containers are future providers, and nothing is built for them.** Local Docker, and Tier 1 remote sandboxes such as boat.dev, are named as candidates behind the same `RoomProvider` interface. A provider that cannot make a room refuses `room_unavailable`.
 - **Rooms live under `%LOCALAPPDATA%\avel\rooms\<dispatchId>`,** with the root injected through dependencies so tests use a temp directory.
-- **A room's source is a local clone, never a fetch:** the mission's template at `template_version`, or else its one approved intake's repository at the commit read, under `AVEL_SOURCES_DIR` (`templates/<slug>`, `repos/<owner>/<repo>`). The runner never holds the GitHub credential, so it cannot clone. A source that cannot be resolved refuses `source_unavailable`, which retrying will not fix.
+- **A room's source is a local clone, never a fetch:** an internal mission's template at `template_version`, or a client mission's one approved intake's repository at the commit read (by origin since 2026-10-21, *render and delivery*), under `AVEL_SOURCES_DIR` (`templates/<slug>`, `repos/<owner>/<repo>`). The runner never holds the GitHub credential, so it cannot clone. A source that cannot be resolved refuses `source_unavailable`, which retrying will not fix.
 
 ## Decided 2026-10-14: the dispatch brief and the real harness
 
@@ -965,6 +965,20 @@ J decided both on 2026-10-21, in a BE Main session.
 ## Decided 2026-10-21: the app-router cut
 
 J decided this on 2026-10-21. An app-router tree's cut is read from `src/features/*` (else `features/*`): two or more directories there make a vertical cut, one feature each. Route groups under `app/` do not count, because `TEMPLATE-BOOKING.md` assigns them to features by hand and that link is not in the tree. The rule runs only when the two-layer feature rule finds nothing, so every earlier fixture derives the same cut and evidence. The rule is in `ROSTER-V2.md`, *Choosing the cut*.
+
+
+## Decided 2026-10-21: render and delivery
+
+J decided these on 2026-10-21, before modules 10 and 11 were built. Each supersedes what `EXPORT-ENGINE.md` and `BLAST-RADIUS.md` say where they differ; those docs are not yet rewritten to match.
+
+- **The package is the work.** It is the files the gate's integration commit changed from the mission's base, with their modes, the paths it deleted, and the gate receipt at `.avel/receipt.json` (`src/lib/export/`, `[built]`). It is no longer AVEL's own brief, roster and agent files. Render rebuilds the integration commit from the dispatch refs and refuses `integration_commit_moved` if it is not the recorded one, so no new storage holds it.
+- **The hash leaves the receipt out.** `packageSha256` version 1 covers each file's path, mode and blob sha and each delete, in codepoint order, so the same changes hash the same whichever gate run they carry. The gate writes its receipt before any render, so the receipt holds the commit shas, not the package hash; the export row and the PR body carry the hash.
+- **A zip lists its deletes** in `.avel/deletes.json`, a sorted JSON array, empty when nothing is deleted. A zip cannot delete; a GitHub delivery deletes and carries no list.
+- **Template work and client work are told apart by `origin`,** which already existed: an internal mission with a template pin works in the template repo, and a client mission works in its intake's repository at the commit read, even when it pins a template (`src/runner/room-source.ts`, `[built]`). The pin on a client mission records which template its code came from. Rejected: a new `target` field and an internal firm client, which would restate what `origin` holds. An empty client repository will start from the template at its pin `[specced]`.
+- **Where a package may write** is the roster's `writable_paths`, plus `.avel/`, not `.avel/` alone. Protected paths and the other violations still block, and no override clears one.
+- **A PR is built on the mission's base,** the commit the intake read, so GitHub shows the true diff and finds conflicts itself. `github_push` is fast-forward only and never forces `[specced]`.
+- **GitHub write access** is one fine-grained token per Connection, one repository, contents and pull requests write only, in an environment variable that `credential_ref` names. A GitHub App replaces it when there is more than one client `[specced]`.
+- **The receipt goes in the PR** as `.avel/receipt.json`, and the PR body carries a fixed summary built from it: the result, the counts and the package hash `[specced]`.
 
 ---
 

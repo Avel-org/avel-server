@@ -1,5 +1,5 @@
 import { matchesGlob, supportedGlob } from "../../../rooms/globs";
-import { byCodepoint } from "./order";
+import { byCodepoint } from "../order";
 import type {
 	BlastRadius,
 	BlastRadiusContext,
