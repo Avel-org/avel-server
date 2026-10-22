@@ -32,7 +32,7 @@ import { seedIds } from "../api/agent-fixtures";
 import { reportsOf, row, runnerDeps } from "../api/runner-fixtures";
 import { type ApiHarness, clock, withApi } from "../api/support";
 import { removeDir, tempDir } from "../unit/git-fixtures";
-import { fixture, fixtureRepos } from "../unit/repo-fixtures";
+import { fixtureRepos, snapshotOfCommit } from "../unit/repo-fixtures";
 import { SEED_RUN_AT } from "../unit/seed-run-at";
 import { BASE_URL, captureLogger } from "../unit/support";
 
@@ -41,9 +41,12 @@ import { BASE_URL, captureLogger } from "../unit/support";
 // tests/api/first-mission.test.ts. Spends real money, so it only runs with
 // AVEL_LIVE_SMOKE=1 and a key. Run it with --disableConsoleIntercept, or vitest
 // hides the cost lines of a passing run. Everything lives in a rolled-back
-// transaction on DATABASE_URL; the source is the template-booking dev
-// fixture. The mission's ceiling is $20; the SDK backstops are $1 for
-// Canon and $2 for the dispatch.
+// transaction on DATABASE_URL. It is a client mission that started from
+// the template, as in first-mission.test.ts: the client's clone of
+// meridian-co/app is at the template-booking dev fixture's commit, the
+// intake reads that commit, and the room opens on it from the client's
+// clone (decided 2026-10-21, J). The mission's ceiling is $20; the SDK
+// backstops are $1 for Canon and $2 for the dispatch.
 
 const live =
 	process.env.AVEL_LIVE_SMOKE === "1" && !!process.env.ANTHROPIC_API_KEY;
@@ -144,6 +147,8 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 					path.join(sources, "templates", "template-booking"),
 				),
 			).toBe(DEV_BOOKING_SHA);
+			const clientClone = path.join(sources, "repos", "meridian-co", "app");
+			expect(await buildDevTemplateBooking(clientClone)).toBe(DEV_BOOKING_SHA);
 			const rooms = worktreeRooms(path.join(base, "rooms"));
 			const roomSources = localSources(sources);
 			const blobs = memoryBlobs();
@@ -343,7 +348,7 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 							successEnvelope(connectionSchema),
 						)
 					).id;
-					await ok(
+					const read = await ok(
 						await post(`/api/intakes/${intakeId}/read-repo`, {
 							connectionId,
 							repoUrl: REPO,
@@ -351,6 +356,7 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 						200,
 						intake,
 					);
+					expect(read.repoCommitSha).toBe(DEV_BOOKING_SHA);
 					await ok(await post(`/api/intakes/${intakeId}/propose`), 200, intake);
 					const approved = await ok(
 						await post(`/api/intakes/${intakeId}/approve`, {
@@ -466,6 +472,9 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 						one,
 					);
 					expect(running.status).toBe("running");
+					const room = await rooms.get(queued.id);
+					expect(room?.repoPath).toBe(clientClone);
+					expect(room?.commit).toBe(read.repoCommitSha);
 					await harness.settled(queued.id);
 					await tick(deps);
 					const d = await row(h.tx, queued.id);
@@ -527,7 +536,7 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 						run.receiptSha256,
 						run.commitSha,
 					);
-					expect(run.baseSha).toBe(DEV_BOOKING_SHA);
+					expect(run.baseSha).toBe(read.repoCommitSha);
 					expect(run.receiptSha256).toMatch(/^[0-9a-f]{64}$/);
 					expect(
 						run.reasons.find((r) => r.source === "file_exists"),
@@ -537,7 +546,9 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 					harness,
 					rooms,
 					roomSources,
-					repos: fixtureRepos({ "meridian-co/app": fixture("nest-feature") }),
+					repos: fixtureRepos({
+						"meridian-co/app": snapshotOfCommit(clientClone, DEV_BOOKING_SHA),
+					}),
 					drive: { blobs, maxBytes: DEFAULT_UPLOAD_MAX_BYTES },
 				},
 			);

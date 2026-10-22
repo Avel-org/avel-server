@@ -3,12 +3,12 @@ import path from "node:path";
 import { COMMIT_SHA, git, gitOk } from "./git";
 
 /**
- * Where a room's code comes from (module 7, decided 2026-10-13): the
- * mission's template at its pinned commit, or else the repository its one
- * approved intake read, at the commit read. Tier 0 resolves both to local
- * clones under AVEL_SOURCES_DIR and never fetches: the GitHub credential
- * lives only in the delivery room (SANDBOX.md), so keeping the clones
- * current is the operator's job.
+ * Where a room's code comes from (module 7; which one a mission uses is
+ * missionRoomSource's rule, decided 2026-10-21): a template at its pinned
+ * commit, or the repository an approved intake read, at the commit read.
+ * Tier 0 resolves both to local clones under AVEL_SOURCES_DIR and never
+ * fetches: the GitHub credential lives only in the delivery room
+ * (SANDBOX.md), so keeping the clones current is the operator's job.
  */
 
 export type RoomSource =
