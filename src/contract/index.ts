@@ -11,6 +11,7 @@ import { clientContract } from "./client";
 import { connectionContract } from "./connection";
 import { dispatchContract } from "./dispatch";
 import { engagementContract } from "./engagement";
+import { exportContract } from "./export";
 import { findingContract } from "./finding";
 import { gateContract } from "./gate";
 import { intakeContract } from "./intake";
@@ -34,6 +35,7 @@ export * from "./client";
 export * from "./connection";
 export * from "./dispatch";
 export * from "./engagement";
+export * from "./export";
 export * from "./finding";
 export * from "./gate";
 export * from "./intake";
@@ -95,6 +97,7 @@ export const contract = c.router(
 		intakeFiles: intakeFileContract,
 		findings: findingContract,
 		gate: gateContract,
+		exports: exportContract,
 		connections: connectionContract,
 		agentTemplates: agentTemplateContract,
 		identityVersions: identityVersionContract,

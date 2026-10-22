@@ -42,6 +42,7 @@ import { clientRoutes } from "./routes/clients";
 import { connectionRoutes } from "./routes/connections";
 import { dispatchRoutes } from "./routes/dispatches";
 import { engagementRoutes } from "./routes/engagements";
+import { exportRoutes } from "./routes/exports";
 import { type Drive, fileRoutes, intakeFileRoutes } from "./routes/files";
 import { findingRoutes } from "./routes/findings";
 import { gateRoutes } from "./routes/gate";
@@ -120,6 +121,11 @@ export function createApp(deps: AppDeps) {
 		intakeFiles: intakeFileRoutes(routeDeps),
 		findings: findingRoutes(routeDeps),
 		gate: gateRoutes({ ...routeDeps, roomSources: deps.roomSources }),
+		exports: exportRoutes({
+			...routeDeps,
+			repos: deps.repos,
+			roomSources: deps.roomSources,
+		}),
 		connections: connectionRoutes(routeDeps),
 		agentTemplates: agentTemplateRoutes(routeDeps),
 		identityVersions: identityVersionRoutes(routeDeps),
