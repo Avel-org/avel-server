@@ -1,6 +1,6 @@
 import type { GateFinding } from "../types";
 import { SECURITY_GATE } from "./secret-scan";
-import { byId } from "./shared";
+import { byId, cmp } from "./shared";
 
 export const DEPENDENCIES_SOURCE = "dependencies";
 
@@ -33,8 +33,32 @@ const NAME = /^(?:@[a-z0-9-*~][a-z0-9-*._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
 /** A version, range, tag or union of ranges: what the registry resolves. */
 const RANGE = /^[0-9A-Za-z.^~<>=*|+\s-]*$/;
 
+/** npm-package-arg reads a specifier ending in these as a local tarball, not a tag. */
+const TARBALL = /\.(?:tgz|tar|tar\.gz)$/i;
+
+/** An npm override's `$name`: the version the root package.json gives that name. */
+const REFERENCE =
+	/^\$(?:@[a-z0-9-*~][a-z0-9-*._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
+
 /** Workspace and catalog specifiers resolve inside the repo's own lockfile. */
 const LOCAL = /^(?:workspace|catalog):/;
+
+/**
+ * Everything the dependency check reads by, the same objects it uses, so
+ * GATE_CONFIG carries them and the receipt's config hash changes with them.
+ */
+export const DEPENDENCY_RULES = Object.freeze({
+	sections: [...DEPENDENCY_SECTIONS, ...OVERRIDE_SECTIONS] as readonly string[],
+	patterns: Object.freeze({
+		name: NAME,
+		range: RANGE,
+		tarball: TARBALL,
+		reference: REFERENCE,
+		local: LOCAL,
+	}) as Readonly<Record<string, RegExp>>,
+});
+
+export type DependencyRules = typeof DEPENDENCY_RULES;
 
 /** A package.json the work added or changed, parsed at both commits. */
 export type DependencyManifest = {
@@ -49,7 +73,7 @@ type Spec = {
 	section: string;
 	name: string;
 	spec: unknown;
-	/** From an override section, whose keys are selectors, not names. */
+	/** From an override section, whose keys are selectors, not names; nested npm keys join with `>`. */
 	override: boolean;
 };
 
@@ -57,7 +81,10 @@ type Spec = {
  * Dependencies the work added or changed, on the security gate. Each one
  * must be a valid npm name with a registry specifier: a version, range or
  * tag, an `npm:` alias to one, or `workspace:`/`catalog:`. A git, URL, file
- * or link specifier fails, because nothing downstream pins what it installs.
+ * or link specifier fails, because nothing downstream pins what it installs;
+ * so does a tarball filename, which npm installs as a local file. An
+ * override may also be npm's `$name` reference, and a nested npm override
+ * is read entry by entry (`a>b`), so reordering its keys is no change.
  * A `workspace:` or `catalog:` one passes: it resolves inside the repo.
  * Whether any other name exists in the registry needs the network, so each
  * is a not_run from `registry`, which the runner's install will feed.
@@ -139,7 +166,7 @@ export function dependencyFindings(
 
 function problemOf(s: Spec): string | null {
 	if (typeof s.spec !== "string") {
-		// An npm nested override is an object; it is not read, so not shown safe.
+		// Not read, so not shown safe.
 		return s.spec === undefined
 			? "is not an object, so it was not read"
 			: "is not a string specifier, so it was not read";
@@ -150,6 +177,10 @@ function problemOf(s: Spec): string | null {
 	}
 	const spec = s.spec.trim();
 	if (LOCAL.test(spec)) return null;
+	if (s.override && REFERENCE.test(spec)) return null;
+	if (TARBALL.test(spec)) {
+		return `${spec} is a tarball filename, which installs a local file nothing pins`;
+	}
 	if (spec.startsWith("npm:")) {
 		const alias = spec.slice("npm:".length);
 		const at = alias.lastIndexOf("@");
@@ -157,7 +188,7 @@ function problemOf(s: Spec): string | null {
 		const range = at > 0 ? alias.slice(at + 1) : "";
 		if (!validName(name))
 			return `aliases ${name}, which is not a valid npm package name`;
-		if (!RANGE.test(range))
+		if (!RANGE.test(range) || TARBALL.test(range))
 			return `aliases ${name} at ${range}, which is not a registry range`;
 		return null;
 	}
@@ -184,6 +215,12 @@ function specsOf(pkg: Record<string, unknown>): Spec[] {
 			continue;
 		}
 		const override = (OVERRIDE_SECTIONS as readonly string[]).includes(section);
+		if (override) {
+			flatten(value, "", (name, spec) =>
+				out.push({ section, name, spec, override }),
+			);
+			continue;
+		}
 		for (const [name, spec] of Object.entries(value)) {
 			out.push({ section, name, spec, override });
 		}
@@ -191,13 +228,26 @@ function specsOf(pkg: Record<string, unknown>): Spec[] {
 	return out.sort((a, b) => cmp(key(a), key(b)));
 }
 
+/**
+ * An npm override object's entries as `a>b` paths. A nested object's own
+ * version is its `.` key, so `{ a: { ".": "1", b: "2" } }` is `a` at "1"
+ * and `a>b` at "2". An object nested deeper than 8 levels is not read.
+ */
+function flatten(
+	value: Record<string, unknown>,
+	at: string,
+	add: (name: string, spec: unknown) => void,
+	depth = 0,
+): void {
+	for (const [k, v] of Object.entries(value)) {
+		const name = at === "" ? k : k === "." ? at : `${at}>${k}`;
+		if (isObject(v) && depth < 8) flatten(v, name, add, depth + 1);
+		else add(name, v);
+	}
+}
+
 const key = (s: Spec) => `${s.section}\0${s.name}`;
 
 function isObject(v: unknown): v is Record<string, unknown> {
 	return v !== null && typeof v === "object" && !Array.isArray(v);
-}
-
-/** Code-unit order, never locale order (DEV-TIPS §2). */
-function cmp(a: string, b: string): number {
-	return a < b ? -1 : a > b ? 1 : 0;
 }

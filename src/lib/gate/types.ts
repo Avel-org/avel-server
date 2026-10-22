@@ -168,7 +168,7 @@ export type Decision = {
 	result: GateResult;
 	/** Every counted finding that did not check, in GATES order, then by id. */
 	notChecked: NotChecked[];
-	/** Listed gates only, in GATES order. */
+	/** Listed gates, and an unlisted gate holding the brief's checks (as mandatory), in GATES order. */
 	gates: GateDecision[];
 	/** Every reason, unlisted and stale ones included, sorted. */
 	reasons: GateReason[];

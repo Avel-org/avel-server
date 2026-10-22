@@ -332,6 +332,29 @@ describe("decide", () => {
 				"x:unlisted_gate:ignored",
 			);
 		});
+
+		it("shows the unlisted gate in gates, as mandatory, so a fail has a gate that explains it", () => {
+			const brief = check("ck", "acceptance", "fail", {
+				source: "file_exists",
+			});
+			const d = run([check("t1", "qa", "pass"), brief]);
+			expect(d.gates.map((g) => [g.gate, g.policy, g.result])).toEqual([
+				["qa", "mandatory", "verified"],
+				["acceptance", "mandatory", "fail"],
+			]);
+			// No brief check, no unlisted gate.
+			expect(run([check("t1", "qa", "pass")]).gates.map((g) => g.gate)).toEqual(
+				["qa"],
+			);
+		});
+
+		it("counts a brief-check source only on the brief's own gate", () => {
+			const elsewhere = check("r", "security", "not_run", { source: "runner" });
+			const d = run([check("t1", "qa", "pass"), elsewhere]);
+			expect(rules(d)).toContain("r:unlisted_gate:ignored");
+			expect(d.result).toBe("verified");
+			expect(d.gates.map((g) => g.gate)).toEqual(["qa"]);
+		});
 	});
 
 	describe("f. unlisted gate", () => {

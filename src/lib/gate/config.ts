@@ -2,10 +2,14 @@ import type { Gate } from "../../contract/playbook";
 import {
 	DEFAULT_PROTECTED_PATHS,
 	DEPENDENCIES_SOURCE,
+	DEPENDENCY_RULES,
+	type DependencyRules,
 	FILE_EXISTS_SOURCE,
 	JUDGE_COVERAGE_SOURCE,
 	PROTECTED_PATHS_SOURCE,
+	SECRET_SCAN_CONFIG,
 	SECRET_SCAN_SOURCE,
+	type SecretScanConfig,
 	SPEC_CHECK_SOURCE,
 	TEST_GLOB_SOURCE,
 } from "./producers";
@@ -18,6 +22,10 @@ export type GateConfig = {
 	protectedPaths: readonly string[];
 	/** The gate judge coverage reports on. */
 	judgeCoverageGate: Gate;
+	/** The secret scan's rules, env-template suffixes and size limit. */
+	secretScan: SecretScanConfig;
+	/** The dependency check's sections and patterns. */
+	dependencies: DependencyRules;
 };
 
 /**
@@ -30,8 +38,8 @@ export type GateConfig = {
  * checked, so it cannot be verified until a runner is installed.
  *
  * Version 2 (2026-10-22) installs the security gate's code-reading checks:
- * the secret scan and the dependency check (`SECRET_RULES` is part of what
- * version 2 means).
+ * the secret scan and the dependency check. Their rules are fields here,
+ * so the receipt's config hash changes when one does.
  */
 export const GATE_CONFIG: GateConfig = Object.freeze({
 	version: 2,
@@ -48,4 +56,6 @@ export const GATE_CONFIG: GateConfig = Object.freeze({
 	testGlobs: Object.freeze(["tests/**", "**/*.test.ts", "**/*.spec.ts"]),
 	protectedPaths: Object.freeze([...DEFAULT_PROTECTED_PATHS]),
 	judgeCoverageGate: "qa",
+	secretScan: SECRET_SCAN_CONFIG,
+	dependencies: DEPENDENCY_RULES,
 });

@@ -4,7 +4,10 @@ import {
 	type GatePolicy,
 	type PlaybookGate,
 } from "../../contract/playbook";
-import { BRIEF_CHECK_SOURCES } from "./producers/brief-checks";
+import {
+	BRIEF_CHECK_SOURCES,
+	BRIEF_CHECKS_GATE,
+} from "./producers/brief-checks";
 import {
 	DECIDE_RULES,
 	type DecideConfig,
@@ -51,8 +54,10 @@ type Classified = {
  *    one blocks on any gate too, and an override can clear it. A dismissed
  *    one is a pass, from here on.
  * f. A finding on a gate the playbook does not list is ignored, except the
- *    brief's own checks (BRIEF_CHECK_SOURCES), which count as on a mandatory
- *    gate: a requirement's check is not dropped by leaving its gate out.
+ *    brief's own checks (BRIEF_CHECK_SOURCES on BRIEF_CHECKS_GATE), which
+ *    count as on a mandatory gate: a requirement's check is not dropped by
+ *    leaving its gate out. That gate is then in `gates`, as mandatory, so
+ *    every counted reason is shown under a gate.
  * d. A fail or error blocks on a mandatory gate and warns on a warn gate.
  * e. A not_run blocks on a mandatory gate and warns on a warn gate. A not_run
  *    from a source that is not installed warns instead, tagged degraded.
@@ -187,11 +192,13 @@ export function decide(
 
 	const gates: GateDecision[] = [];
 	for (const gate of GATES) {
-		const gatePolicy = policyOf.get(gate);
-		if (gatePolicy === undefined) continue;
 		const own = reasons.filter(
 			(r) => r.gate === gate && r.effect !== "ignored",
 		);
+		// An unlisted gate with counted reasons holds the brief's checks (rule f).
+		const gatePolicy =
+			policyOf.get(gate) ?? (own.length > 0 ? "mandatory" : undefined);
+		if (gatePolicy === undefined) continue;
 		gates.push({
 			gate,
 			policy: gatePolicy,
@@ -310,6 +317,7 @@ function classify(
 	// Rule f.
 	const briefCheck =
 		f.kind === "check" &&
+		f.gate === BRIEF_CHECKS_GATE &&
 		(BRIEF_CHECK_SOURCES as readonly string[]).includes(f.source);
 	if (gatePolicy === null && !briefCheck) {
 		return result("unlisted_gate", "ignored");

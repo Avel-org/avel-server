@@ -99,6 +99,32 @@ export function buildReceipt(input: ReceiptInput): Receipt {
 		testGlobs: [...input.config.testGlobs].sort(cmp),
 		protectedPaths: [...input.config.protectedPaths].sort(cmp),
 		judgeCoverageGate: input.config.judgeCoverageGate,
+		// A pattern is hashed by its source and flags, the regex itself.
+		secretScan: {
+			rules: sortBy(
+				input.config.secretScan.rules.map((r) => ({
+					id: r.id,
+					pattern: r.pattern.source,
+					flags: r.pattern.flags,
+				})),
+				(r) => r.id,
+			),
+			envTemplateSuffixes: [
+				...input.config.secretScan.envTemplateSuffixes,
+			].sort(cmp),
+			maxBytes: input.config.secretScan.maxBytes,
+		},
+		dependencies: {
+			sections: [...input.config.dependencies.sections].sort(cmp),
+			patterns: Object.fromEntries(
+				Object.keys(input.config.dependencies.patterns)
+					.sort(cmp)
+					.map((k) => {
+						const p = input.config.dependencies.patterns[k] as RegExp;
+						return [k, { pattern: p.source, flags: p.flags }];
+					}),
+			),
+		},
 	};
 
 	for (const d of input.dispatches) {

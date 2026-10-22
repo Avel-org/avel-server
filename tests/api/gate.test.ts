@@ -68,9 +68,9 @@ let n = 0;
  * A repository at its pinned commit, and a source resolver that finds it
  * for any source and records each source it was asked for.
  */
-function repo() {
+function repo(files: Record<string, string> = FILES) {
 	const dir = path.join(base, `repo-${++n}`);
-	const [pinned] = makeRepo(dir, FILES) as [string];
+	const [pinned] = makeRepo(dir, files) as [string];
 	const rooms = worktreeRooms(path.join(base, `rooms-${n}`));
 	const asked: RoomSource[] = [];
 	const roomSources: RoomSourceResolver = {
@@ -491,6 +491,35 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 				"src/b.ts:2: matches github-token",
 			]);
 			expect(posted.receipt).not.toContain(key);
+		});
+	});
+
+	it("leaves a secret the client's base already had to the client, and lists a file too large to scan", async () => {
+		const key = `AKI${"A"}${"Q".repeat(16)}`;
+		const r = repo({ ...FILES, "src/config.ts": `const k = "${key}";\n` });
+		await gated(r, async (h, m) => {
+			await closedDispatch(h, m, r, {
+				// The work edits another line of the file that holds the client's key.
+				"src/config.ts": `const k = "${key}";\nexport const port = 4000;\n`,
+				// Over the scan limit: sized first, never read whole, listed.
+				"src/big.txt": "x".repeat(2 * 1024 * 1024),
+			});
+			await playbookFor(
+				h,
+				m,
+				[...QA_AND_ACCEPTANCE, { gate: "security", policy: "mandatory" }],
+				RUNNABLE_PLAN,
+			);
+			const res = await run(h, m.missionId);
+			expect(res.status, await res.clone().text()).toBe(201);
+			const posted = successEnvelope(gateRunSchema).parse(
+				await res.json(),
+			).data;
+			const security = posted.gates.find((g) => g.gate === "security");
+			expect(security?.reasons.map((x) => [x.findingId, x.effect])).toEqual([
+				["check:secret:src/big.txt:too-large", "block"],
+				["check:dependency", "pass"],
+			]);
 		});
 	});
 

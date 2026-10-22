@@ -54,7 +54,7 @@ import {
 import { buildReceipt, RECEIPT_VERSION } from "../lib/gate/receipt";
 import { ApiError } from "../middleware/errors";
 import type { FileChange } from "../rooms/checkpoint";
-import { git, readBlob } from "../rooms/git";
+import { type BlobRead, git, readBlobs } from "../rooms/git";
 import {
 	buildIntegrationCommit,
 	dispatchChanges,
@@ -360,29 +360,41 @@ export function gateRoutes(deps: GateDeps) {
 		const changed = Object.keys(head)
 			.filter((p) => base[p] !== head[p])
 			.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-		const scanned: SecretScanFile[] = [];
-		for (const p of changed) {
-			scanned.push({
+		const blobs = await readBlobs(
+			source,
+			changed.flatMap((p) => [
+				head[p] as string,
+				...(base[p] ? [base[p]] : []),
+			]),
+			GATE_CONFIG.secretScan.maxBytes,
+		);
+		const blob = (sha: string) => blobs.get(sha) as BlobRead;
+		const scanned: SecretScanFile[] = changed.map((p) => {
+			const h = blob(head[p] as string);
+			const b = base[p] === undefined ? null : blob(base[p]);
+			return {
 				path: p,
-				content: await readBlob(source, head[p] as string),
-			});
-		}
+				size: h.size,
+				bytes: h.bytes,
+				// A base blob too large to read whole gives no lines to discount.
+				base: b === null ? null : b.whole ? b.bytes : new Uint8Array(),
+			};
+		});
 		const manifests: DependencyManifest[] = [];
-		for (const f of scanned) {
-			if (f.path !== "package.json" && !f.path.endsWith("/package.json")) {
-				continue;
-			}
-			const before = base[f.path];
+		for (const p of changed) {
+			if (p !== "package.json" && !p.endsWith("/package.json")) continue;
+			const h = blob(head[p] as string);
+			const b = base[p] === undefined ? undefined : blob(base[p]);
 			manifests.push({
-				path: f.path,
-				base: before ? parseJson(await readBlob(source, before)) : undefined,
-				head: parseJson(f.content),
+				path: p,
+				base: b?.whole ? parseJson(b.bytes) : undefined,
+				head: h.whole ? parseJson(h.bytes) : undefined,
 			});
 		}
 
 		const findings: GateFinding[] = [
 			...specCheckFindings(m.brief, commitSha),
-			...secretScanFindings(scanned, commitSha),
+			...secretScanFindings(scanned, commitSha, GATE_CONFIG.secretScan),
 			...dependencyFindings(manifests, commitSha),
 			...briefCheckFindings(
 				brief.success ? brief.data.checks : [],
