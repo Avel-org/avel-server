@@ -29,9 +29,10 @@ import {
 	DECIDE_VERSION,
 	type Decision,
 	decide,
-	type GateAssurance,
 	type GateFinding,
-	storedAssurance,
+	type GateReason,
+	type GateResult,
+	resultOf,
 } from "../lib/gate";
 import { GATE_CONFIG } from "../lib/gate/config";
 import {
@@ -80,9 +81,8 @@ const REPLAYED = "idempotency-replayed";
 type GateRunPayload = {
 	commitSha: string;
 	baseSha: string;
-	verdict: "pass" | "block";
-	/** From decide() version 2; older rows read it from their receipt (assuranceOf). */
-	assurance?: GateAssurance;
+	/** From decide() version 3; older rows read it from their receipt (resultOfRun). */
+	result?: GateResult;
 	decideVersion: number;
 	receiptVersion: number;
 	configSha256: string;
@@ -108,33 +108,49 @@ function sideOf(roles: readonly Role[]): string | null {
 	return null;
 }
 
-/** The run's assurance: stored on the row, else read from its receipt's decision. */
-function assuranceOf(p: GateRunPayload): GateAssurance {
-	if (p.assurance !== undefined) return p.assurance;
-	return storedAssurance(
-		(JSON.parse(p.receipt) as { decision: Decision }).decision,
+/**
+ * A run's result: stored on the row from decide() version 3, else read
+ * from its receipt's reasons, which every version stores.
+ */
+function resultOfRun(p: GateRunPayload): GateResult {
+	if (p.result !== undefined) return p.result;
+	return resultOf(
+		(JSON.parse(p.receipt) as { decision: Pick<Decision, "reasons"> }).decision
+			.reasons,
 	);
 }
+
+/** A stored decision's gates; before version 3 each carried a verdict, not a result. */
+type StoredGate = Omit<Decision["gates"][number], "result"> & {
+	result?: GateResult;
+	reasons: GateReason[];
+};
 
 /** The run's wire shape, rebuilt from its activity row. */
 function toRun(
 	row: { id: string; at: Date; missionId: string | null },
 	p: GateRunPayload,
 ): GateRun {
-	const receipt = JSON.parse(p.receipt) as { decision: Decision };
+	const receipt = JSON.parse(p.receipt) as {
+		decision: Omit<Decision, "gates"> & { gates: StoredGate[] };
+	};
 	return {
 		id: row.id,
 		at: row.at.toISOString(),
 		missionId: row.missionId as string,
 		commitSha: p.commitSha,
 		baseSha: p.baseSha,
-		verdict: p.verdict,
-		assurance: assuranceOf(p),
+		result: resultOfRun(p),
 		decideVersion: p.decideVersion,
 		receiptVersion: p.receiptVersion,
 		configSha256: p.configSha256,
 		receiptSha256: p.receiptSha256,
-		gates: receipt.decision.gates,
+		gates: receipt.decision.gates.map((g) => ({
+			gate: g.gate,
+			policy: g.policy,
+			result: g.result ?? resultOf(g.reasons),
+			reasons: g.reasons,
+		})),
 		reasons: receipt.decision.reasons,
 		ignoredOverrides: receipt.decision.ignoredOverrides,
 		excludedDispatches: p.excludedDispatches,
@@ -161,7 +177,7 @@ async function liveMission(db: Executor | Tx, id: string) {
  * Module 9's gate, run by the operator (decided 2026-10-19). It judges one
  * integration commit: the mission's complete dispatches laid onto its pinned
  * commit in close order. Producers turn the commit and the mission's rows
- * into findings, decide() turns findings into a verdict, and the receipt
+ * into findings, decide() turns findings into a result, and the receipt
  * records all of it. No model is in this path.
  */
 export function gateRoutes(deps: GateDeps) {
@@ -511,8 +527,7 @@ export function gateRoutes(deps: GateDeps) {
 				const payload: GateRunPayload = {
 					commitSha: judged.commitSha,
 					baseSha: judged.baseSha,
-					verdict: judged.decision.verdict,
-					assurance: judged.decision.assurance,
+					result: judged.decision.result,
 					decideVersion: DECIDE_VERSION,
 					receiptVersion: RECEIPT_VERSION,
 					configSha256: parsed.config.sha256,
@@ -590,8 +605,7 @@ export function gateRoutes(deps: GateDeps) {
 						return {
 							id: r.id,
 							at: r.at.toISOString(),
-							verdict: p.verdict,
-							assurance: assuranceOf(p),
+							result: resultOfRun(p),
 							commitSha: p.commitSha,
 							baseSha: p.baseSha,
 							receiptSha256: p.receiptSha256,

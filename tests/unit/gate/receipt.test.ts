@@ -101,7 +101,7 @@ describe("buildReceipt", () => {
 			missionId: "m1",
 			commitSha: SHA,
 			baseSha: BASE,
-			verdict: "pass",
+			result: "verified",
 			overrides: [],
 			degraded: [],
 		});
@@ -115,7 +115,7 @@ describe("buildReceipt", () => {
 	it("carries an applied override with its rationale and operator", () => {
 		const findings = [check("t1", "qa", "fail"), passing[1] as GateFinding];
 		const r = buildReceipt(input(findings, [op(override("t1"))]));
-		expect(parse(r).verdict).toBe("pass");
+		expect(parse(r).result).toBe("pass");
 		expect(parse(r).overrides).toEqual([
 			{
 				findingId: "t1",
@@ -185,17 +185,14 @@ describe("buildReceipt", () => {
 		}
 	});
 
-	it("carries the decision's assurance: verified only when every counted check ran", () => {
-		expect(parse(buildReceipt(input(passing))).assurance).toBe("verified");
+	it("carries the decision's result: verified only when every counted check ran and passed", () => {
+		expect(parse(buildReceipt(input(passing))).result).toBe("verified");
 		const findings = [
 			...passing,
 			check("t3", "acceptance", "not_run", { source: "runner" }),
 		];
 		const body = parse(buildReceipt(input(findings)));
-		expect([body.verdict, body.assurance]).toEqual([
-			"pass",
-			"not_fully_checked",
-		]);
+		expect(body.result).toBe("pass");
 		expect(body.decision.notChecked).toEqual([
 			{
 				gate: "acceptance",

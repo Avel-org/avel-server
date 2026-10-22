@@ -117,8 +117,21 @@ async function setUp(h: ApiHarness) {
 	).id;
 	const gateB = (
 		await logged("mission.gate_run", {
-			verdict: "pass",
+			result: "verified",
 			commitSha: "c".repeat(40),
+		})
+	).id;
+	// Runs from before decide() version 3 stored a verdict, not a result.
+	const oldBlock = (
+		await logged("mission.gate_run", {
+			verdict: "block",
+			commitSha: "d".repeat(40),
+		})
+	).id;
+	const oldPass = (
+		await logged("mission.gate_run", {
+			verdict: "pass",
+			commitSha: "e".repeat(40),
 		})
 	).id;
 	const ofBRows: Record<FetchEntity, string> = {
@@ -150,7 +163,17 @@ async function setUp(h: ApiHarness) {
 		model,
 		logger: silentLogger(),
 	};
-	return { ...seeded, ofA, ofB, internal, ofBRows, call, model, deps };
+	return {
+		...seeded,
+		ofA,
+		ofB,
+		internal,
+		ofBRows,
+		gateRuns: { gateB, oldBlock, oldPass },
+		call,
+		model,
+		deps,
+	};
 }
 
 const inClient = (clientId: ClientId): CanonScope => ({
@@ -211,6 +234,20 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					expect(fromA, `A's ${entity}`).not.toContain(rowOfB);
 					expect(fromA, `A's ${entity}`).not.toContain(s.b.clientId);
 				}
+			}, asApp);
+		});
+
+		it("reads a gate run's result, and an old run's verdict as fail or pass, never verified", async () => {
+			await withApi(async (h) => {
+				const s = await setUp(h);
+				const rows = rowsOf(
+					await fetchData(h.tx, OPEN, { entity: "gate_runs", limit: 50 }),
+				);
+				const resultOf = (id: string) => rows.find((r) => r.id === id)?.result;
+				expect(resultOf(s.gateRuns.gateB)).toBe("verified");
+				expect(resultOf(s.gateRuns.oldBlock)).toBe("fail");
+				expect(resultOf(s.gateRuns.oldPass)).toBe("pass");
+				expect(rows.every((r) => !("verdict" in r))).toBe(true);
 			}, asApp);
 		});
 
