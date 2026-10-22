@@ -351,7 +351,6 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					expect(run.receiptSha256).toMatch(/^[0-9a-f]{64}$/);
 					expect(run.gates.map((g) => [g.gate, g.policy])).toEqual([
 						["qa", "mandatory"],
-						["security", "warn"],
 						["acceptance", "mandatory"],
 					]);
 					const spec = run.reasons.filter((r) => r.source === "spec-check");
@@ -362,8 +361,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						gate: "acceptance",
 						effect: "pass",
 					});
-					// What each listed gate saw. security has no producer, so decide()
-					// synthesizes a not-run warn. The test check needs a runner, so it
+					// What each listed gate saw. The test check needs a runner, so it
 					// is a degraded warn on a mandatory gate, and the mission still
 					// passes with no test run: the "not fully checked" gap.
 					expect(
@@ -386,11 +384,6 @@ describe.skipIf(!process.env.DATABASE_URL)(
 								["checkpoint:test-glob", "passed", "pass", false],
 								["spec-check", "passed", "pass", false],
 							],
-						},
-						{
-							gate: "security",
-							verdict: "warn",
-							reasons: [[null, "warn_not_run", "warn", false]],
 						},
 						{
 							gate: "acceptance",
