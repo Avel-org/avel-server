@@ -9,8 +9,9 @@ import {
 } from "../../src/lib/gate/producers";
 import { SEED_RUN_AT } from "./seed-run-at";
 
-// A mandatory gate that nothing feeds blocks every run, and no override can
-// clear it, so a seeded mission type with one could never pass.
+// A listed gate that nothing feeds has no evidence on any run. Mandatory, it
+// blocks every run and no override clears it; warn, it keeps every run from
+// verified, which is the only result that ships (J, 2026-10-21).
 const FED = new Set<string>([
 	BRIEF_CHECKS_GATE,
 	PROTECTED_PATHS_GATE,
@@ -22,10 +23,10 @@ const FED = new Set<string>([
 describe("seed playbooks", () => {
 	const rows = buildSeed(seedIds(), SEED_RUN_AT);
 
-	it("make mandatory only the gates some producer feeds", () => {
+	it("list only the gates some producer feeds, mandatory or warn", () => {
 		const unfed = rows.playbook.flatMap((p) =>
 			(p.gates ?? [])
-				.filter((g) => g.policy === "mandatory" && !FED.has(g.gate))
+				.filter((g) => !FED.has(g.gate))
 				.map((g) => `${p.missionType}:${g.gate}`),
 		);
 		expect(unfed).toEqual([]);
