@@ -391,7 +391,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					expect(
 						run.gates.map((g) => ({
 							gate: g.gate,
-							verdict: g.verdict,
+							result: g.result,
 							reasons: g.reasons.map((r) => [
 								r.source,
 								r.rule,
@@ -402,7 +402,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					).toEqual([
 						{
 							gate: "qa",
-							verdict: "pass",
+							result: "verified",
 							reasons: [
 								["checkpoint:protected-paths", "passed", "pass", false],
 								["checkpoint:test-glob", "passed", "pass", false],
@@ -416,21 +416,20 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						},
 						{
 							gate: "acceptance",
-							verdict: "warn",
+							result: "pass",
 							reasons: [
 								["runner", "degraded_not_run", "warn", true],
 								["file_exists", "passed", "pass", false],
 							],
 						},
 					]);
-					expect(run.verdict).toBe("pass");
-					// The pass ran no test, so it must not read as verified (J,
+					// The run ran no test, so it must not read as verified (J,
 					// 2026-10-21): a warn gate with no evidence and a degraded check
-					// both leave the run not fully checked.
+					// both leave it a pass, which does not ship.
 					expect(run).toMatchObject({
-						assurance: "not_fully_checked",
-						decideVersion: 2,
-						receiptVersion: 2,
+						result: "pass",
+						decideVersion: 3,
+						receiptVersion: 3,
 					});
 
 					// 10. The mission's activity, oldest first.

@@ -269,16 +269,15 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 			expect(posted.receiptSha256).toBe(
 				createHash("sha256").update(posted.receipt, "utf8").digest("hex"),
 			);
-			expect(posted.verdict).toBe("pass");
 			// The plan's test checks have no runner yet: degraded warns, never passes.
 			const degraded = posted.reasons.filter((x) => x.degraded);
 			expect(degraded.length).toBeGreaterThan(0);
 			for (const x of degraded) expect(x.effect).toBe("warn");
-			// So the pass is not a verified one, and the run says so.
-			expect(posted.assurance).toBe("not_fully_checked");
-			expect([posted.decideVersion, posted.receiptVersion]).toEqual([2, 2]);
+			// So the run is a pass, not verified, and it cannot ship.
+			expect(posted.result).toBe("pass");
+			expect([posted.decideVersion, posted.receiptVersion]).toEqual([3, 3]);
 			const receipt = JSON.parse(posted.receipt);
-			expect(receipt.assurance).toBe("not_fully_checked");
+			expect(receipt.result).toBe("pass");
 			expect(
 				receipt.decision.notChecked.map(
 					(n: { findingId: string }) => n.findingId,
@@ -291,7 +290,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 			expect(list.meta.total).toBe(1);
 			expect(list.data[0]?.id).toBe(posted.id);
 			expect(list.data[0]?.actor.kind).toBe("operator");
-			expect(list.data[0]?.assurance).toBe("not_fully_checked");
+			expect(list.data[0]?.result).toBe("pass");
 			const read = successEnvelope(gateRunSchema).parse(
 				await (
 					await h.call(`/api/missions/${m.missionId}/gate-runs/${posted.id}`)
@@ -310,15 +309,30 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 				);
 			expect(logged?.id).toBe(posted.id);
 
-			// A run stored before decide() version 2 has no assurance on its
-			// row or in its decision: it is read from the stored reasons. The
-			// log is append-only, so the old run is a second row beside it.
+			// A run stored before decide() version 3 has a verdict and an
+			// assurance, and its gates carry verdicts: its result is read from
+			// the stored reasons. The log is append-only, so the old run is a
+			// second row beside it.
 			if (!logged) throw new Error("no gate run row");
-			const v1 = JSON.parse(posted.receipt);
-			delete v1.assurance;
-			delete v1.decision.assurance;
-			delete v1.decision.notChecked;
-			const { assurance: _dropped, ...oldPayload } = logged.payload as Record<
+			const v2 = JSON.parse(posted.receipt);
+			delete v2.result;
+			delete v2.decision.result;
+			v2.verdict = "pass";
+			v2.assurance = "not_fully_checked";
+			v2.decision.verdict = "pass";
+			v2.decision.assurance = "not_fully_checked";
+			const verdictOf: Record<string, string> = {
+				verified: "pass",
+				pass: "warn",
+				fail: "block",
+			};
+			v2.decision.gates = v2.decision.gates.map(
+				({ result, ...g }: { result: string }) => ({
+					...g,
+					verdict: verdictOf[result],
+				}),
+			);
+			const { result: _dropped, ...oldPayload } = logged.payload as Record<
 				string,
 				unknown
 			>;
@@ -328,9 +342,11 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 				id: oldId,
 				payload: {
 					...oldPayload,
-					decideVersion: 1,
-					receiptVersion: 1,
-					receipt: JSON.stringify(v1),
+					verdict: "pass",
+					assurance: "not_fully_checked",
+					decideVersion: 2,
+					receiptVersion: 2,
+					receipt: JSON.stringify(v2),
 				},
 			});
 			const old = successEnvelope(gateRunSchema).parse(
@@ -338,16 +354,14 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 					await h.call(`/api/missions/${m.missionId}/gate-runs/${oldId}`)
 				).json(),
 			).data;
-			expect([old.decideVersion, old.assurance]).toEqual([
-				1,
-				"not_fully_checked",
-			]);
+			expect([old.decideVersion, old.result]).toEqual([2, "pass"]);
+			expect(old.gates.map((g) => g.result)).toEqual(
+				posted.gates.map((g) => g.result),
+			);
 			const oldList = gateRunListEnvelope.parse(
 				await (await h.call(`/api/missions/${m.missionId}/gate-runs`)).json(),
 			);
-			expect(oldList.data.find((x) => x.id === oldId)?.assurance).toBe(
-				"not_fully_checked",
-			);
+			expect(oldList.data.find((x) => x.id === oldId)?.result).toBe("pass");
 		});
 	});
 
@@ -395,7 +409,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 			const posted = successEnvelope(gateRunSchema).parse(
 				await res.json(),
 			).data;
-			expect(posted.verdict).toBe("block");
+			expect(posted.result).toBe("fail");
 			const violation = posted.reasons.find(
 				(x) => x.rule === "checkpoint_violation",
 			);
@@ -415,7 +429,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 					})
 				).json(),
 			).data;
-			expect(overridden.verdict).toBe("block");
+			expect(overridden.result).toBe("fail");
 			expect(overridden.ignoredOverrides[0]?.why).toBe("not_overridable");
 		});
 	});

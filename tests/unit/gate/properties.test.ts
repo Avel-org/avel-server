@@ -32,8 +32,8 @@ describe("decide properties", () => {
 					...s,
 					findings: s.findings.filter((f) => f.gate !== p.gate),
 				});
-				if (before.verdict === "block") exercised++;
-				expect(after.verdict, `seed ${seed}, gate ${p.gate}`).toBe("block");
+				if (before.result === "fail") exercised++;
+				expect(after.result, `seed ${seed}, gate ${p.gate}`).toBe("fail");
 			}
 		});
 		expect(exercised).toBeGreaterThan(100);
@@ -43,7 +43,7 @@ describe("decide properties", () => {
 		let exercised = 0;
 		forAll((s, seed) => {
 			const before = decideScenario(s);
-			if (before.verdict !== "block") return;
+			if (before.result !== "fail") return;
 			exercised++;
 			const r = rng(seed + 1_000_000);
 			let added = randomFinding(r, "added");
@@ -57,7 +57,7 @@ describe("decide properties", () => {
 					{ ...added, commitSha: r.next() < 0.8 ? SHA : OLD_SHA },
 				],
 			});
-			expect(after.verdict, `seed ${seed}`).toBe("block");
+			expect(after.result, `seed ${seed}`).toBe("fail");
 		});
 		expect(exercised).toBeGreaterThan(500);
 	});
@@ -101,7 +101,7 @@ describe("decide properties", () => {
 					})),
 				],
 			});
-			expect(d.verdict, `seed ${seed}`).toBe("block");
+			expect(d.result, `seed ${seed}`).toBe("fail");
 			for (const f of checkpoints) {
 				const reason = d.reasons.find(
 					(x) => x.findingId === f.id && x.kind === "checkpoint",
@@ -127,7 +127,7 @@ describe("decide properties", () => {
 						f === target ? { ...f, status: "confirmed" as const } : f,
 					),
 				});
-				expect(after.verdict, `seed ${seed}, ${target.id}`).toBe("block");
+				expect(after.result, `seed ${seed}, ${target.id}`).toBe("fail");
 			}
 		});
 		expect(exercised).toBeGreaterThan(100);
