@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { rmSync } from "node:fs";
 import path from "node:path";
 import { and, eq } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -12,7 +13,9 @@ import {
 import { closeDb } from "../../src/db/client";
 import {
 	activityLog,
+	agentTemplate,
 	completionReport,
+	finding,
 	mission,
 	playbook,
 	rosterPreset,
@@ -23,9 +26,12 @@ import { worktreeRooms } from "../../src/rooms/provider";
 import { snapshotDispatch } from "../../src/rooms/snapshot";
 import type { RoomSource, RoomSourceResolver } from "../../src/rooms/sources";
 import {
+	DISPATCH_PLAN,
 	dispatchValues,
 	insertDispatchRow,
 	reportValues,
+	type SeededAgent,
+	seedAgent,
 } from "../db/dispatch-fixtures";
 import { makeRepo, removeDir, tempDir, writeFiles } from "../unit/git-fixtures";
 import {
@@ -91,11 +97,14 @@ async function closedDispatch(
 	r: Repo,
 	files: Record<string, string> | null,
 	status: "complete" | "blocked" = "complete",
+	/** Another roster entry's agent, and paths the room deletes. */
+	opts: { agent?: SeededAgent; remove?: string[] } = {},
 ) {
+	const agent = opts.agent ?? m.agent;
 	const id = await insertDispatchRow(
 		h.tx,
 		m.ids,
-		dispatchValues(m.agent, m.ids, "complete"),
+		dispatchValues(agent, m.ids, "complete"),
 	);
 	let resultCommitSha: string | null = null;
 	if (files) {
@@ -106,6 +115,7 @@ async function closedDispatch(
 			writableGlobs: ["**"],
 		});
 		writeFiles(room.root, files);
+		for (const p of opts.remove ?? []) rmSync(path.join(room.root, p));
 		resultCommitSha = await snapshotDispatch(
 			room,
 			r.pinned,
@@ -118,12 +128,62 @@ async function closedDispatch(
 		.values(
 			reportValues(
 				m.ids,
-				{ id, missionId: m.missionId, rosterEntryId: m.agent.entryId },
+				{ id, missionId: m.missionId, rosterEntryId: agent.entryId },
 				{ status, resultCommitSha },
 			),
 		);
 	return id;
 }
+
+/** A playbook for a type of the call's own, made the mission's type, with `brief`. */
+async function playbookFor(
+	h: ApiHarness,
+	m: Mission,
+	gates: { gate: "qa" | "acceptance"; policy: "mandatory" | "warn" }[],
+	brief: unknown,
+) {
+	const type = `gate-${h.ns}`;
+	const presetId = m.ids.next();
+	await h.tx.insert(rosterPreset).values({
+		id: presetId,
+		name: `Preset ${h.ns}`,
+		description: null,
+		cut: "vertical",
+		agents: [],
+		version: 1,
+		...stamp(clock),
+	});
+	await h.tx.insert(playbook).values({
+		id: m.ids.next(),
+		missionType: type,
+		name: "Gate test",
+		wavesApplicable: ["A"],
+		gates,
+		deliverable: "pr",
+		requiredFields: [],
+		defaultPresetId: presetId,
+		version: 1,
+		...stamp(clock),
+	});
+	await h.tx
+		.update(mission)
+		.set({ type, brief: brief as never })
+		.where(eq(mission.id, m.missionId));
+}
+
+const QA_AND_ACCEPTANCE = [
+	{ gate: "qa", policy: "mandatory" },
+	{ gate: "acceptance", policy: "mandatory" },
+] as const;
+
+/** DISPATCH_PLAN with file_exists checks: R1 on a path only the work adds, R2 on one only the base had. */
+const FILE_CHECKS_PLAN = {
+	...DISPATCH_PLAN,
+	checks: [
+		{ id: "CK1", requirementId: "R1", kind: "file_exists", path: "src/b.ts" },
+		{ id: "CK2", requirementId: "R2", kind: "file_exists", path: "src/a.ts" },
+	],
+};
 
 const run = (
 	h: ApiHarness,
@@ -380,6 +440,96 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 			expect((await refusal(await run(h, m.missionId))).reason).toBe(
 				"mission_not_active",
 			);
+		});
+	});
+
+	it("checks file_exists against the integration commit, never the base", async () => {
+		const r = repo();
+		await gated(r, async (h, m) => {
+			await playbookFor(h, m, [...QA_AND_ACCEPTANCE], FILE_CHECKS_PLAN);
+			await closedDispatch(
+				h,
+				m,
+				r,
+				{ "src/b.ts": "export const b = 2;\n" },
+				"complete",
+				{ remove: ["src/a.ts"] },
+			);
+			const posted = successEnvelope(gateRunSchema).parse(
+				await (await run(h, m.missionId)).json(),
+			).data;
+			const of = (id: string) => posted.reasons.find((x) => x.findingId === id);
+			// src/b.ts exists only at head; src/a.ts only at the base.
+			expect([of("check:CK1:0")?.rule, of("check:CK2:1")?.rule]).toEqual([
+				"passed",
+				"mandatory_failed",
+			]);
+			expect(of("check:CK2:1")?.subject).toContain("does not exist");
+			expect(posted.verdict).toBe("block");
+		});
+	});
+
+	it("gathers every producer's findings into the run", async () => {
+		const r = repo();
+		await gated(r, async (h, m) => {
+			await playbookFor(h, m, [...QA_AND_ACCEPTANCE], FILE_CHECKS_PLAN);
+			// A judge on the roster: complete, with one open finding.
+			const judge = await seedAgent(h.tx, m.ids, m.missionId, "Vera");
+			await h.tx
+				.update(agentTemplate)
+				.set({ roles: ["security-review"] })
+				.where(eq(agentTemplate.id, judge.templateId));
+			const author = await closedDispatch(h, m, r, {
+				"src/b.ts": "export const b = 2;\n",
+				// A package.json that does not parse is protected as a whole file.
+				"package.json": "{ not json",
+			});
+			const judged = await closedDispatch(h, m, r, {}, "complete", {
+				agent: judge,
+			});
+			const open = m.ids.next();
+			await h.tx.insert(finding).values({
+				id: open,
+				missionId: m.missionId,
+				clientId: m.clientId,
+				rule: "no secrets in source",
+				subject: "src/b.ts",
+				severity: "high",
+				class: "security",
+				status: "open",
+				caughtBy: "judge",
+				reportedByDispatchId: judged,
+				idempotencyKey: `finding-${open}`,
+				requestSha256: "f".repeat(64),
+				...stamp(clock),
+			});
+
+			const res = await run(h, m.missionId);
+			expect(res.status, await res.clone().text()).toBe(201);
+			const posted = successEnvelope(gateRunSchema).parse(
+				await res.json(),
+			).data;
+			const rules = Object.fromEntries(
+				posted.reasons.map((x) => [x.findingId, x.rule]),
+			);
+			expect(rules).toMatchObject({
+				// spec-check, on the brief
+				"spec-check:R1": "passed",
+				"spec-check:R2": "passed",
+				// the brief's file_exists checks
+				"check:CK1:0": "passed",
+				// protected paths, with an unparseable package.json protected whole
+				"checkpoint:protected:package.json": "checkpoint_violation",
+				// the test-file checkpoint, once per dispatch
+				[`checkpoint:test-glob:${author}:src/b.ts`]: "passed",
+				[`checkpoint:test-glob:${author}:package.json`]: "passed",
+				[`checkpoint:test-glob:${judged}`]: "passed",
+				// judge coverage: complete with one open finding is a fail
+				[`judge-coverage:${judge.entryId}`]: "mandatory_failed",
+				// the open finding itself blocks
+				[open]: "judge_open",
+			});
+			expect(posted.verdict).toBe("block");
 		});
 	});
 
