@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Brief, BriefCheck } from "../../../src/contract";
-import { decide } from "../../../src/lib/gate";
+import { decide, type GateFinding } from "../../../src/lib/gate";
 import {
 	briefCheckFindings,
 	type JudgeRun,
@@ -256,6 +256,8 @@ describe("testGlobFindings", () => {
 
 describe("briefCheckFindings", () => {
 	const tree = { "src/day.ts": "a1", "src/lib/x.ts": "b2" };
+	/** The base had neither path, so every path in tree is the work's. */
+	const empty = {};
 
 	it("passes a file_exists check whose path is in the tree, and fails one that is not", () => {
 		const fs = briefCheckFindings(
@@ -280,6 +282,7 @@ describe("briefCheckFindings", () => {
 				},
 			],
 			tree,
+			empty,
 			SHA,
 		);
 		expect(outcomes(fs)).toEqual([
@@ -301,6 +304,7 @@ describe("briefCheckFindings", () => {
 				},
 			],
 			{ "src/a.ts": "a1" },
+			empty,
 			SHA,
 		);
 		expect(outcomes(fs)).toEqual(["check:CK1:0:error"]);
@@ -314,6 +318,7 @@ describe("briefCheckFindings", () => {
 				{ id: "CK3", requirementId: "R1", kind: "command", command: "make" },
 			],
 			tree,
+			empty,
 			SHA,
 		);
 		expect(outcomes(fs)).toEqual([
@@ -343,9 +348,40 @@ describe("briefCheckFindings", () => {
 			},
 		];
 		const reversed = Object.fromEntries(Object.entries(tree).reverse());
-		expect(briefCheckFindings(checks, reversed, SHA)).toEqual(
-			briefCheckFindings(checks, tree, SHA),
+		expect(briefCheckFindings(checks, reversed, empty, SHA)).toEqual(
+			briefCheckFindings(checks, tree, empty, SHA),
 		);
+	});
+
+	it("passes only a path the work created or changed (J, 2026-10-21)", () => {
+		const check = (path: string): BriefCheck => ({
+			id: "CK1",
+			requirementId: "R1",
+			kind: "file_exists",
+			path,
+		});
+		const base = { "src/day.ts": "a1", "src/lib/x.ts": "old" };
+		const head = {
+			"src/day.ts": "a1",
+			"src/lib/x.ts": "b2",
+			"src/new.ts": "n",
+		};
+		const one = (path: string, from = base) =>
+			briefCheckFindings([check(path)], head, from, SHA)[0] as GateFinding & {
+				outcome: string;
+				subject: string;
+			};
+		// Created, and changed.
+		expect(one("src/new.ts").outcome).toBe("pass");
+		expect(one("src/lib/x.ts").outcome).toBe("pass");
+		// There, but as the base had it: the base proves nothing about the work.
+		expect(one("src/day.ts").outcome).toBe("fail");
+		expect(one("src/day.ts").subject).toContain("unchanged from the base");
+		// A glob passes when any path it matches is the work's.
+		expect(one("src/*.ts").outcome).toBe("pass");
+		// Nothing changed at all: every check fails.
+		expect(one("src/new.ts", head).outcome).toBe("fail");
+		expect(one("src/gone.ts").subject).toContain("does not exist");
 	});
 });
 

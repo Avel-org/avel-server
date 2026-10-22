@@ -122,7 +122,7 @@ export const gateRun = z.object({
 	receiptVersion: z.number().int().positive(),
 	configSha256: sha256,
 	receiptSha256: sha256,
-	/** Listed gates only, in GATES order. */
+	/** Listed gates, and an unlisted gate holding the brief's checks (as mandatory), in GATES order. */
 	gates: z.array(
 		z.object({
 			gate,

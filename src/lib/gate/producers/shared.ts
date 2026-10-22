@@ -1,7 +1,7 @@
 import type { GateFinding } from "../types";
 
 /** Code-unit order, never locale order (DEV-TIPS §2). */
-function cmp(a: string, b: string): number {
+export function cmp(a: string, b: string): number {
 	return a < b ? -1 : a > b ? 1 : 0;
 }
 

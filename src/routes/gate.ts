@@ -41,16 +41,20 @@ import {
 } from "../lib/gate/integration";
 import {
 	briefCheckFindings,
+	type DependencyManifest,
+	dependencyFindings,
 	type JudgeRun,
 	judgeCoverageFindings,
 	protectedPathFindings,
+	type SecretScanFile,
+	secretScanFindings,
 	specCheckFindings,
 	testGlobFindings,
 } from "../lib/gate/producers";
 import { buildReceipt, RECEIPT_VERSION } from "../lib/gate/receipt";
 import { ApiError } from "../middleware/errors";
 import type { FileChange } from "../rooms/checkpoint";
-import { git } from "../rooms/git";
+import { type BlobRead, git, readBlobs } from "../rooms/git";
 import {
 	buildIntegrationCommit,
 	dispatchChanges,
@@ -193,6 +197,13 @@ export function gateRoutes(deps: GateDeps) {
 				missionId: m.id,
 			});
 		}
+
+		const [pb] = await tx
+			.select({ gates: playbook.gates })
+			.from(playbook)
+			.where(and(eq(playbook.missionType, m.type), live(playbook)));
+		const policy: PlaybookGate[] = pb?.gates ?? [];
+		const brief = briefSchema.safeParse(m.brief);
 
 		const runs = await tx
 			.select({
@@ -345,12 +356,50 @@ export function gateRoutes(deps: GateDeps) {
 			};
 		}
 
-		const brief = briefSchema.safeParse(m.brief);
+		// The security gate reads what the work added or changed, never the base's own files.
+		const changed = Object.keys(head)
+			.filter((p) => base[p] !== head[p])
+			.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+		const blobs = await readBlobs(
+			source,
+			changed.flatMap((p) => [
+				head[p] as string,
+				...(base[p] ? [base[p]] : []),
+			]),
+			GATE_CONFIG.secretScan.maxBytes,
+		);
+		const blob = (sha: string) => blobs.get(sha) as BlobRead;
+		const scanned: SecretScanFile[] = changed.map((p) => {
+			const h = blob(head[p] as string);
+			const b = base[p] === undefined ? null : blob(base[p]);
+			return {
+				path: p,
+				size: h.size,
+				bytes: h.bytes,
+				// A base blob too large to read whole gives no lines to discount.
+				base: b === null ? null : b.whole ? b.bytes : new Uint8Array(),
+			};
+		});
+		const manifests: DependencyManifest[] = [];
+		for (const p of changed) {
+			if (p !== "package.json" && !p.endsWith("/package.json")) continue;
+			const h = blob(head[p] as string);
+			const b = base[p] === undefined ? undefined : blob(base[p]);
+			manifests.push({
+				path: p,
+				base: b?.whole ? parseJson(b.bytes) : undefined,
+				head: h.whole ? parseJson(h.bytes) : undefined,
+			});
+		}
+
 		const findings: GateFinding[] = [
 			...specCheckFindings(m.brief, commitSha),
+			...secretScanFindings(scanned, commitSha, GATE_CONFIG.secretScan),
+			...dependencyFindings(manifests, commitSha),
 			...briefCheckFindings(
 				brief.success ? brief.data.checks : [],
 				head,
+				base,
 				commitSha,
 			),
 			...protectedPathFindings({
@@ -438,12 +487,6 @@ export function gateRoutes(deps: GateDeps) {
 				}),
 			),
 		);
-
-		const [pb] = await tx
-			.select({ gates: playbook.gates })
-			.from(playbook)
-			.where(and(eq(playbook.missionType, m.type), live(playbook)));
-		const policy: PlaybookGate[] = pb?.gates ?? [];
 
 		const decision = decide(findings, policy, overrides, {
 			commitSha,
@@ -653,6 +696,15 @@ export function gateRoutes(deps: GateDeps) {
 			};
 		},
 	});
+}
+
+/** Parsed JSON, or undefined when the bytes are not JSON. */
+function parseJson(bytes: Uint8Array): unknown {
+	try {
+		return JSON.parse(new TextDecoder().decode(bytes));
+	} catch {
+		return undefined;
+	}
 }
 
 /** Gate runs page on (at desc, id desc), the activity feed's own order. */

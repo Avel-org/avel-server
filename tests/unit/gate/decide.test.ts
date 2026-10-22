@@ -18,6 +18,9 @@ const run = (
 	cfg = config,
 ) => decide(findings, policy, overrides, cfg);
 
+const notCheckedIds = (d: ReturnType<typeof decide>) =>
+	d.notChecked.map((n) => n.findingId);
+
 const rules = (d: ReturnType<typeof decide>) =>
 	d.reasons.map((r) => `${r.findingId}:${r.rule}:${r.effect}`);
 
@@ -303,6 +306,54 @@ describe("decide", () => {
 				"t1:stale_commit:ignored",
 				"not_run:qa:mandatory_not_run:block",
 			]);
+		});
+	});
+
+	describe("f. the brief's own checks count on an unlisted gate (version 4)", () => {
+		it("counts a file_exists fail as mandatory when acceptance is not listed", () => {
+			const brief = check("ck", "acceptance", "fail", {
+				source: "file_exists",
+			});
+			const d = run([check("t1", "qa", "pass"), brief]);
+			expect(d.result).toBe("fail");
+			expect(rules(d)).toContain("ck:mandatory_failed:block");
+		});
+
+		it("keeps a runner check that did not run from verified", () => {
+			const brief = check("ck", "acceptance", "not_run", { source: "runner" });
+			const d = run([check("t1", "qa", "pass"), brief]);
+			expect(d.result).toBe("pass");
+			expect(notCheckedIds(d)).toEqual(["ck"]);
+		});
+
+		it("still ignores another source's finding on an unlisted gate", () => {
+			const other = check("x", "acceptance", "fail", { source: "spec-check" });
+			expect(rules(run([check("t1", "qa", "pass"), other]))).toContain(
+				"x:unlisted_gate:ignored",
+			);
+		});
+
+		it("shows the unlisted gate in gates, as mandatory, so a fail has a gate that explains it", () => {
+			const brief = check("ck", "acceptance", "fail", {
+				source: "file_exists",
+			});
+			const d = run([check("t1", "qa", "pass"), brief]);
+			expect(d.gates.map((g) => [g.gate, g.policy, g.result])).toEqual([
+				["qa", "mandatory", "verified"],
+				["acceptance", "mandatory", "fail"],
+			]);
+			// No brief check, no unlisted gate.
+			expect(run([check("t1", "qa", "pass")]).gates.map((g) => g.gate)).toEqual(
+				["qa"],
+			);
+		});
+
+		it("counts a brief-check source only on the brief's own gate", () => {
+			const elsewhere = check("r", "security", "not_run", { source: "runner" });
+			const d = run([check("t1", "qa", "pass"), elsewhere]);
+			expect(rules(d)).toContain("r:unlisted_gate:ignored");
+			expect(d.result).toBe("verified");
+			expect(d.gates.map((g) => g.gate)).toEqual(["qa"]);
 		});
 	});
 

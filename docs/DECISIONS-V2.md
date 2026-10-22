@@ -958,7 +958,7 @@ J decided both on 2026-10-21, in a BE Main session.
 
 - **`template-booking` lists no `phase1-close` until something produces its evidence.** A mandatory gate with no evidence blocks, and no override clears it, so the seeded playbook could never pass. A producer waits on the client-conformance artifact (`CLIENT-CONTRACT-CONFORMANCE.md`), which is unspecified. `tests/unit/seed-playbook.test.ts` refuses any seeded mandatory gate that no producer feeds.
 - **The spec check reports on `qa`, not `alignment`.** `alignment` keeps the meaning the docs give it: phase 2 conforms to the phase-1 interface. The spec check asks whether every requirement has a criterion and a check, which is a quality-of-the-plan question. The Booking playbook does not list `alignment`, so the spec check's results were being ignored.
-- **`security` stays on `template-booking`** (J, later the same day). It was taken off only to try a seeded mission, and doing so let an empty run reach `verified` (the gate audit, 2026-10-21). A listed gate that nothing feeds is to be refused before the run, not removed from the playbook.
+- **`security` stays on `template-booking`** (J, later the same day). It was taken off only to try a seeded mission, and doing so let an empty run reach `verified` (the gate audit, 2026-10-21). A listed gate that nothing feeds is recorded as not checked, which keeps the run from `verified`, instead of being removed from the playbook (*no gate without its tools*).
 
 ---
 
@@ -1007,6 +1007,34 @@ J decided this on 2026-10-21, while settling render and delivery. A run, and eac
 - **No reasons is a `pass`.** A playbook that lists no gate checked nothing.
 - **Old runs.** A stored run of decide() version 1 or 2 gets its result from its receipt's reasons, the same rule, so its result does not depend on which version wrote it. Canon's fetch tool reads no receipt, so it reads an old run's verdict `block` as `fail` and `pass` as `pass`, never `verified`.
 - **Consequence.** Today the Booking playbook's `security` gate has no producer and its test checks have no runner, so no Booking mission can reach `verified`. Shipping needs both, or a playbook change.
+
+
+## Decided 2026-10-21: no gate without its tools
+
+J decided this on 2026-10-21, after a gate audit showed a run reaching `verified` on work that was never done. J's requirement: nothing is trusted without the proper test tools and materials.
+
+- **The gate always runs, and records what it could not check.** A listed gate no producer feeds gets a not-checked reason ("Not checked: nothing reported on the security gate at this commit"), and a brief check whose tool is not installed is a degraded not_run. Both are listed in the receipt's `notChecked`, so the run cannot be `verified`, and only `verified` work is delivered. The rule holds at shipping, not at running.
+- **Rejected: refusing the run up front** (`gate_unproduced`, `check_unrunnable`, built and withdrawn the same day). J: "this is not good practice for the gates". A refused run leaves no receipt, shows nothing of what did pass, and reveals one gap at a time.
+- **The brief's checks always count** (`decide()` version 4). A requirement's check is no longer ignored because the playbook leaves its gate out; it counts as on a mandatory gate.
+- **`file_exists` means the work created or changed the path.** A path the base already had, unchanged, fails: the base proves nothing about the work.
+- **An integration commit that changed nothing is not judged** (`nothing_to_judge`, the tree equals the base's).
+- **Consequence.** Every Booking run is `pass` today, never `verified`: `security` has no producer and the plan's test checks have no runner. It becomes `verified` when the runner exists (*Making the gate judge real work*, step 1: an AVEL-owned mirror on GitHub Actions) and a security producer that only reads code is installed.
+- **Open.** A brief whose checks are all `file_exists` can still reach `verified` with no test run, and qa can be `verified` on the spec check and the checkpoints alone. Judges review the mission's base, not the integration commit, so a judge never sees the work it is counted as reviewing.
+
+
+## Decided 2026-10-22: the security gate reads the work
+
+J asked for the security checks to start (2026-10-22). They are the code-reading half of *Making the gate judge real work* step 0.3, built inside the gate instead of as gitleaks and Semgrep binaries, so they need nothing installed. Their rules are fields of `GATE_CONFIG`, so the receipt's config hash changes whenever a rule does, with or without a version bump.
+
+- **Only what the work added is the mission's.** The scan reads every path whose blob at the integration commit differs from the base's, and drops a match on a line the base had, word for word, at the same path. A secret the base already had is the client's. A renamed file reads as a delete and an add, so a secret it carries counts as added.
+- **The secret scan** (`secret-scan`) fails a match of a credential with a fixed, documented shape: private key blocks, AWS access key ids, GitHub, Slack, Stripe live, Google, Anthropic and OpenAI keys. It also fails a `.env` or `.env.*` the base did not have, unless its last segment marks a template (`example`, `sample`, `template`, `dist`, `defaults`, `schema`). A finding names the path, line and rule, never the matched text, because the receipt is kept and shared.
+- **No entropy rule.** A high-entropy string is as often a hash or a fixture. A check that fails on guesses trains people to override it.
+- **Size first, then bytes.** Every blob is sized before it is read. Binary files (a NUL in the first 8000 bytes, git's own test) are not scanned and are named in the pass. A text file over 1 MiB is never read whole; it is an error, so it is listed as not checked. A large file never makes the run fail to answer.
+- **The dependency check** (`dependencies`) reads every package.json the work added or changed. Each added or changed entry in `dependencies`, `devDependencies`, `optionalDependencies`, `peerDependencies`, `overrides`, `resolutions` or `pnpm.overrides` must be a valid npm name with a registry specifier. A git, URL, `file:`, `link:` or tarball-filename specifier fails. `workspace:` and `catalog:` pass. An override may use npm's `$name` reference, and a nested npm override is read entry by entry, so reordering its keys is no change.
+- **Whether a new name exists in the registry is not checked by the gate.** That needs the network, and the gate's inputs are the commit and the database. Each new registry dependency is a `not_run` from `registry`, a source that is not installed, so it is listed as not checked and the run cannot be `verified`. The runner's frozen-lockfile install is meant to feed it.
+- **Auth rules** ("every route calls the auth check") depend on each repo's framework, so they come per framework, written against a repo with routes.
+- **Supersedes** the 2026-10-21 consequences above that say `security` has no producer. Current status is in `STATE.md`.
+- **The brief's own checks are shown under their gate** (`decide()`, same day, from code review). Brief checks count on `acceptance` even when the playbook leaves it out, so that gate is listed in the run's `gates` as mandatory; a run can no longer fail with no gate showing why. Only `file_exists` and `runner` findings on `acceptance` get this treatment, so a runner check on another gate follows that gate's policy.
 
 ---
 

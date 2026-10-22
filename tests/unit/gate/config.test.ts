@@ -3,23 +3,26 @@ import { GATES } from "../../../src/contract/playbook";
 import { GATE_CONFIG } from "../../../src/lib/gate/config";
 import {
 	DEFAULT_PROTECTED_PATHS,
+	DEPENDENCIES_SOURCE,
 	FILE_EXISTS_SOURCE,
 	JUDGE_COVERAGE_SOURCE,
 	PROTECTED_PATHS_SOURCE,
+	REGISTRY_SOURCE,
 	RUNNER_SOURCE,
+	SECRET_SCAN_SOURCE,
 	SPEC_CHECK_SOURCE,
 	TEST_GLOB_SOURCE,
 } from "../../../src/lib/gate/producers";
 import { matchesGlob, supportedGlob } from "../../../src/rooms/globs";
 
 describe("GATE_CONFIG", () => {
-	it("is version 1, with coverage on the qa gate", () => {
-		expect(GATE_CONFIG.version).toBe(1);
+	it("is version 2, with coverage on the qa gate", () => {
+		expect(GATE_CONFIG.version).toBe(2);
 		expect(GATE_CONFIG.judgeCoverageGate).toBe("qa");
 		expect(GATES).toContain(GATE_CONFIG.judgeCoverageGate);
 	});
 
-	it("installs every producer's source and no runner", () => {
+	it("installs every producer's source, and neither the runner nor the registry", () => {
 		expect([...GATE_CONFIG.availableSources].sort()).toEqual(
 			[
 				SPEC_CHECK_SOURCE,
@@ -27,9 +30,12 @@ describe("GATE_CONFIG", () => {
 				TEST_GLOB_SOURCE,
 				PROTECTED_PATHS_SOURCE,
 				JUDGE_COVERAGE_SOURCE,
+				SECRET_SCAN_SOURCE,
+				DEPENDENCIES_SOURCE,
 			].sort(),
 		);
 		expect(GATE_CONFIG.availableSources).not.toContain(RUNNER_SOURCE);
+		expect(GATE_CONFIG.availableSources).not.toContain(REGISTRY_SOURCE);
 	});
 
 	it("protects the default paths", () => {

@@ -5,6 +5,7 @@ import { and, eq } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import {
 	errorEnvelope,
+	type Gate,
 	gateRunListEnvelope,
 	gateRun as gateRunSchema,
 	preconditionDetails,
@@ -67,9 +68,9 @@ let n = 0;
  * A repository at its pinned commit, and a source resolver that finds it
  * for any source and records each source it was asked for.
  */
-function repo() {
+function repo(files: Record<string, string> = FILES) {
 	const dir = path.join(base, `repo-${++n}`);
-	const [pinned] = makeRepo(dir, FILES) as [string];
+	const [pinned] = makeRepo(dir, files) as [string];
 	const rooms = worktreeRooms(path.join(base, `rooms-${n}`));
 	const asked: RoomSource[] = [];
 	const roomSources: RoomSourceResolver = {
@@ -139,7 +140,7 @@ async function closedDispatch(
 async function playbookFor(
 	h: ApiHarness,
 	m: Mission,
-	gates: { gate: "qa" | "acceptance"; policy: "mandatory" | "warn" }[],
+	gates: { gate: Gate; policy: "mandatory" | "warn" }[],
 	brief: unknown,
 ) {
 	const type = `gate-${h.ns}`;
@@ -185,6 +186,20 @@ const FILE_CHECKS_PLAN = {
 	],
 };
 
+/**
+ * DISPATCH_PLAN with checks the gate can run: a file_exists on src/** for
+ * each requirement, which every dispatch here satisfies by writing under
+ * src/. DISPATCH_PLAN's own test checks have no runner, so a run on it
+ * lists them as not checked and is never verified.
+ */
+const RUNNABLE_PLAN = {
+	...DISPATCH_PLAN,
+	checks: [
+		{ id: "CK1", requirementId: "R1", kind: "file_exists", path: "src/**" },
+		{ id: "CK2", requirementId: "R2", kind: "file_exists", path: "src/**" },
+	],
+};
+
 const run = (
 	h: ApiHarness,
 	missionId: string,
@@ -213,6 +228,10 @@ async function gated(
 			await h.signIn();
 			const m = await activeMission(h.tx, runnerIds(h.ns));
 			await pinTo(h.tx, m, r.pinned);
+			await h.tx
+				.update(mission)
+				.set({ brief: RUNNABLE_PLAN as never })
+				.where(eq(mission.id, m.missionId));
 			await fn(h, m);
 		},
 		{ roomSources: r.roomSources },
@@ -269,20 +288,13 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 			expect(posted.receiptSha256).toBe(
 				createHash("sha256").update(posted.receipt, "utf8").digest("hex"),
 			);
-			// The plan's test checks have no runner yet: degraded warns, never passes.
-			const degraded = posted.reasons.filter((x) => x.degraded);
-			expect(degraded.length).toBeGreaterThan(0);
-			for (const x of degraded) expect(x.effect).toBe("warn");
-			// So the run is a pass, not verified, and it cannot ship.
-			expect(posted.result).toBe("pass");
-			expect([posted.decideVersion, posted.receiptVersion]).toEqual([3, 3]);
+			// Every check ran and passed, so the run is verified.
+			expect(posted.reasons.filter((x) => x.degraded)).toEqual([]);
+			expect(posted.result).toBe("verified");
+			expect([posted.decideVersion, posted.receiptVersion]).toEqual([4, 4]);
 			const receipt = JSON.parse(posted.receipt);
-			expect(receipt.result).toBe("pass");
-			expect(
-				receipt.decision.notChecked.map(
-					(n: { findingId: string }) => n.findingId,
-				),
-			).toEqual(expect.arrayContaining(degraded.map((x) => x.findingId)));
+			expect(receipt.result).toBe("verified");
+			expect(receipt.decision.notChecked).toEqual([]);
 
 			const list = gateRunListEnvelope.parse(
 				await (await h.call(`/api/missions/${m.missionId}/gate-runs`)).json(),
@@ -290,7 +302,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 			expect(list.meta.total).toBe(1);
 			expect(list.data[0]?.id).toBe(posted.id);
 			expect(list.data[0]?.actor.kind).toBe("operator");
-			expect(list.data[0]?.result).toBe("pass");
+			expect(list.data[0]?.result).toBe("verified");
 			const read = successEnvelope(gateRunSchema).parse(
 				await (
 					await h.call(`/api/missions/${m.missionId}/gate-runs/${posted.id}`)
@@ -318,9 +330,9 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 			delete v2.result;
 			delete v2.decision.result;
 			v2.verdict = "pass";
-			v2.assurance = "not_fully_checked";
+			v2.assurance = "verified";
 			v2.decision.verdict = "pass";
-			v2.decision.assurance = "not_fully_checked";
+			v2.decision.assurance = "verified";
 			const verdictOf: Record<string, string> = {
 				verified: "pass",
 				pass: "warn",
@@ -343,7 +355,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 				payload: {
 					...oldPayload,
 					verdict: "pass",
-					assurance: "not_fully_checked",
+					assurance: "verified",
 					decideVersion: 2,
 					receiptVersion: 2,
 					receipt: JSON.stringify(v2),
@@ -354,14 +366,14 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 					await h.call(`/api/missions/${m.missionId}/gate-runs/${oldId}`)
 				).json(),
 			).data;
-			expect([old.decideVersion, old.result]).toEqual([2, "pass"]);
+			expect([old.decideVersion, old.result]).toEqual([2, "verified"]);
 			expect(old.gates.map((g) => g.result)).toEqual(
 				posted.gates.map((g) => g.result),
 			);
 			const oldList = gateRunListEnvelope.parse(
 				await (await h.call(`/api/missions/${m.missionId}/gate-runs`)).json(),
 			);
-			expect(oldList.data.find((x) => x.id === oldId)?.result).toBe("pass");
+			expect(oldList.data.find((x) => x.id === oldId)?.result).toBe("verified");
 		});
 	});
 
@@ -383,6 +395,10 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 					})
 					.where(eq(mission.id, m.missionId));
 				expect(TEMPLATE_COMMIT).not.toBe(r.pinned);
+				await h.tx
+					.update(mission)
+					.set({ brief: RUNNABLE_PLAN as never })
+					.where(eq(mission.id, m.missionId));
 				await closedDispatch(h, m, r, { "src/b.ts": "export const b = 2;\n" });
 				const res = await run(h, m.missionId);
 				expect(res.status, await res.clone().text()).toBe(201);
@@ -396,6 +412,149 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 			},
 			{ roomSources: r.roomSources },
 		);
+	});
+
+	it("runs without the tools for every check, and lists what it could not check", async () => {
+		const r = repo();
+		await gated(r, async (h, m) => {
+			await closedDispatch(h, m, r, { "src/b.ts": "export const b = 2;\n" });
+			// rollback has no producer, and the plan's test checks no runner.
+			await playbookFor(
+				h,
+				m,
+				[...QA_AND_ACCEPTANCE, { gate: "rollback", policy: "warn" }],
+				DISPATCH_PLAN,
+			);
+			const res = await run(h, m.missionId);
+			expect(res.status, await res.clone().text()).toBe(201);
+			const posted = successEnvelope(gateRunSchema).parse(
+				await res.json(),
+			).data;
+			// It ran and recorded what passed...
+			expect(posted.gates.map((g) => [g.gate, g.result])).toEqual([
+				["qa", "verified"],
+				["rollback", "pass"],
+				["acceptance", "pass"],
+			]);
+			// ...and names each thing it could not check, so it is not verified
+			// and cannot ship (J, 2026-10-21).
+			expect(posted.result).toBe("pass");
+			const receipt = JSON.parse(posted.receipt);
+			expect(
+				receipt.decision.notChecked.map(
+					(n: { findingId: string; source: string | null }) =>
+						`${n.findingId}:${n.source}`,
+				),
+			).toEqual([
+				"not_run:rollback:null",
+				"check:CK1:0:runner",
+				"check:CK2:1:runner",
+			]);
+			const rollback = posted.reasons.find(
+				(x) => x.findingId === "not_run:rollback",
+			);
+			expect(rollback?.message).toBe(
+				"Not checked: nothing reported on the rollback gate at this commit",
+			);
+		});
+	});
+
+	it("fails security on a secret the work committed, and keeps the secret out of the receipt", async () => {
+		const r = repo();
+		// Built at run time, so this file holds no literal a push-protection scanner reads as a key.
+		const key = `gh${"p_"}${"a1".repeat(18)}`;
+		await gated(r, async (h, m) => {
+			await closedDispatch(h, m, r, {
+				"src/b.ts": `export const b = 2;\nconst token = "${key}";\n`,
+				".env": "PORT=3000\n",
+			});
+			await playbookFor(
+				h,
+				m,
+				[...QA_AND_ACCEPTANCE, { gate: "security", policy: "mandatory" }],
+				RUNNABLE_PLAN,
+			);
+			const res = await run(h, m.missionId);
+			expect(res.status, await res.clone().text()).toBe(201);
+			const posted = successEnvelope(gateRunSchema).parse(
+				await res.json(),
+			).data;
+			expect(posted.result).toBe("fail");
+			const security = posted.gates.find((g) => g.gate === "security");
+			expect(security?.result).toBe("fail");
+			expect(
+				security?.reasons
+					.filter((x) => x.effect === "block")
+					.map((x) => x.subject),
+			).toEqual([
+				".env: an environment file is committed",
+				"src/b.ts:2: matches github-token",
+			]);
+			expect(posted.receipt).not.toContain(key);
+		});
+	});
+
+	it("leaves a secret the client's base already had to the client, and lists a file too large to scan", async () => {
+		const key = `AKI${"A"}${"Q".repeat(16)}`;
+		const r = repo({ ...FILES, "src/config.ts": `const k = "${key}";\n` });
+		await gated(r, async (h, m) => {
+			await closedDispatch(h, m, r, {
+				// The work edits another line of the file that holds the client's key.
+				"src/config.ts": `const k = "${key}";\nexport const port = 4000;\n`,
+				// Over the scan limit: sized first, never read whole, listed.
+				"src/big.txt": "x".repeat(2 * 1024 * 1024),
+			});
+			await playbookFor(
+				h,
+				m,
+				[...QA_AND_ACCEPTANCE, { gate: "security", policy: "mandatory" }],
+				RUNNABLE_PLAN,
+			);
+			const res = await run(h, m.missionId);
+			expect(res.status, await res.clone().text()).toBe(201);
+			const posted = successEnvelope(gateRunSchema).parse(
+				await res.json(),
+			).data;
+			const security = posted.gates.find((g) => g.gate === "security");
+			expect(security?.reasons.map((x) => [x.findingId, x.effect])).toEqual([
+				["check:secret:src/big.txt:too-large", "block"],
+				["check:dependency", "pass"],
+			]);
+		});
+	});
+
+	it("verifies security on clean work, and lists a new dependency as not checked", async () => {
+		const r = repo();
+		await gated(r, async (h, m) => {
+			await closedDispatch(h, m, r, {
+				"src/b.ts": "export const b = 2;\n",
+				"package.json":
+					'{ "name": "salon", "scripts": { "test": "vitest run" }, "dependencies": { "zod": "^4.0.0" } }\n',
+			});
+			await playbookFor(
+				h,
+				m,
+				[...QA_AND_ACCEPTANCE, { gate: "security", policy: "warn" }],
+				RUNNABLE_PLAN,
+			);
+			const res = await run(h, m.missionId);
+			const posted = successEnvelope(gateRunSchema).parse(
+				await res.json(),
+			).data;
+			// No secret, but nothing here can ask the registry whether zod exists.
+			expect(posted.gates.map((g) => [g.gate, g.result])).toEqual([
+				["qa", "verified"],
+				["security", "pass"],
+				["acceptance", "verified"],
+			]);
+			expect(
+				JSON.parse(posted.receipt).decision.notChecked.map(
+					(n: { findingId: string; source: string | null }) =>
+						`${n.findingId}:${n.source}`,
+				),
+			).toEqual(["check:dependency:package.json#dependencies.zod:registry"]);
+			expect(posted.result).toBe("pass");
+		});
 	});
 
 	it("blocks, with no override, when a builder wrote a test file", async () => {
@@ -529,7 +688,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 				"mandatory_failed",
 			]);
 			expect(of("check:CK2:1")?.subject).toContain("does not exist");
-			expect(posted.verdict).toBe("block");
+			expect(posted.result).toBe("fail");
 		});
 	});
 
@@ -593,7 +752,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 				// the open finding itself blocks
 				[open]: "judge_open",
 			});
-			expect(posted.verdict).toBe("block");
+			expect(posted.result).toBe("fail");
 		});
 	});
 

@@ -4,7 +4,7 @@ import {
 	decide,
 	type GateFinding,
 } from "../../../src/lib/gate";
-import type { GateConfig } from "../../../src/lib/gate/config";
+import { GATE_CONFIG, type GateConfig } from "../../../src/lib/gate/config";
 import {
 	buildReceipt,
 	RECEIPT_VERSION,
@@ -39,6 +39,8 @@ function gateConfig(over: Partial<GateConfig> = {}): GateConfig {
 		testGlobs: ["tests/**"],
 		protectedPaths: [".github/workflows/**", "**/vitest.config.*"],
 		judgeCoverageGate: "qa",
+		secretScan: GATE_CONFIG.secretScan,
+		dependencies: GATE_CONFIG.dependencies,
 		...over,
 	};
 }
@@ -236,6 +238,39 @@ describe("buildReceipt", () => {
 			{ testGlobs: ["test/**"] },
 			{ protectedPaths: [".github/workflows/**"] },
 			{ judgeCoverageGate: "acceptance" as const },
+			// A loosened secret rule, with no version bump, still moves the hash.
+			{
+				secretScan: {
+					...GATE_CONFIG.secretScan,
+					rules: GATE_CONFIG.secretScan.rules.map((r) =>
+						r.id === "aws-access-key-id"
+							? { ...r, pattern: /\bAKIA[0-9A-Z]{12}\b/ }
+							: r,
+					),
+				},
+			},
+			{ secretScan: { ...GATE_CONFIG.secretScan, maxBytes: 1 } },
+			{
+				secretScan: {
+					...GATE_CONFIG.secretScan,
+					envTemplateSuffixes: ["example"],
+				},
+			},
+			{
+				dependencies: {
+					...GATE_CONFIG.dependencies,
+					patterns: {
+						...GATE_CONFIG.dependencies.patterns,
+						range: /^.*$/,
+					},
+				},
+			},
+			{
+				dependencies: {
+					...GATE_CONFIG.dependencies,
+					sections: ["dependencies"],
+				},
+			},
 		]) {
 			expect(configSha(gateConfig(over)), JSON.stringify(over)).not.toBe(a);
 		}
