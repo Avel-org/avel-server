@@ -417,8 +417,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						},
 					]);
 					// The run ran no test, so it must not read as verified (J,
-					// 2026-10-21): a warn gate with no evidence and a degraded check
-					// both leave it a pass, which does not ship.
+					// 2026-10-21): the degraded test check leaves it a pass, which
+					// does not ship.
 					expect(run).toMatchObject({
 						result: "pass",
 						decideVersion: 3,
