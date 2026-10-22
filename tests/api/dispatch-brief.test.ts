@@ -3,26 +3,34 @@ import { and, eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { dispatchBrief, successEnvelope } from "../../src/contract";
 import { closeDb } from "../../src/db/client";
-import { activityLog, intake, mission } from "../../src/db/schema";
-import { stamp } from "../../src/db/schema/columns";
+import { activityLog, mission } from "../../src/db/schema";
 import { worktreeRooms } from "../../src/rooms/provider";
 import { localSources } from "../../src/rooms/sources";
 import { briefSha256 } from "../../src/runner/brief";
 import { DISPATCH_PLAN } from "../db/dispatch-fixtures";
 import { gitIn, makeRepo, removeDir, tempDir } from "../unit/git-fixtures";
 import { seedIds } from "./agent-fixtures";
-import { activeMission, queued, row, start } from "./runner-fixtures";
-import { type ApiHarness, clock, withApi } from "./support";
+import {
+	activeClientMission,
+	approvedIntake,
+	CLIENT_REPO,
+	queued,
+	row,
+	start,
+} from "./runner-fixtures";
+import { type ApiHarness, withApi } from "./support";
 
 // Start renders the brief from the plan and a real clone, and freezes it.
-// The template pins its first commit; the second changes a file and adds
-// one, so a brief read at HEAD instead of the pin would show it.
+// The mission is a client mission, so the clone is the client's repository
+// and the brief carries its intake's source. The intake read the first
+// commit; the second changes a file and adds one, so a brief read at HEAD
+// instead of the commit read would show it.
 
 const base = tempDir("dispatch-brief");
 afterAll(() => removeDir(base));
 
 const sources = path.join(base, "sources");
-const clone = path.join(sources, "templates", "template-booking");
+const clone = path.join(sources, "repos", "meridian-co", "app");
 const [pinned] = makeRepo(
 	clone,
 	{
@@ -62,7 +70,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			await withApi(
 				async (h) => {
 					await h.signIn();
-					const m = await activeMission(h.tx, seedIds(h.ns));
+					const m = await activeClientMission(h, seedIds(h.ns), null);
 					const plan = structuredClone(DISPATCH_PLAN);
 					(plan.modules[0] as { reads: string[] }).reads = [
 						"src/auth",
@@ -70,19 +78,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					];
 					await h.tx
 						.update(mission)
-						.set({ brief: plan, templateVersion: pinned })
+						.set({ brief: plan })
 						.where(eq(mission.id, m.missionId));
-					await h.tx.insert(intake).values({
-						id: m.ids.next(),
-						engagementId: m.engagementId,
-						status: "approved",
-						sourceMd: "# The ask\n\nAccounts, please.",
-						openQuestions: [],
-						approvedBy: await h.operatorId(),
-						approvedAt: clock.now(),
-						missionId: m.missionId,
-						...stamp(clock),
-					});
+					await approvedIntake(
+						h,
+						m,
+						{ repoUrl: CLIENT_REPO, commit: pinned },
+						"# The ask\n\nAccounts, please.",
+					);
 					const id = await queued(h.tx, m);
 
 					// Queued: nothing frozen yet.
@@ -138,11 +141,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			await withApi(
 				async (h) => {
 					await h.signIn();
-					const m = await activeMission(h.tx, seedIds(h.ns));
-					await h.tx
-						.update(mission)
-						.set({ templateVersion: pinned })
-						.where(eq(mission.id, m.missionId));
+					const m = await activeClientMission(h, seedIds(h.ns), {
+						repoUrl: CLIENT_REPO,
+						commit: pinned,
+					});
 					const id = await queued(h.tx, m, { briefRef: null });
 					expect((await start(h, id)).status).toBe(200);
 					expect(await getBrief(h, id)).toEqual({

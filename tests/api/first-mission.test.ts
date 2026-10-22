@@ -21,18 +21,23 @@ import { worktreeRooms } from "../../src/rooms/provider";
 import { localSources } from "../../src/rooms/sources";
 import { writeTool } from "../../src/rooms/tools";
 import { FakeHarness } from "../../src/runner/harness";
-import { removeDir, tempDir } from "../unit/git-fixtures";
-import { fixture, fixtureRepos } from "../unit/repo-fixtures";
+import { gitIn, removeDir, tempDir } from "../unit/git-fixtures";
+import { fixtureRepos, snapshotOfCommit } from "../unit/repo-fixtures";
 import { SEED_RUN_AT } from "../unit/seed-run-at";
 import { bearer, seedIds } from "./agent-fixtures";
 import { type ApiHarness, clock, withApi } from "./support";
 
 // One mission through every built module, over the HTTP API the way
 // avel-web and an agent call it: client, engagement, intake, repo read,
-// approval, plan, roster, start, dispatch in a real worktree room on the
-// template-booking dev fixture, the agent's report, the gate, and the
-// activity chain. Direct inserts appear only where no route exists, each
-// marked GAP.
+// approval, plan, roster, start, dispatch in a real worktree room, the
+// agent's report, the gate, and the activity chain. Direct inserts appear
+// only where no route exists, each marked GAP.
+//
+// It is a client mission that started from the template: the client's
+// repository, meridian-co/app, is a clone whose commit is the
+// template-booking dev fixture's. The intake reads that commit, and the
+// rooms open on it from the client's clone (decided 2026-10-21, J). The
+// plan's template pin is only the record of where the code came from.
 
 const base = tempDir("first-mission");
 afterAll(async () => {
@@ -42,6 +47,7 @@ afterAll(async () => {
 
 const sources = path.join(base, "sources");
 const REPO = "https://github.com/meridian-co/app";
+const clientClone = path.join(sources, "repos", "meridian-co", "app");
 const SLOTS = "src/features/scheduling/slots.ts";
 
 const BRIEF = {
@@ -104,15 +110,23 @@ describe.skipIf(!process.env.DATABASE_URL)(
 	{ timeout: 120_000 },
 	() => {
 		it("runs intake to gate over the API, on a real room", async () => {
-			const head = await buildDevTemplateBooking(
-				path.join(sources, "templates", "template-booking"),
+			// The template clone and the client's clone, both at the fixture's
+			// commit: the client's code came from the template.
+			const templateClone = path.join(sources, "templates", "template-booking");
+			expect(await buildDevTemplateBooking(templateClone)).toBe(
+				DEV_BOOKING_SHA,
 			);
-			expect(head).toBe(DEV_BOOKING_SHA);
+			expect(await buildDevTemplateBooking(clientClone)).toBe(DEV_BOOKING_SHA);
 			const harness = new FakeHarness();
 			const rooms = worktreeRooms(path.join(base, "rooms"));
-			const repos = fixtureRepos({
-				"meridian-co/app": fixture("nest-feature"),
-			});
+			// GitHub's answer for meridian-co/app is that clone's commit.
+			const snapshot = snapshotOfCommit(clientClone, DEV_BOOKING_SHA);
+			expect(snapshot.entries.map((e) => e.path).sort()).toEqual(
+				gitIn(clientClone, "ls-tree", "-r", "--name-only", DEV_BOOKING_SHA)
+					.split("\n")
+					.sort(),
+			);
+			const repos = fixtureRepos({ "meridian-co/app": snapshot });
 
 			await withApi(
 				async (h) => {
@@ -171,6 +185,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						intake,
 					);
 					expect(read.derivedCut).not.toBeNull();
+					expect(read.repoUrl).toBe(REPO);
+					expect(read.repoCommitSha).toBe(DEV_BOOKING_SHA);
 					await ok(await post(`/api/intakes/${intakeId}/propose`), 200, intake);
 					const approved = await ok(
 						await post(`/api/intakes/${intakeId}/approve`, {
@@ -185,7 +201,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					const missionId = approved.missionId as string;
 					expect(missionId.startsWith(h.ns)).toBe(true);
 
-					// 4. The plan, pinned to the dev fixture's commit.
+					// 4. The plan, pinned to the dev fixture's commit: the record of
+					// which template version the client's code came from.
 					const plan = await ok(
 						await h.call(`/api/missions/${missionId}/plan`, {
 							method: "PUT",
@@ -279,7 +296,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					const started = await post(`/api/missions/${missionId}/start`);
 					expect(started.status, await started.clone().text()).toBe(200);
 
-					// 7. One dispatch, in a worktree room on the fixture's commit.
+					// 7. One dispatch, in a worktree room on the commit the intake
+					// read, made from the client's clone.
 					const one = successEnvelope(dispatchWire);
 					const queued = await ok(
 						await post(
@@ -300,7 +318,11 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					);
 					expect(running.status).toBe("running");
 					const room = await rooms.get(queued.id);
-					expect(room?.commit).toBe(DEV_BOOKING_SHA);
+					expect(room?.commit).toBe(read.repoCommitSha);
+					expect(room?.repoPath).toBe(clientClone);
+					expect(gitIn(room?.root ?? "", "rev-parse", "HEAD")).toBe(
+						read.repoCommitSha,
+					);
 
 					// 8. The agent: its own dispatch, one write inside its mount
 					// through the harness's file tool, then its report. The write
@@ -346,7 +368,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						201,
 						successEnvelope(gateRunSchema),
 					);
-					expect(run.baseSha).toBe(DEV_BOOKING_SHA);
+					expect(run.baseSha).toBe(read.repoCommitSha);
 					expect(run.commitSha).not.toBe(DEV_BOOKING_SHA);
 					expect(run.receiptSha256).toMatch(/^[0-9a-f]{64}$/);
 					expect(run.gates.map((g) => [g.gate, g.policy])).toEqual([

@@ -14,10 +14,8 @@ import * as schema from "../../src/db/schema";
 import {
 	agentIdentityVersion,
 	agentTemplate,
-	client,
 	completionReport,
 	dispatch,
-	engagement,
 	mission,
 	rosterEntry,
 } from "../../src/db/schema";
@@ -98,34 +96,19 @@ describe.skipIf(!url)(
 		/** A running dispatch, started through the route; its token from the harness. */
 		async function runningDispatch(label: string) {
 			const id = () => seedIds.next();
-			const clientId = id();
-			await db.insert(client).values({
-				id: clientId,
-				name: `Client ${label}`,
-				status: "active",
-				...stamp(clock),
-			});
-			const engagementId = id();
-			await db.insert(engagement).values({
-				id: engagementId,
-				clientId,
-				name: "App",
-				status: "active",
-				startedAt: clock.now(),
-				...stamp(clock),
-			});
+			// An internal template build: its rooms come from the template clone.
 			const missionId = id();
 			await db.insert(mission).values({
 				id: missionId,
-				engagementId,
-				origin: "client",
+				engagementId: null,
+				origin: "internal",
 				type: "template-booking",
 				brief: DISPATCH_PLAN,
 				sprintN: 1,
 				status: "active",
 				cut: "vertical",
 				cutSource: "derived",
-				repoUrl: "https://github.com/meridian-co/app",
+				repoUrl: "https://github.com/avel-org/template-booking",
 				spendCeilingUsd: "100.00",
 				templateRef: "template-booking",
 				templateVersion: commit,
