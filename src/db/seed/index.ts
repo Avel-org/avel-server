@@ -37,6 +37,7 @@ const COUNTED = [
 	"roster_preset",
 	"playbook",
 	"mission",
+	"intake",
 	"roster_entry",
 	"export",
 	"activity_log",
@@ -83,6 +84,7 @@ export async function runSeed(
 				await tx.insert(schema.rosterPreset).values(rows.rosterPreset);
 				await tx.insert(schema.playbook).values(rows.playbook);
 				await tx.insert(schema.mission).values(rows.mission);
+				await tx.insert(schema.intake).values(rows.intake);
 				await tx.insert(schema.rosterEntry).values(rows.rosterEntry);
 				await tx.insert(schema.exportTable).values(rows.export);
 				await tx.insert(schema.dispatch).values(rows.dispatch);

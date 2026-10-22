@@ -6,6 +6,7 @@ import type { IdGenerator } from "../../lib/ids";
 import { PRICE_VERSION } from "../../lib/prices";
 import { skillContentSha256 } from "../../lib/skill-hash";
 import { DEV_BOOKING_SHA } from "../../lib/templates";
+import { ownerRepo } from "../../rooms/sources";
 import { skillsSha256 } from "../../runner/skills";
 import type {
 	activityLog,
@@ -17,6 +18,7 @@ import type {
 	dispatch,
 	engagement,
 	exportTable,
+	intake,
 	mission,
 	playbook,
 	roleSkills,
@@ -26,6 +28,7 @@ import type {
 	skillSource,
 	user,
 } from "../schema";
+import { devTemplateBookingRead } from "./dev-template";
 
 /**
  * The dev seed's rows. Pure: the same ids and the same epoch give the same
@@ -96,6 +99,8 @@ export interface SeedRows {
 	rosterPreset: Row<typeof rosterPreset>[];
 	playbook: Row<typeof playbook>[];
 	mission: Row<typeof mission>[];
+	/** One approved intake per client mission, with its repository read. */
+	intake: Row<typeof intake>[];
 	rosterEntry: Row<typeof rosterEntry>[];
 	export: Row<typeof exportTable>[];
 	activityLog: Row<typeof activityLog>[];
@@ -360,6 +365,7 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 		rosterPreset: [],
 		playbook: [],
 		mission: [],
+		intake: [],
 		rosterEntry: [],
 		export: [],
 		activityLog: [],
@@ -2043,6 +2049,67 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 		canonTemplateId,
 		{ number: 1, sha256: canonIdentity.sha256 },
 	);
+
+	// One approved intake per client mission, the way the product makes a
+	// client mission: the intake read the client's repository, then the
+	// operator approved it, creating the mission at that moment. Each
+	// client's repository started from the template at the mission's pin (J's
+	// rule for an empty client repository), so the commit read is the dev
+	// fixture's, DEV_BOOKING_SHA, and `pnpm dev:sources` builds that clone at
+	// repos/<owner>/<repo>. The derived fields are a real read of the
+	// fixture. Added last, so every earlier seed id stays where it was.
+	const read = devTemplateBookingRead();
+	for (const m of [...rows.mission]) {
+		if (m.origin !== "client") continue;
+		if (!m.engagementId || !ownerRepo(m.repoUrl)) {
+			throw new Error(
+				`seed: client mission ${m.id} has no clonable repository`,
+			);
+		}
+		if (m.templateVersion !== DEV_BOOKING_SHA || read.cut !== m.cut) {
+			throw new Error(
+				`seed: client mission ${m.id} does not start from the dev template's read`,
+			);
+		}
+		const approvedAt = m.createdAt as Date;
+		const id = ids.next();
+		rows.intake.push({
+			id,
+			engagementId: m.engagementId,
+			status: "approved",
+			sourceMd: `# Call notes
+
+${(m.brief as { summary: string }).summary}
+`,
+			proposedBrief: m.brief,
+			openQuestions: [],
+			derivedCut: read.cut,
+			derivedCutEvidence: read.cutEvidence,
+			derivedConventions: read.conventions,
+			derivedBoundaries: read.boundaries,
+			suggestedPresetId: null,
+			approvedBy: SEED_OPERATOR_ID,
+			approvedAt,
+			missionId: m.id,
+			repoUrl: m.repoUrl,
+			repoCommitSha: read.commitSha,
+			repoReadAt: new Date(approvedAt.getTime() - HOUR),
+			draftedByCanonSessionId: null,
+			recommendedRoster: null,
+			// A removed mission's intake goes with it.
+			deletedAt: m.deletedAt ?? null,
+			createdAt: new Date(approvedAt.getTime() - 2 * HOUR),
+			updatedAt: approvedAt,
+		});
+		log(
+			approvedAt,
+			"intake.approved",
+			"intake",
+			id,
+			{ missionId: m.id, acknowledged: [] },
+			{ missionId: m.id, engagementId: m.engagementId },
+		);
+	}
 
 	return rows;
 }

@@ -50,6 +50,7 @@ async function dump(dbUrl: string) {
 			"roster_preset",
 			"playbook",
 			"mission",
+			"intake",
 			"roster_entry",
 			"export",
 			"activity_log",
@@ -101,13 +102,16 @@ describe.skipIf(!url)("pnpm db:seed", () => {
 			expect(run1.status).toBe("seeded");
 			// Module 6's preview added two missions, twelve roster entries, nine
 			// dispatches, seven reports and 43 activity rows. Canon's template
-			// (2026-10-19) added one more operator row.
+			// (2026-10-19) added one more operator row. One approved intake per
+			// client mission (2026-10-21) added eleven intakes and their
+			// intake.approved rows.
 			expect(run1.counts).toMatchObject({
 				mission: 16,
+				intake: 11,
 				roster_entry: 28,
 				dispatch: 9,
 				completion_report: 7,
-				activity_log: 117,
+				activity_log: 128,
 			});
 			const before = await dump(dbUrl);
 
@@ -179,7 +183,7 @@ describe.skipIf(!url)("pnpm db:seed", () => {
 				const named = await conn<{ n: number }[]>`
 					select count(*)::int as n from activity_log
 					where actor_kind = 'operator' and actor_user_id = ${SEED_OPERATOR_ID}`;
-				expect(named[0]?.n).toBe(89);
+				expect(named[0]?.n).toBe(100);
 			} finally {
 				await conn.end();
 			}
