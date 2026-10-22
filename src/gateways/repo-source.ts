@@ -1,4 +1,5 @@
 import { Octokit } from "@octokit/rest";
+import type { RemoteEntry, RemoteTree } from "../lib/export/delivery/types";
 import type { Snapshot } from "../lib/repo-read/snapshot";
 import { snapshotFromTarball } from "../lib/repo-read/tar";
 import { ApiError } from "../middleware/errors";
@@ -12,6 +13,17 @@ export type SnapshotRequest = {
 	credentialRef: string;
 };
 
+export type TreeRequest = {
+	owner: string;
+	repo: string;
+	/** A branch name. Omitted: the repository's default branch. */
+	branch?: string;
+	credentialRef: string;
+};
+
+/** A branch's tree at its tip, and which branch that was. A null commitSha is an empty repository. */
+export type BranchTree = RemoteTree & { branch: string };
+
 /**
  * Where the repo read gets a repository from. An AppDeps gateway: production
  * reads GitHub, tests pass a fake that serves fixtures. A token never leaves
@@ -22,6 +34,13 @@ export type RepoSource = {
 	hasCredential: (credentialRef: string) => boolean;
 	/** One commit, pinned by sha, as a Snapshot. Fails with the BLAST-RADIUS repository codes. */
 	snapshot: (request: SnapshotRequest) => Promise<Snapshot>;
+	/**
+	 * A branch's whole tree at its tip, from one recursive Git Trees call
+	 * (BLAST-RADIUS.md, Reading the remote tree): paths, modes and object
+	 * shas, no bytes. An empty repository answers commitSha null. A missing
+	 * branch is BRANCH_NOT_FOUND; a truncated tree is TREE_TOO_LARGE.
+	 */
+	tree: (request: TreeRequest) => Promise<BranchTree>;
 };
 
 function statusOf(e: unknown): number | undefined {
@@ -115,6 +134,83 @@ export function githubRepoSource(options: {
 				return snapshot;
 			} catch (e) {
 				throw githubFailure(e, req);
+			}
+		},
+		tree: async (req) => {
+			const token = options.env(req.credentialRef);
+			if (!token) {
+				throw new Error(`credential ${req.credentialRef} is not set`);
+			}
+			const gh = new Octokit({
+				auth: token,
+				request: options.fetch ? { fetch: options.fetch } : undefined,
+			});
+			const named = `${req.owner}/${req.repo}`;
+			try {
+				// The repository first, so a missing one is REPO_NOT_FOUND and
+				// never a missing branch.
+				const repo = await gh.rest.repos.get({
+					owner: req.owner,
+					repo: req.repo,
+				});
+				const branch = req.branch ?? repo.data.default_branch;
+				let commitSha: string;
+				try {
+					const ref = await gh.rest.git.getRef({
+						owner: req.owner,
+						repo: req.repo,
+						ref: `heads/${branch}`,
+					});
+					if (ref.data.object.type !== "commit") {
+						throw new ApiError(
+							"BRANCH_NOT_FOUND",
+							`${named} has no branch ${branch}`,
+						);
+					}
+					commitSha = ref.data.object.sha;
+				} catch (e) {
+					if (statusOf(e) === 409) {
+						return { branch, commitSha: null, entries: new Map() };
+					}
+					if (statusOf(e) === 404) {
+						throw new ApiError(
+							"BRANCH_NOT_FOUND",
+							`${named} has no branch ${branch}`,
+						);
+					}
+					throw e;
+				}
+				const commit = await gh.rest.git.getCommit({
+					owner: req.owner,
+					repo: req.repo,
+					commit_sha: commitSha,
+				});
+				const tree = await gh.rest.git.getTree({
+					owner: req.owner,
+					repo: req.repo,
+					tree_sha: commit.data.tree.sha,
+					recursive: "true",
+				});
+				if (tree.data.truncated) {
+					throw new ApiError(
+						"TREE_TOO_LARGE",
+						`GitHub truncated the tree of ${named} at ${commitSha}`,
+					);
+				}
+				const entries = new Map<string, RemoteEntry>();
+				for (const e of tree.data.tree) {
+					if (e.path && e.mode && e.sha) {
+						entries.set(e.path, { sha: e.sha, mode: e.mode });
+					}
+				}
+				return { branch, commitSha, entries };
+			} catch (e) {
+				throw githubFailure(e, {
+					owner: req.owner,
+					repo: req.repo,
+					ref: req.branch,
+					credentialRef: req.credentialRef,
+				});
 			}
 		},
 	};

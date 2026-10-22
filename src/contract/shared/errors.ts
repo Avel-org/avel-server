@@ -149,6 +149,29 @@ export const PRECONDITION_REASONS = [
 	"canon_question_not_open",
 	"client_memory_not_proposed",
 	"client_memory_removed",
+	// Modules 10 and 11, slice 1 (2026-10-22): exports. The gate run to ship.
+	"gate_not_run",
+	"gate_run_not_latest",
+	"gate_pass_not_verified",
+	"gate_failed",
+	// The linked preview.
+	"preview_mission_mismatch",
+	"preview_target_mismatch",
+	"package_hash_version_mismatch",
+	// Render: the integration commit, and what the package may hold.
+	"integration_commit_moved",
+	"package_symlink",
+	"package_submodule",
+	"package_mode_only",
+	"package_unsupported_mode",
+	"package_path_not_utf8",
+	"package_reserved_path",
+	"package_unsafe_path",
+	"package_duplicate_path",
+	"package_too_large",
+	// Where it goes: an internal mission has no client repository, and GitHub delivery is slice 2.
+	"export_target_repo_missing",
+	"export_target_not_built",
 ] as const;
 
 export const preconditionReason = z.enum(PRECONDITION_REASONS);

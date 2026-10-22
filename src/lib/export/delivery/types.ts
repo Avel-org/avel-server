@@ -1,3 +1,5 @@
+import { VIOLATION_CODES } from "../../../contract/export";
+
 /**
  * Inputs and output of the blast radius (docs/BLAST-RADIUS.md). The package
  * and remote-tree types are defined here until the render core and the
@@ -47,20 +49,7 @@ export type BlastRadiusContext = {
 	target: { owner: string; repo: string; branch: string };
 };
 
-export const VIOLATION_CODES = [
-	"PATH_OUTSIDE_ALLOWED",
-	"PATH_TRAVERSAL",
-	"PATH_NOT_NORMALIZED",
-	"SPECIAL_FILE_COLLISION",
-	"PATH_TYPE_COLLISION",
-	"CASE_COLLISION",
-	"PROTECTED_PATH",
-	"DUPLICATE_PATH",
-	"UNSUPPORTED_MODE",
-	"DELETE_NOT_FOUND",
-	"POLICY_GLOB_UNSUPPORTED",
-] as const;
-
+export { VIOLATION_CODES };
 export type ViolationCode = (typeof VIOLATION_CODES)[number];
 
 export type Violation = { code: ViolationCode; path: string; detail: string };

@@ -182,7 +182,7 @@ function checkFailed(issues: ReturnType<typeof checkIntake>): ApiError {
 
 type ConnectionRow = typeof connection.$inferSelect;
 
-function connectionRefused(
+export function connectionRefused(
 	reason:
 		| "connection_not_found"
 		| "connection_expired"
@@ -201,7 +201,7 @@ function connectionRefused(
  * engagement, active and unexpired, scoped to cover the repository. The
  * credential is checked separately, by name, through the gateway.
  */
-function usableConnection(
+export function usableConnection(
 	row: ConnectionRow | undefined,
 	connectionId: string,
 	engagementId: string,

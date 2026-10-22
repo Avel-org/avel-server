@@ -105,14 +105,14 @@ Twelve links in three groups. The sidebar's design belongs to avel-web: `avel-we
 
 ## Contract gaps this map surfaces
 
-`src/contract/` holds route groups for clients, engagements, missions, missionPlans, activity, intakes, connections, agentTemplates, skills, skillSources, roster, presets and playbooks (checked 2026-10-10). Export and repo-policy arrive with modules 10 and 11. Exact routes: `DATA-CONTRACTS-V2.md`, *Built so far*.
+`src/contract/` holds route groups for clients, engagements, missions, missionPlans, activity, intakes, connections, agentTemplates, skills, skillSources, roster, presets and playbooks (checked 2026-10-10). Export arrived with modules 10 and 11, slice 1 (2026-10-22). Repo-policy arrives with slice 2. Exact routes: `DATA-CONTRACTS-V2.md`, *Built so far*.
 
 | Gap | Needed by | Severity |
 |---|---|---|
 | ~~No `client`, `engagement`, or `intake` route groups.~~ Resolved: built with modules 0 and 1. | `/clients/*`, `/intake/:id` | — |
 | ~~No `preset` route group.~~ Resolved 2026-10-10: `presets` list, get, create, update; applying is `roster.applyPreset`. | `/presets`, `/presets/:id`, and the loadout screen's "apply preset" | — |
 | ~~No `skillSource` procedures.~~ Resolved: built with module 4. | inside `/catalog/skills` (`?view=sources`), since avel-web ruling 40 removed `/catalog/sources` | — |
-| `export.preview` | pre-flight | specced in `BLAST-RADIUS.md`, not yet in the contract |
+| ~~`export.preview`~~ Resolved 2026-10-22: `exports.preview` (`POST /api/exports/preview`). | pre-flight | — |
 | `mission.getWithRoster` | loadout | Not built, by decision (2026-10-06): the loadout calls `missions.get` and `roster.list` |
 | `skill.resolveTiers` | loadout | Built as the pure function `resolveSkillTiers()` in the contract, not a route |
 | `mission.list` → `lastActivity` | mission list | needs one aggregate join to ActivityLog, not an N+1 |

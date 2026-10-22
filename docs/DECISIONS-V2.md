@@ -1036,6 +1036,24 @@ J asked for the security checks to start (2026-10-22). They are the code-reading
 - **Supersedes** the 2026-10-21 consequences above that say `security` has no producer. Current status is in `STATE.md`.
 - **The brief's own checks are shown under their gate** (`decide()`, same day, from code review). Brief checks count on `acceptance` even when the playbook leaves it out, so that gate is listed in the run's `gates` as mandatory; a run can no longer fail with no gate showing why. Only `file_exists` and `runner` findings on `acceptance` get this treatment, so a runner check on another gate follows that gate's policy.
 
+## Decided 2026-10-22: export routes, slice 1
+
+J chose these on 2026-10-22, when the export routes were built (`src/routes/exports.ts`, `src/contract/export.ts`).
+
+- **Slice 1 is previews for every target and delivery by zip.** GitHub targets can be previewed against their branch tip. Their create is refused (`export_target_not_built`) until slice 2, which adds the GitHub write path and the PR webhook.
+- **A zip computes violations only.** It reads no remote. Its violations and each file's create or overwrite come from the mission's base in the local clone. It records no blast radius.
+- **The render runs inside the request.** A preview answers `previewed` and a zip answers `done`. A refusal writes no export row.
+
+Built this way in the same change, for J to confirm:
+
+- **A zip's bytes are not stored.** The Drive's orphan sweep removes any blob no `file` row names, so a zip in that store would be swept. The export records the zip's sha256 and length and the dispatch inputs its integration commit was rebuilt from. `GET /api/exports/:id/zip` renders again from those inputs and refuses `DETERMINISM_VIOLATION` when the sha256 differs. This follows *render and delivery* above: the integration commit is rebuilt, not stored. It supersedes `EXPORT-ENGINE.md` §13's archive rule until frozen bytes have a store.
+- **A preview records what would refuse delivery instead of refusing.** The gate's result and the violations land on the preview, in `blocked`, so the pre-flight screen shows the whole package beside the reason. `BLAST-RADIUS.md`'s contract lists `BLAST_RADIUS_VIOLATION` and `PRECONDITION_FAILED` as 422s on preview. A create still refuses both.
+- **A create names its gate run** (`gateRunId`). A newer run refuses `gate_run_not_latest`, so the operator ships the run they saw.
+- **Where a package may write** is the union of every live roster entry's writable paths, plus `.avel/`.
+- **Protected paths at delivery are the built-in ones** (`.git` and `.github/workflows/**`). `RepoPolicy` has no protected-path list. The gate's own protected paths already judged the work.
+- **A preview of one target approves no other** (`preview_target_mismatch`).
+- **A missing branch is `BRANCH_NOT_FOUND` for every target.** `BLAST-RADIUS.md` says a PR compares against the base instead. That is slice 2's.
+
 ---
 
 ## Open questions

@@ -2,8 +2,10 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import type {
+	BranchTree,
 	RepoSource,
 	SnapshotRequest,
+	TreeRequest,
 } from "../../src/gateways/repo-source";
 import type { Snapshot } from "../../src/lib/repo-read/snapshot";
 import { snapshotFromTarball } from "../../src/lib/repo-read/tar";
@@ -54,20 +56,28 @@ export const noRepos: RepoSource = {
 	snapshot: async () => {
 		throw new Error("this test has no repository source; pass repos");
 	},
+	tree: async () => {
+		throw new Error("this test has no repository source; pass repos");
+	},
 };
 
 /**
  * A RepoSource serving snapshots by "owner/repo", with the credentials
  * `credentials` names. An unknown repository answers REPO_NOT_FOUND, as
  * GitHub would; a value that is an ApiError is thrown as that failure.
+ * Branch trees come from `trees` by "owner/repo" the same way; a tree
+ * answers for whichever branch is asked, as that branch.
  */
 export function fixtureRepos(
 	repos: Record<string, Snapshot | ApiError>,
 	credentials: readonly string[] = ["MERIDIAN_GITHUB_TOKEN"],
-): RepoSource & { requests: SnapshotRequest[] } {
+	trees: Record<string, BranchTree | ApiError> = {},
+): RepoSource & { requests: SnapshotRequest[]; treeRequests: TreeRequest[] } {
 	const requests: SnapshotRequest[] = [];
+	const treeRequests: TreeRequest[] = [];
 	return {
 		requests,
+		treeRequests,
 		hasCredential: (ref) => credentials.includes(ref),
 		snapshot: async (req) => {
 			requests.push(req);
@@ -79,6 +89,17 @@ export function fixtureRepos(
 					`No fixture for ${req.owner}/${req.repo}`,
 				);
 			return found;
+		},
+		tree: async (req) => {
+			treeRequests.push(req);
+			const found = trees[`${req.owner}/${req.repo}`];
+			if (found instanceof ApiError) throw found;
+			if (!found)
+				throw new ApiError(
+					"REPO_NOT_FOUND",
+					`No tree fixture for ${req.owner}/${req.repo}`,
+				);
+			return { ...found, branch: req.branch ?? found.branch };
 		},
 	};
 }
