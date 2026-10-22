@@ -56,7 +56,8 @@ export type ProtectedPathsInput = {
  * fail, so no override clears it; so is every package.json script that was
  * added, removed or changed. Nothing changed is one pass. No protected paths,
  * a glob the matcher cannot read, or a head package.json whose scripts are
- * not given, is an error: nothing is shown protected.
+ * not given and that no protected glob covers, is an error: nothing is
+ * shown protected.
  *
  * The caller parses package.json at both commits for `packageJsonScripts`.
  * When head's does not parse, the caller adds "package.json" to
@@ -99,7 +100,9 @@ export function protectedPathFindings(
 
 	if (
 		Object.hasOwn(input.head, "package.json") &&
-		input.packageJsonScripts === undefined
+		input.packageJsonScripts === undefined &&
+		// Protected whole, its blob is compared below instead.
+		!input.protectedPaths.some((g) => matchesGlob("package.json", g))
 	) {
 		return [
 			{

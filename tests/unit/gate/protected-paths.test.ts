@@ -92,6 +92,21 @@ describe("protectedPathFindings", () => {
 			expect(fs[0]?.subject).toContain("package.json");
 		});
 
+		it("compares package.json whole when it is protected and its scripts are not given", () => {
+			// The route does this when head's package.json does not parse.
+			const protectedPaths = ["vitest.config.*", "package.json"];
+			const changed = run(
+				{ ...base, "package.json": "p2" },
+				{ protectedPaths, packageJsonScripts: undefined },
+			);
+			expect(outcomes(changed)).toEqual([
+				"checkpoint:protected:package.json:fail",
+			]);
+			expect(
+				outcomes(run(base, { protectedPaths, packageJsonScripts: undefined })),
+			).toEqual(["checkpoint:protected:pass"]);
+		});
+
 		it("needs no scripts when head has no package.json", () => {
 			const { "package.json": _, ...head } = base;
 			expect(outcomes(run(head, { packageJsonScripts: undefined }))).toEqual([
