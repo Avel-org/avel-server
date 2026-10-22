@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { canonicalJson } from "../../src/lib/canonical";
+import { byCodepoint } from "../../src/lib/export";
 import {
 	type BlastRadiusPolicy,
-	byCodepoint,
 	computeBlastRadius,
 	type DeliveryPackage,
 	normalizePath,
@@ -468,11 +468,11 @@ describe("byCodepoint", () => {
 	it("orders by codepoint, which differs from code-unit order above U+FFFF", () => {
 		const astral = "\u{1F600}";
 		const bmpHigh = "\uFF21";
-		expect(byCodepoint(bmpHigh, astral)).toBe(-1);
+		expect(Math.sign(byCodepoint(bmpHigh, astral))).toBe(-1);
 		expect(bmpHigh < astral).toBe(false);
-		expect(byCodepoint("a", "b")).toBe(-1);
-		expect(byCodepoint("ab", "a")).toBe(1);
+		expect(Math.sign(byCodepoint("a", "b"))).toBe(-1);
+		expect(Math.sign(byCodepoint("ab", "a"))).toBe(1);
 		expect(byCodepoint("a", "a")).toBe(0);
-		expect(byCodepoint("I", "i")).toBe(-1);
+		expect(Math.sign(byCodepoint("I", "i"))).toBe(-1);
 	});
 });
