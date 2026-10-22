@@ -83,7 +83,7 @@ const REPLAYED = "idempotency-replayed";
  * What a mission.gate_run activity row holds. The receipt is stored as its
  * exact string, so its hash reproduces byte for byte; jsonb would rewrite it.
  */
-type GateRunPayload = {
+export type GateRunPayload = {
 	commitSha: string;
 	baseSha: string;
 	/** From decide() version 3; older rows read it from their receipt (resultOfRun). */
@@ -117,7 +117,7 @@ function sideOf(roles: readonly Role[]): string | null {
  * A run's result: stored on the row from decide() version 3, else read
  * from its receipt's reasons, which every version stores.
  */
-function resultOfRun(p: GateRunPayload): GateResult {
+export function resultOfRun(p: GateRunPayload): GateResult {
 	if (p.result !== undefined) return p.result;
 	return resultOf(
 		(JSON.parse(p.receipt) as { decision: Pick<Decision, "reasons"> }).decision

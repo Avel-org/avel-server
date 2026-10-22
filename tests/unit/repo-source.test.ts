@@ -322,3 +322,121 @@ describe("githubRepoSource", () => {
 		expect((failure as ApiError).code).toBe("EMPTY_REPOSITORY");
 	});
 });
+
+describe("githubRepoSource.tree", () => {
+	const TOKEN = "ghp_secretTokenValue123";
+	const env = (name: string) =>
+		name === "MERIDIAN_GITHUB_TOKEN" ? TOKEN : undefined;
+	const req = {
+		owner: "meridian-co",
+		repo: "app",
+		credentialRef: "MERIDIAN_GITHUB_TOKEN",
+	};
+	const TIP = "d".repeat(40);
+	const TREE = "e".repeat(40);
+
+	/** GitHub's four calls: the repo, the branch ref, its commit, and the recursive tree. */
+	function github(
+		answers: { repo?: number; ref?: number; truncated?: boolean } = {},
+	) {
+		const paths: string[] = [];
+		const fetch = (async (input: string | URL | Request) => {
+			const url = new URL(String(input instanceof Request ? input.url : input));
+			paths.push(`${url.pathname}${url.search}`);
+			const fail = (status: number) =>
+				Response.json({ message: `GitHub says ${TOKEN}` }, { status });
+			if (url.pathname === "/repos/meridian-co/app") {
+				return answers.repo
+					? fail(answers.repo)
+					: Response.json({ default_branch: "trunk" });
+			}
+			if (url.pathname.startsWith("/repos/meridian-co/app/git/ref/")) {
+				return answers.ref
+					? fail(answers.ref)
+					: Response.json({ object: { type: "commit", sha: TIP } });
+			}
+			if (url.pathname === `/repos/meridian-co/app/git/commits/${TIP}`) {
+				return Response.json({ sha: TIP, tree: { sha: TREE } });
+			}
+			if (url.pathname === `/repos/meridian-co/app/git/trees/${TREE}`) {
+				return Response.json({
+					sha: TREE,
+					truncated: answers.truncated ?? false,
+					tree: [
+						{ path: "src", mode: "040000", type: "tree", sha: "1".repeat(40) },
+						{
+							path: "src/a.ts",
+							mode: "100644",
+							type: "blob",
+							sha: "2".repeat(40),
+						},
+						{
+							path: "vendor/lib",
+							mode: "160000",
+							type: "commit",
+							sha: "3".repeat(40),
+						},
+					],
+				});
+			}
+			return new Response("unexpected", { status: 500 });
+		}) as typeof globalThis.fetch;
+		return { fetch, paths };
+	}
+
+	it("reads the default branch's tip and its whole tree, directories and submodules included", async () => {
+		const gh = github();
+		const t = await githubRepoSource({ env, fetch: gh.fetch }).tree(req);
+		expect(t.branch).toBe("trunk");
+		expect(t.commitSha).toBe(TIP);
+		expect([...t.entries]).toEqual([
+			["src", { sha: "1".repeat(40), mode: "040000" }],
+			["src/a.ts", { sha: "2".repeat(40), mode: "100644" }],
+			["vendor/lib", { sha: "3".repeat(40), mode: "160000" }],
+		]);
+		expect(gh.paths).toEqual([
+			"/repos/meridian-co/app",
+			"/repos/meridian-co/app/git/ref/heads%2Ftrunk",
+			`/repos/meridian-co/app/git/commits/${TIP}`,
+			`/repos/meridian-co/app/git/trees/${TREE}?recursive=true`,
+		]);
+	});
+
+	it("reads a named branch", async () => {
+		const gh = github();
+		const t = await githubRepoSource({ env, fetch: gh.fetch }).tree({
+			...req,
+			branch: "release",
+		});
+		expect(t.branch).toBe("release");
+		expect(gh.paths[1]).toBe("/repos/meridian-co/app/git/ref/heads%2Frelease");
+	});
+
+	it("answers an empty repository as a null tip with no entries", async () => {
+		const t = await githubRepoSource({
+			env,
+			fetch: github({ ref: 409 }).fetch,
+		}).tree(req);
+		expect(t).toEqual({ branch: "trunk", commitSha: null, entries: new Map() });
+	});
+
+	it("maps a missing branch, a missing repository and a truncated tree to their codes", async () => {
+		for (const [answers, code] of [
+			[{ ref: 404 }, "BRANCH_NOT_FOUND"],
+			[{ repo: 404 }, "REPO_NOT_FOUND"],
+			[{ repo: 403 }, "REPO_NO_ACCESS"],
+			[{ truncated: true }, "TREE_TOO_LARGE"],
+			[{ ref: 500 }, "EXTERNAL_GITHUB"],
+		] as const) {
+			const failure = await githubRepoSource({
+				env,
+				fetch: github(answers).fetch,
+			})
+				.tree(req)
+				.catch((e: unknown) => e);
+			expect(failure, code).toBeInstanceOf(ApiError);
+			expect((failure as ApiError).code, code).toBe(code);
+			expect((failure as ApiError).message).not.toContain(TOKEN);
+		}
+	});
+});
