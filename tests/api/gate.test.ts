@@ -5,6 +5,7 @@ import { and, eq } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import {
 	errorEnvelope,
+	type Gate,
 	gateRunListEnvelope,
 	gateRun as gateRunSchema,
 	preconditionDetails,
@@ -139,7 +140,7 @@ async function closedDispatch(
 async function playbookFor(
 	h: ApiHarness,
 	m: Mission,
-	gates: { gate: "qa" | "acceptance"; policy: "mandatory" | "warn" }[],
+	gates: { gate: Gate; policy: "mandatory" | "warn" }[],
 	brief: unknown,
 ) {
 	const type = `gate-${h.ns}`;
@@ -417,11 +418,11 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 		const r = repo();
 		await gated(r, async (h, m) => {
 			await closedDispatch(h, m, r, { "src/b.ts": "export const b = 2;\n" });
-			// security has no producer, and the plan's test checks no runner.
+			// rollback has no producer, and the plan's test checks no runner.
 			await playbookFor(
 				h,
 				m,
-				[...QA_AND_ACCEPTANCE, { gate: "security" as "qa", policy: "warn" }],
+				[...QA_AND_ACCEPTANCE, { gate: "rollback", policy: "warn" }],
 				DISPATCH_PLAN,
 			);
 			const res = await run(h, m.missionId);
@@ -432,7 +433,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 			// It ran and recorded what passed...
 			expect(posted.gates.map((g) => [g.gate, g.result])).toEqual([
 				["qa", "verified"],
-				["security", "pass"],
+				["rollback", "pass"],
 				["acceptance", "pass"],
 			]);
 			// ...and names each thing it could not check, so it is not verified
@@ -445,16 +446,85 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 						`${n.findingId}:${n.source}`,
 				),
 			).toEqual([
-				"not_run:security:null",
+				"not_run:rollback:null",
 				"check:CK1:0:runner",
 				"check:CK2:1:runner",
 			]);
-			const security = posted.reasons.find(
-				(x) => x.findingId === "not_run:security",
+			const rollback = posted.reasons.find(
+				(x) => x.findingId === "not_run:rollback",
 			);
-			expect(security?.message).toBe(
-				"Not checked: nothing reported on the security gate at this commit",
+			expect(rollback?.message).toBe(
+				"Not checked: nothing reported on the rollback gate at this commit",
 			);
+		});
+	});
+
+	it("fails security on a secret the work committed, and keeps the secret out of the receipt", async () => {
+		const r = repo();
+		// Built at run time, so this file holds no literal a push-protection scanner reads as a key.
+		const key = `gh${"p_"}${"a1".repeat(18)}`;
+		await gated(r, async (h, m) => {
+			await closedDispatch(h, m, r, {
+				"src/b.ts": `export const b = 2;\nconst token = "${key}";\n`,
+				".env": "PORT=3000\n",
+			});
+			await playbookFor(
+				h,
+				m,
+				[...QA_AND_ACCEPTANCE, { gate: "security", policy: "mandatory" }],
+				RUNNABLE_PLAN,
+			);
+			const res = await run(h, m.missionId);
+			expect(res.status, await res.clone().text()).toBe(201);
+			const posted = successEnvelope(gateRunSchema).parse(
+				await res.json(),
+			).data;
+			expect(posted.result).toBe("fail");
+			const security = posted.gates.find((g) => g.gate === "security");
+			expect(security?.result).toBe("fail");
+			expect(
+				security?.reasons
+					.filter((x) => x.effect === "block")
+					.map((x) => x.subject),
+			).toEqual([
+				".env: an environment file is committed",
+				"src/b.ts:2: matches github-token",
+			]);
+			expect(posted.receipt).not.toContain(key);
+		});
+	});
+
+	it("verifies security on clean work, and lists a new dependency as not checked", async () => {
+		const r = repo();
+		await gated(r, async (h, m) => {
+			await closedDispatch(h, m, r, {
+				"src/b.ts": "export const b = 2;\n",
+				"package.json":
+					'{ "name": "salon", "scripts": { "test": "vitest run" }, "dependencies": { "zod": "^4.0.0" } }\n',
+			});
+			await playbookFor(
+				h,
+				m,
+				[...QA_AND_ACCEPTANCE, { gate: "security", policy: "warn" }],
+				RUNNABLE_PLAN,
+			);
+			const res = await run(h, m.missionId);
+			const posted = successEnvelope(gateRunSchema).parse(
+				await res.json(),
+			).data;
+			// No secret, but nothing here can ask the registry whether zod exists.
+			expect(posted.gates.map((g) => [g.gate, g.result])).toEqual([
+				["qa", "verified"],
+				["security", "pass"],
+				["acceptance", "verified"],
+			]);
+			expect(
+				JSON.parse(posted.receipt).decision.notChecked.map(
+					(n: { findingId: string; source: string | null }) =>
+						`${n.findingId}:${n.source}`,
+				),
+			).toEqual(["check:dependency:package.json#dependencies.zod:registry"]);
+			expect(posted.result).toBe("pass");
 		});
 	});
 

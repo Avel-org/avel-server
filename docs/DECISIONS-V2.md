@@ -1021,6 +1021,20 @@ J decided this on 2026-10-21, after a gate audit showed a run reaching `verified
 - **Consequence.** Every Booking run is `pass` today, never `verified`: `security` has no producer and the plan's test checks have no runner. It becomes `verified` when the runner exists (*Making the gate judge real work*, step 1: an AVEL-owned mirror on GitHub Actions) and a security producer that only reads code is installed.
 - **Open.** A brief whose checks are all `file_exists` can still reach `verified` with no test run, and qa can be `verified` on the spec check and the checkpoints alone. Judges review the mission's base, not the integration commit, so a judge never sees the work it is counted as reviewing.
 
+
+## Decided 2026-10-22: the security gate reads the work
+
+J asked for the security checks to start (2026-10-22). They are the code-reading half of *Making the gate judge real work* step 0.3, built inside the gate instead of as gitleaks and Semgrep binaries, so they need nothing installed and their rules are versioned with `GATE_CONFIG` (version 2).
+
+- **Only what the work added or changed is read:** every path whose blob at the integration commit differs from the base's. A secret the base already had is the client's, and is not this mission's finding.
+- **The secret scan** (`secret-scan`) fails a match of a credential with a fixed, documented shape: private key blocks, AWS access key ids, GitHub, Slack, Stripe live, Google, Anthropic and OpenAI keys. It also fails any committed `.env` or `.env.*` other than `.example`, `.sample`, `.template` and `.dist`. A finding names the path, line and rule, never the matched text, because the receipt is kept and shared.
+- **No entropy rule.** A high-entropy string is as often a hash or a fixture. A check that fails on guesses trains people to override it.
+- **Binary files are not scanned** (a NUL in the first 8000 bytes, git's own test) and are named in the pass. A text file over 1 MiB is an error, so it is listed as not checked.
+- **The dependency check** (`dependencies`) reads every package.json the work added or changed. Each added or changed entry in `dependencies`, `devDependencies`, `optionalDependencies`, `peerDependencies`, `overrides`, `resolutions` or `pnpm.overrides` must be a valid npm name with a registry specifier. A git, URL, `file:` or `link:` specifier fails. `workspace:` and `catalog:` pass.
+- **Whether a new name exists in the registry is not checked here.** That needs the network, and the gate's inputs are the commit and the database. Each new registry dependency is a `not_run` from `registry`, a source that is not installed, so it is listed as not checked and the run cannot be `verified`. The runner's frozen-lockfile install will feed it.
+- **Not built: auth rules** ("every route calls the auth check"). They depend on each repo's framework, and the Booking template has no routes yet.
+- **Consequence.** This supersedes the consequences recorded on 2026-10-21 above, which said `security` has no producer. A Booking run's `security` gate is `verified` when the work commits no secret and adds no dependency. The run is still `pass`, never `verified`, until the runner exists, because the plan's test check has no runner.
+
 ---
 
 ## Open questions

@@ -50,3 +50,30 @@ export async function gitOk(
 
 /** A full commit sha: 40 lowercase hex. */
 export const COMMIT_SHA = /^[0-9a-f]{40}$/;
+
+/** A blob's exact bytes. git() decodes stdout as text, which would change binary files. */
+export function readBlob(source: string, blobSha: string): Promise<Buffer> {
+	return new Promise((resolve, reject) => {
+		execFile(
+			"git",
+			["cat-file", "blob", blobSha],
+			{
+				cwd: source,
+				encoding: "buffer",
+				maxBuffer: 64 * 1024 * 1024,
+				windowsHide: true,
+			},
+			(err, stdout, stderr) => {
+				if (err) {
+					reject(
+						new Error(`git cat-file failed: ${String(stderr).trim()}`, {
+							cause: err,
+						}),
+					);
+					return;
+				}
+				resolve(stdout);
+			},
+		);
+	});
+}

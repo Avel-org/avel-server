@@ -384,9 +384,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						gate: "acceptance",
 						effect: "pass",
 					});
-					// What each listed gate saw. security has no producer, so decide()
-					// records it as not checked. The test check needs a runner, so it
-					// is a degraded warn on a mandatory gate. The gate still runs and
+					// What each listed gate saw. security reads the work: no secret,
+					// no new dependency. The test check needs a runner, so it is a
+					// degraded warn on a mandatory gate. The gate still runs and
 					// records what passed (J, 2026-10-21).
 					expect(
 						run.gates.map((g) => ({
@@ -411,8 +411,11 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						},
 						{
 							gate: "security",
-							result: "pass",
-							reasons: [[null, "warn_not_run", "warn", false]],
+							result: "verified",
+							reasons: [
+								["dependencies", "passed", "pass", false],
+								["secret-scan", "passed", "pass", false],
+							],
 						},
 						{
 							gate: "acceptance",
@@ -423,9 +426,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
 							],
 						},
 					]);
-					// Nothing checked security and no test ran, so the run is a pass,
-					// not verified, and it does not ship (J, 2026-10-21). The receipt
-					// names both gaps.
+					// No test ran, so the run is a pass, not verified, and it does not
+					// ship (J, 2026-10-21). The receipt names the gap.
 					expect(run).toMatchObject({
 						result: "pass",
 						decideVersion: 4,
@@ -436,7 +438,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 							(n: { gate: string; source: string | null }) =>
 								`${n.gate}:${n.source}`,
 						),
-					).toEqual(["security:null", "acceptance:runner"]);
+					).toEqual(["acceptance:runner"]);
 
 					// 10. The mission's activity, oldest first.
 					const log = await h.call(

@@ -41,16 +41,20 @@ import {
 } from "../lib/gate/integration";
 import {
 	briefCheckFindings,
+	type DependencyManifest,
+	dependencyFindings,
 	type JudgeRun,
 	judgeCoverageFindings,
 	protectedPathFindings,
+	type SecretScanFile,
+	secretScanFindings,
 	specCheckFindings,
 	testGlobFindings,
 } from "../lib/gate/producers";
 import { buildReceipt, RECEIPT_VERSION } from "../lib/gate/receipt";
 import { ApiError } from "../middleware/errors";
 import type { FileChange } from "../rooms/checkpoint";
-import { git } from "../rooms/git";
+import { git, readBlob } from "../rooms/git";
 import {
 	buildIntegrationCommit,
 	dispatchChanges,
@@ -352,8 +356,34 @@ export function gateRoutes(deps: GateDeps) {
 			};
 		}
 
+		// The security gate reads what the work added or changed, never the base's own files.
+		const changed = Object.keys(head)
+			.filter((p) => base[p] !== head[p])
+			.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+		const scanned: SecretScanFile[] = [];
+		for (const p of changed) {
+			scanned.push({
+				path: p,
+				content: await readBlob(source, head[p] as string),
+			});
+		}
+		const manifests: DependencyManifest[] = [];
+		for (const f of scanned) {
+			if (f.path !== "package.json" && !f.path.endsWith("/package.json")) {
+				continue;
+			}
+			const before = base[f.path];
+			manifests.push({
+				path: f.path,
+				base: before ? parseJson(await readBlob(source, before)) : undefined,
+				head: parseJson(f.content),
+			});
+		}
+
 		const findings: GateFinding[] = [
 			...specCheckFindings(m.brief, commitSha),
+			...secretScanFindings(scanned, commitSha),
+			...dependencyFindings(manifests, commitSha),
 			...briefCheckFindings(
 				brief.success ? brief.data.checks : [],
 				head,
@@ -654,6 +684,15 @@ export function gateRoutes(deps: GateDeps) {
 			};
 		},
 	});
+}
+
+/** Parsed JSON, or undefined when the bytes are not JSON. */
+function parseJson(bytes: Uint8Array): unknown {
+	try {
+		return JSON.parse(new TextDecoder().decode(bytes));
+	} catch {
+		return undefined;
+	}
 }
 
 /** Gate runs page on (at desc, id desc), the activity feed's own order. */

@@ -1,9 +1,11 @@
 import type { Gate } from "../../contract/playbook";
 import {
 	DEFAULT_PROTECTED_PATHS,
+	DEPENDENCIES_SOURCE,
 	FILE_EXISTS_SOURCE,
 	JUDGE_COVERAGE_SOURCE,
 	PROTECTED_PATHS_SOURCE,
+	SECRET_SCAN_SOURCE,
 	SPEC_CHECK_SOURCE,
 	TEST_GLOB_SOURCE,
 } from "./producers";
@@ -26,15 +28,21 @@ export type GateConfig = {
  * No runner is installed, so test, typecheck and command checks are not_run
  * from `runner`. They degrade to warns, and the run lists them as not
  * checked, so it cannot be verified until a runner is installed.
+ *
+ * Version 2 (2026-10-22) installs the security gate's code-reading checks:
+ * the secret scan and the dependency check (`SECRET_RULES` is part of what
+ * version 2 means).
  */
 export const GATE_CONFIG: GateConfig = Object.freeze({
-	version: 1,
+	version: 2,
 	availableSources: Object.freeze([
 		SPEC_CHECK_SOURCE,
 		FILE_EXISTS_SOURCE,
 		TEST_GLOB_SOURCE,
 		PROTECTED_PATHS_SOURCE,
 		JUDGE_COVERAGE_SOURCE,
+		SECRET_SCAN_SOURCE,
+		DEPENDENCIES_SOURCE,
 	]),
 	// Templates keep tests in their own directories (SANDBOX.md).
 	testGlobs: Object.freeze(["tests/**", "**/*.test.ts", "**/*.spec.ts"]),
