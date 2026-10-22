@@ -8,22 +8,29 @@ export const BRIEF_CHECKS_GATE = "acceptance";
 /** The source of every check that needs a runner. Until one is installed, its not_run degrades. */
 export const RUNNER_SOURCE = "runner";
 
+/** The sources of the brief's own checks, which count whether or not the playbook lists their gate. */
+export const BRIEF_CHECK_SOURCES = [FILE_EXISTS_SOURCE, RUNNER_SOURCE] as const;
+
 /**
  * The brief's Done-when checks on the acceptance gate, one finding each. A
- * file_exists check passes when its path, or a glob, matches a path in
- * `tree` (path to blob sha at `commitSha`), and fails otherwise. A glob the
- * matcher does not understand is an error. test, typecheck and command need
- * a runner, so they are not_run from `runner`. In the brief's order, which
- * the ids carry, so the output is as stable as the brief.
+ * file_exists check passes when its path, or a glob, matches a path the
+ * work created or changed: in `head` (path to blob sha at `commitSha`) with
+ * a blob `base` does not have at that path (J, 2026-10-21). A matching path
+ * the work left as the base had it fails, because the base proves nothing
+ * about the work. A glob the matcher does not understand is an error. test,
+ * typecheck and command need a runner, so they are not_run from `runner`.
+ * In the brief's order, which the ids carry, so the output is as stable as
+ * the brief.
  */
 export function briefCheckFindings(
 	checks: readonly BriefCheck[],
-	tree: Readonly<Record<string, string>>,
+	head: Readonly<Record<string, string>>,
+	base: Readonly<Record<string, string>>,
 	commitSha: string,
 ): GateFinding[] {
-	const paths = Object.keys(tree);
+	const paths = Object.keys(head);
 	return checks.map((ck, i): GateFinding => {
-		const base = {
+		const finding = {
 			gate: BRIEF_CHECKS_GATE,
 			kind: "check",
 			commitSha,
@@ -32,7 +39,7 @@ export function briefCheckFindings(
 		} as const;
 		if (ck.kind !== "file_exists") {
 			return {
-				...base,
+				...finding,
 				source: RUNNER_SOURCE,
 				subject: `${ck.id} (${ck.requirementId}): ${ck.kind} ${ck.command}`,
 				outcome: "not_run",
@@ -41,18 +48,23 @@ export function briefCheckFindings(
 		const subject = `${ck.id} (${ck.requirementId}): ${ck.path}`;
 		if (!supportedGlob(ck.path)) {
 			return {
-				...base,
+				...finding,
 				source: FILE_EXISTS_SOURCE,
 				subject: `${subject} is not a path the matcher understands`,
 				outcome: "error",
 			};
 		}
-		const found = paths.some((p) => matchesGlob(p, ck.path));
+		const matching = paths.filter((p) => matchesGlob(p, ck.path));
+		const changed = matching.some((p) => base[p] !== head[p]);
 		return {
-			...base,
+			...finding,
 			source: FILE_EXISTS_SOURCE,
-			subject: found ? subject : `${subject} does not exist`,
-			outcome: found ? "pass" : "fail",
+			subject: changed
+				? subject
+				: matching.length > 0
+					? `${subject} is unchanged from the base: the work did not create or change it`
+					: `${subject} does not exist`,
+			outcome: changed ? "pass" : "fail",
 		};
 	});
 }

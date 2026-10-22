@@ -13,8 +13,9 @@ import type {
  * Bumped whenever the same input could give a different receipt.
  * 2 (2026-10-21): assurance, and the decision's notChecked.
  * 3 (2026-10-21): one result replaces verdict and assurance.
+ * 4 (2026-10-21): decide() version 4.
  */
-export const RECEIPT_VERSION = 3;
+export const RECEIPT_VERSION = 4;
 
 /**
  * What `deterministicFindings` hashes: findings of these kinds, and checks

@@ -18,6 +18,9 @@ const run = (
 	cfg = config,
 ) => decide(findings, policy, overrides, cfg);
 
+const notCheckedIds = (d: ReturnType<typeof decide>) =>
+	d.notChecked.map((n) => n.findingId);
+
 const rules = (d: ReturnType<typeof decide>) =>
 	d.reasons.map((r) => `${r.findingId}:${r.rule}:${r.effect}`);
 
@@ -303,6 +306,31 @@ describe("decide", () => {
 				"t1:stale_commit:ignored",
 				"not_run:qa:mandatory_not_run:block",
 			]);
+		});
+	});
+
+	describe("f. the brief's own checks count on an unlisted gate (version 4)", () => {
+		it("counts a file_exists fail as mandatory when acceptance is not listed", () => {
+			const brief = check("ck", "acceptance", "fail", {
+				source: "file_exists",
+			});
+			const d = run([check("t1", "qa", "pass"), brief]);
+			expect(d.result).toBe("fail");
+			expect(rules(d)).toContain("ck:mandatory_failed:block");
+		});
+
+		it("keeps a runner check that did not run from verified", () => {
+			const brief = check("ck", "acceptance", "not_run", { source: "runner" });
+			const d = run([check("t1", "qa", "pass"), brief]);
+			expect(d.result).toBe("pass");
+			expect(notCheckedIds(d)).toEqual(["ck"]);
+		});
+
+		it("still ignores another source's finding on an unlisted gate", () => {
+			const other = check("x", "acceptance", "fail", { source: "spec-check" });
+			expect(rules(run([check("t1", "qa", "pass"), other]))).toContain(
+				"x:unlisted_gate:ignored",
+			);
 		});
 	});
 

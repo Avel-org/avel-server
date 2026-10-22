@@ -194,6 +194,13 @@ export function gateRoutes(deps: GateDeps) {
 			});
 		}
 
+		const [pb] = await tx
+			.select({ gates: playbook.gates })
+			.from(playbook)
+			.where(and(eq(playbook.missionType, m.type), live(playbook)));
+		const policy: PlaybookGate[] = pb?.gates ?? [];
+		const brief = briefSchema.safeParse(m.brief);
+
 		const runs = await tx
 			.select({
 				id: dispatch.id,
@@ -345,12 +352,12 @@ export function gateRoutes(deps: GateDeps) {
 			};
 		}
 
-		const brief = briefSchema.safeParse(m.brief);
 		const findings: GateFinding[] = [
 			...specCheckFindings(m.brief, commitSha),
 			...briefCheckFindings(
 				brief.success ? brief.data.checks : [],
 				head,
+				base,
 				commitSha,
 			),
 			...protectedPathFindings({
@@ -438,12 +445,6 @@ export function gateRoutes(deps: GateDeps) {
 				}),
 			),
 		);
-
-		const [pb] = await tx
-			.select({ gates: playbook.gates })
-			.from(playbook)
-			.where(and(eq(playbook.missionType, m.type), live(playbook)));
-		const policy: PlaybookGate[] = pb?.gates ?? [];
 
 		const decision = decide(findings, policy, overrides, {
 			commitSha,

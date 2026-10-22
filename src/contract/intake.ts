@@ -29,8 +29,10 @@ export const checkId = z
 
 /**
  * How a requirement is shown done without taking the agent's word (step 9,
- * docs/STEP-9-PLAN.md). file_exists names a path; the other kinds name a
- * command. The gate (module 9) runs them, never the agent.
+ * docs/STEP-9-PLAN.md). file_exists names a path or glob that the work must
+ * create or change: one the mission's base already had, unchanged, fails
+ * (J, 2026-10-21). The other kinds name a command. The gate (module 9) runs
+ * them, never the agent.
  */
 export const CHECK_KINDS = [
 	"file_exists",

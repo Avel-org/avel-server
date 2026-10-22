@@ -185,6 +185,20 @@ const FILE_CHECKS_PLAN = {
 	],
 };
 
+/**
+ * DISPATCH_PLAN with checks the gate can run: a file_exists on src/** for
+ * each requirement, which every dispatch here satisfies by writing under
+ * src/. DISPATCH_PLAN's own test checks have no runner, so a run on it
+ * lists them as not checked and is never verified.
+ */
+const RUNNABLE_PLAN = {
+	...DISPATCH_PLAN,
+	checks: [
+		{ id: "CK1", requirementId: "R1", kind: "file_exists", path: "src/**" },
+		{ id: "CK2", requirementId: "R2", kind: "file_exists", path: "src/**" },
+	],
+};
+
 const run = (
 	h: ApiHarness,
 	missionId: string,
@@ -213,6 +227,10 @@ async function gated(
 			await h.signIn();
 			const m = await activeMission(h.tx, runnerIds(h.ns));
 			await pinTo(h.tx, m, r.pinned);
+			await h.tx
+				.update(mission)
+				.set({ brief: RUNNABLE_PLAN as never })
+				.where(eq(mission.id, m.missionId));
 			await fn(h, m);
 		},
 		{ roomSources: r.roomSources },
@@ -269,20 +287,13 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 			expect(posted.receiptSha256).toBe(
 				createHash("sha256").update(posted.receipt, "utf8").digest("hex"),
 			);
-			// The plan's test checks have no runner yet: degraded warns, never passes.
-			const degraded = posted.reasons.filter((x) => x.degraded);
-			expect(degraded.length).toBeGreaterThan(0);
-			for (const x of degraded) expect(x.effect).toBe("warn");
-			// So the run is a pass, not verified, and it cannot ship.
-			expect(posted.result).toBe("pass");
-			expect([posted.decideVersion, posted.receiptVersion]).toEqual([3, 3]);
+			// Every check ran and passed, so the run is verified.
+			expect(posted.reasons.filter((x) => x.degraded)).toEqual([]);
+			expect(posted.result).toBe("verified");
+			expect([posted.decideVersion, posted.receiptVersion]).toEqual([4, 4]);
 			const receipt = JSON.parse(posted.receipt);
-			expect(receipt.result).toBe("pass");
-			expect(
-				receipt.decision.notChecked.map(
-					(n: { findingId: string }) => n.findingId,
-				),
-			).toEqual(expect.arrayContaining(degraded.map((x) => x.findingId)));
+			expect(receipt.result).toBe("verified");
+			expect(receipt.decision.notChecked).toEqual([]);
 
 			const list = gateRunListEnvelope.parse(
 				await (await h.call(`/api/missions/${m.missionId}/gate-runs`)).json(),
@@ -290,7 +301,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 			expect(list.meta.total).toBe(1);
 			expect(list.data[0]?.id).toBe(posted.id);
 			expect(list.data[0]?.actor.kind).toBe("operator");
-			expect(list.data[0]?.result).toBe("pass");
+			expect(list.data[0]?.result).toBe("verified");
 			const read = successEnvelope(gateRunSchema).parse(
 				await (
 					await h.call(`/api/missions/${m.missionId}/gate-runs/${posted.id}`)
@@ -318,9 +329,9 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 			delete v2.result;
 			delete v2.decision.result;
 			v2.verdict = "pass";
-			v2.assurance = "not_fully_checked";
+			v2.assurance = "verified";
 			v2.decision.verdict = "pass";
-			v2.decision.assurance = "not_fully_checked";
+			v2.decision.assurance = "verified";
 			const verdictOf: Record<string, string> = {
 				verified: "pass",
 				pass: "warn",
@@ -343,7 +354,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 				payload: {
 					...oldPayload,
 					verdict: "pass",
-					assurance: "not_fully_checked",
+					assurance: "verified",
 					decideVersion: 2,
 					receiptVersion: 2,
 					receipt: JSON.stringify(v2),
@@ -354,14 +365,14 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 					await h.call(`/api/missions/${m.missionId}/gate-runs/${oldId}`)
 				).json(),
 			).data;
-			expect([old.decideVersion, old.result]).toEqual([2, "pass"]);
+			expect([old.decideVersion, old.result]).toEqual([2, "verified"]);
 			expect(old.gates.map((g) => g.result)).toEqual(
 				posted.gates.map((g) => g.result),
 			);
 			const oldList = gateRunListEnvelope.parse(
 				await (await h.call(`/api/missions/${m.missionId}/gate-runs`)).json(),
 			);
-			expect(oldList.data.find((x) => x.id === oldId)?.result).toBe("pass");
+			expect(oldList.data.find((x) => x.id === oldId)?.result).toBe("verified");
 		});
 	});
 
@@ -383,6 +394,10 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 					})
 					.where(eq(mission.id, m.missionId));
 				expect(TEMPLATE_COMMIT).not.toBe(r.pinned);
+				await h.tx
+					.update(mission)
+					.set({ brief: RUNNABLE_PLAN as never })
+					.where(eq(mission.id, m.missionId));
 				await closedDispatch(h, m, r, { "src/b.ts": "export const b = 2;\n" });
 				const res = await run(h, m.missionId);
 				expect(res.status, await res.clone().text()).toBe(201);
@@ -396,6 +411,51 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 			},
 			{ roomSources: r.roomSources },
 		);
+	});
+
+	it("runs without the tools for every check, and lists what it could not check", async () => {
+		const r = repo();
+		await gated(r, async (h, m) => {
+			await closedDispatch(h, m, r, { "src/b.ts": "export const b = 2;\n" });
+			// security has no producer, and the plan's test checks no runner.
+			await playbookFor(
+				h,
+				m,
+				[...QA_AND_ACCEPTANCE, { gate: "security" as "qa", policy: "warn" }],
+				DISPATCH_PLAN,
+			);
+			const res = await run(h, m.missionId);
+			expect(res.status, await res.clone().text()).toBe(201);
+			const posted = successEnvelope(gateRunSchema).parse(
+				await res.json(),
+			).data;
+			// It ran and recorded what passed...
+			expect(posted.gates.map((g) => [g.gate, g.result])).toEqual([
+				["qa", "verified"],
+				["security", "pass"],
+				["acceptance", "pass"],
+			]);
+			// ...and names each thing it could not check, so it is not verified
+			// and cannot ship (J, 2026-10-21).
+			expect(posted.result).toBe("pass");
+			const receipt = JSON.parse(posted.receipt);
+			expect(
+				receipt.decision.notChecked.map(
+					(n: { findingId: string; source: string | null }) =>
+						`${n.findingId}:${n.source}`,
+				),
+			).toEqual([
+				"not_run:security:null",
+				"check:CK1:0:runner",
+				"check:CK2:1:runner",
+			]);
+			const security = posted.reasons.find(
+				(x) => x.findingId === "not_run:security",
+			);
+			expect(security?.message).toBe(
+				"Not checked: nothing reported on the security gate at this commit",
+			);
+		});
 	});
 
 	it("blocks, with no override, when a builder wrote a test file", async () => {
@@ -529,7 +589,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 				"mandatory_failed",
 			]);
 			expect(of("check:CK2:1")?.subject).toContain("does not exist");
-			expect(posted.verdict).toBe("block");
+			expect(posted.result).toBe("fail");
 		});
 	});
 
@@ -593,7 +653,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 				// the open finding itself blocks
 				[open]: "judge_open",
 			});
-			expect(posted.verdict).toBe("block");
+			expect(posted.result).toBe("fail");
 		});
 	});
 

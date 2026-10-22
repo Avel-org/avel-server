@@ -958,7 +958,7 @@ J decided both on 2026-10-21, in a BE Main session.
 
 - **`template-booking` lists no `phase1-close` until something produces its evidence.** A mandatory gate with no evidence blocks, and no override clears it, so the seeded playbook could never pass. A producer waits on the client-conformance artifact (`CLIENT-CONTRACT-CONFORMANCE.md`), which is unspecified. `tests/unit/seed-playbook.test.ts` refuses any seeded mandatory gate that no producer feeds.
 - **The spec check reports on `qa`, not `alignment`.** `alignment` keeps the meaning the docs give it: phase 2 conforms to the phase-1 interface. The spec check asks whether every requirement has a criterion and a check, which is a quality-of-the-plan question. The Booking playbook does not list `alignment`, so the spec check's results were being ignored.
-- **`security` stays on `template-booking`** (J, later the same day). It was taken off only to try a seeded mission, and doing so let an empty run reach `verified` (the gate audit, 2026-10-21). A listed gate that nothing feeds is to be refused before the run, not removed from the playbook.
+- **`security` stays on `template-booking`** (J, later the same day). It was taken off only to try a seeded mission, and doing so let an empty run reach `verified` (the gate audit, 2026-10-21). A listed gate that nothing feeds is recorded as not checked, which keeps the run from `verified`, instead of being removed from the playbook (*no gate without its tools*).
 
 ---
 
@@ -1007,6 +1007,19 @@ J decided this on 2026-10-21, while settling render and delivery. A run, and eac
 - **No reasons is a `pass`.** A playbook that lists no gate checked nothing.
 - **Old runs.** A stored run of decide() version 1 or 2 gets its result from its receipt's reasons, the same rule, so its result does not depend on which version wrote it. Canon's fetch tool reads no receipt, so it reads an old run's verdict `block` as `fail` and `pass` as `pass`, never `verified`.
 - **Consequence.** Today the Booking playbook's `security` gate has no producer and its test checks have no runner, so no Booking mission can reach `verified`. Shipping needs both, or a playbook change.
+
+
+## Decided 2026-10-21: no gate without its tools
+
+J decided this on 2026-10-21, after a gate audit showed a run reaching `verified` on work that was never done. J's requirement: nothing is trusted without the proper test tools and materials.
+
+- **The gate always runs, and records what it could not check.** A listed gate no producer feeds gets a not-checked reason ("Not checked: nothing reported on the security gate at this commit"), and a brief check whose tool is not installed is a degraded not_run. Both are listed in the receipt's `notChecked`, so the run cannot be `verified`, and only `verified` work is delivered. The rule holds at shipping, not at running.
+- **Rejected: refusing the run up front** (`gate_unproduced`, `check_unrunnable`, built and withdrawn the same day). J: "this is not good practice for the gates". A refused run leaves no receipt, shows nothing of what did pass, and reveals one gap at a time.
+- **The brief's checks always count** (`decide()` version 4). A requirement's check is no longer ignored because the playbook leaves its gate out; it counts as on a mandatory gate.
+- **`file_exists` means the work created or changed the path.** A path the base already had, unchanged, fails: the base proves nothing about the work.
+- **An integration commit that changed nothing is not judged** (`nothing_to_judge`, the tree equals the base's).
+- **Consequence.** Every Booking run is `pass` today, never `verified`: `security` has no producer and the plan's test checks have no runner. It becomes `verified` when the runner exists (*Making the gate judge real work*, step 1: an AVEL-owned mirror on GitHub Actions) and a security producer that only reads code is installed.
+- **Open.** A brief whose checks are all `file_exists` can still reach `verified` with no test run, and qa can be `verified` on the spec check and the checkpoints alone. Judges review the mission's base, not the integration commit, so a judge never sees the work it is counted as reviewing.
 
 ---
 
