@@ -1044,7 +1044,7 @@ J chose these on 2026-10-22, when the export routes were built (`src/routes/expo
 - **A zip computes violations only.** It reads no remote. Its violations and each file's create or overwrite come from the mission's base in the local clone. It records no blast radius.
 - **The render runs inside the request.** A preview answers `previewed` and a zip answers `done`. A refusal writes no export row.
 
-Built this way in the same change, for J to confirm:
+Built this way in the same change, and confirmed by J on 2026-10-22:
 
 - **A zip's bytes are not stored.** The Drive's orphan sweep removes any blob no `file` row names, so a zip in that store would be swept. The export records the zip's sha256 and length and the dispatch inputs its integration commit was rebuilt from. `GET /api/exports/:id/zip` renders again from those inputs and refuses `DETERMINISM_VIOLATION` when the sha256 differs. This follows *render and delivery* above: the integration commit is rebuilt, not stored. It supersedes `EXPORT-ENGINE.md` §13's archive rule until frozen bytes have a store.
 - **A preview records what would refuse delivery instead of refusing.** The gate's result and the violations land on the preview, in `blocked`, so the pre-flight screen shows the whole package beside the reason. `BLAST-RADIUS.md`'s contract lists `BLAST_RADIUS_VIOLATION` and `PRECONDITION_FAILED` as 422s on preview. A create still refuses both.
