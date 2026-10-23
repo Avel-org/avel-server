@@ -149,7 +149,8 @@ export const exportSchema = z.object({
 	baseCommitSha: sha40.nullable(),
 	/**
 	 * The package: the files the integration commit changed from the
-	 * mission's base, plus .avel/receipt.json, and the paths it deleted.
+	 * mission's base, plus .avel/receipt.json and each complete dispatch's
+	 * frozen brief at .avel/dispatches/<dispatch id>.md, and the paths it deleted.
 	 * `change` is against the mission's base. sha256 is packageSha256, which
 	 * leaves the receipt out, under hashVersion.
 	 */

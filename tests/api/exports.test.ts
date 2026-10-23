@@ -12,8 +12,11 @@ import {
 } from "../../src/contract";
 import { closeDb } from "../../src/db/client";
 import {
+	client,
 	completionReport,
 	connection,
+	dispatch,
+	engagement,
 	exportTable,
 	mission,
 	playbook,
@@ -322,6 +325,72 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 		);
 	});
 
+	it("ships each complete dispatch's frozen brief, and refuses one that no longer matches its hash", async () => {
+		const r = repo();
+		await withApi(
+			async (h) => {
+				const m = await prepared(h, r, { "src/b.ts": "export const b = 2;\n" });
+				const briefMd = "# Brief\n\n## Scope\n\nR1, R2\n";
+				const [d] = await h.tx
+					.update(dispatch)
+					.set({ briefMd, briefSha256: sha256(Buffer.from(briefMd, "utf8")) })
+					.where(eq(dispatch.missionId, m.missionId))
+					.returning({ id: dispatch.id });
+				const path = `.avel/dispatches/${d?.id}.md`;
+				const run = await gate(h, m.missionId);
+				const body = { missionId: m.missionId, target: "zip" };
+				const preview = await created(
+					await post(h, "/api/exports/preview", body),
+				);
+				expect(preview.package.files.map((f) => [f.path, f.change])).toEqual([
+					[path, "create"],
+					[".avel/receipt.json", "create"],
+					["src/b.ts", "create"],
+				]);
+				expect(
+					preview.package.files.find((f) => f.path === path)?.blobSha,
+				).toBe(gitBlobSha(new TextEncoder().encode(briefMd)));
+				const done = await created(
+					await post(h, "/api/exports", {
+						...body,
+						gateRunId: run.id,
+						previewExportId: preview.id,
+					}),
+				);
+				expect(done.package.sha256).toBe(preview.package.sha256);
+
+				// The text moves while its frozen hash stays: the package would
+				// not carry what the agent was told.
+				await h.tx
+					.update(dispatch)
+					.set({ briefMd: `${briefMd}edited\n` })
+					.where(eq(dispatch.missionId, m.missionId));
+				const e = await refused(await h.call(`/api/exports/${done.id}/zip`));
+				expect(e.code).toBe("DETERMINISM_VIOLATION");
+				const again = await refused(
+					await post(h, "/api/exports/preview", body),
+				);
+				expect(again.code).toBe("DETERMINISM_VIOLATION");
+
+				// A deleted mission hides its exports, as it hides its dispatches.
+				await h.tx
+					.update(mission)
+					.set({ deletedAt: clock.now() })
+					.where(eq(mission.id, m.missionId));
+				for (const url of [
+					`/api/exports/${done.id}`,
+					`/api/exports/${done.id}/zip`,
+					`/api/dispatches/${d?.id}`,
+					`/api/missions/${m.missionId}/exports`,
+				]) {
+					const hidden = await refused(await h.call(url), 404);
+					expect(hidden.code, url).toBe("NOT_FOUND");
+				}
+			},
+			{ roomSources: r.roomSources },
+		);
+	});
+
 	it("previews work the gate did not verify, and refuses to deliver it", async () => {
 		const r = repo();
 		await withApi(
@@ -572,6 +641,23 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 					}),
 				);
 				expect(reasonOf(noRepo)).toBe("export_target_repo_missing");
+
+				// A deleted client hides its missions' exports, as it hides their dispatches.
+				const [eng] = await h.tx
+					.select({ clientId: engagement.clientId })
+					.from(engagement)
+					.where(eq(engagement.id, m.engagementId as string));
+				await h.tx
+					.update(client)
+					.set({ deletedAt: clock.now() })
+					.where(eq(client.id, eng?.clientId as string));
+				for (const url of [
+					`/api/exports/${preview.id}`,
+					`/api/missions/${m.missionId}/exports`,
+				]) {
+					const hidden = await refused(await h.call(url), 404);
+					expect(hidden.code, url).toBe("NOT_FOUND");
+				}
 			},
 			{ roomSources: r.roomSources, repos },
 		);

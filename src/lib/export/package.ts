@@ -16,23 +16,42 @@ export const RECEIPT_PATH = ".avel/receipt.json";
 export const DELETES_PATH = ".avel/deletes.json";
 
 /**
+ * Where each dispatch's brief sits in the package (J, 2026-10-22): one file
+ * per complete dispatch the integration commit was built from, at
+ * .avel/dispatches/<dispatch id>.md, holding the brief frozen at start byte
+ * for byte. Its sha256 is the dispatch's brief_sha256, so a reader can check
+ * it. The identity is not shipped: it holds AVEL's role text.
+ */
+export const DISPATCH_BRIEFS_DIR = ".avel/dispatches/";
+
+/** A dispatch's frozen brief, as the package ships it. */
+export type DispatchBrief = { dispatchId: string; briefMd: string };
+
+/** Where one dispatch's brief sits in the package. */
+export const dispatchBriefPath = (dispatchId: string) =>
+	`${DISPATCH_BRIEFS_DIR}${dispatchId}.md`;
+
+/**
  * The package (module 10, decided 2026-10-21): the files the gate's
  * integration commit changed from the mission's base, with their modes,
- * plus the gate receipt at .avel/receipt.json, and the paths the commit
+ * plus the gate receipt at .avel/receipt.json and each complete
+ * dispatch's brief under .avel/dispatches/, and the paths the commit
  * deleted. Files and deletes are each sorted by codepoint.
  */
 export type RenderedPackage = { files: PackageFile[]; deletes: string[] };
 
 /**
- * The package from what readPackage read and the receipt's exact string.
- * Pure. The receipt is added as a 100644 file of the string's UTF-8 bytes.
- * Refused (ExportRefused) when the integration commit itself wrote or
- * deleted .avel/receipt.json or .avel/deletes.json, because the package's
- * own would replace it.
+ * The package from what readPackage read, the receipt's exact string and
+ * the dispatches' briefs. Pure. The receipt and each brief are added as
+ * 100644 files of their strings' UTF-8 bytes. Refused (ExportRefused) when
+ * the integration commit itself wrote or deleted .avel/receipt.json,
+ * .avel/deletes.json or anything under .avel/dispatches/, because the
+ * package's own would replace it.
  */
 export function renderPackage(input: {
 	read: PackageRead;
 	receipt: string;
+	briefs: readonly DispatchBrief[];
 }): RenderedPackage {
 	const { read } = input;
 	if (
@@ -53,17 +72,34 @@ export function renderPackage(input: {
 			path: DELETES_PATH,
 		});
 	}
-	const bytes = new TextEncoder().encode(input.receipt);
-	const receipt: PackageFile = {
-		path: RECEIPT_PATH,
-		mode: "100644",
-		bytes,
-		blobSha: gitBlobSha(bytes),
-	};
+	const written = [...read.files.map((f) => f.path), ...read.deletes].find(
+		(p) => p.startsWith(DISPATCH_BRIEFS_DIR),
+	);
+	if (written !== undefined) {
+		throw refuse("The integration commit changed a dispatch brief's path", {
+			reason: "dispatch_brief_path_written",
+			path: written,
+		});
+	}
+	const briefs = input.briefs.map((b) =>
+		textFile(dispatchBriefPath(b.dispatchId), b.briefMd),
+	);
+	if (new Set(briefs.map((b) => b.path)).size !== briefs.length) {
+		throw new Error("The package lists one dispatch's brief twice");
+	}
 	return {
-		files: [...read.files, receipt].sort((a, b) => byCodepoint(a.path, b.path)),
+		files: [
+			...read.files,
+			textFile(RECEIPT_PATH, input.receipt),
+			...briefs,
+		].sort((a, b) => byCodepoint(a.path, b.path)),
 		deletes: [...read.deletes].sort(byCodepoint),
 	};
+}
+
+function textFile(path: string, text: string): PackageFile {
+	const bytes = new TextEncoder().encode(text);
+	return { path, mode: "100644", bytes, blobSha: gitBlobSha(bytes) };
 }
 
 /**
@@ -87,7 +123,8 @@ export const PACKAGE_HASH_VERSION = 1;
  * can hold a NUL (git paths cannot), so the encoding is unambiguous.
  *
  * The receipt is left out, so the hash is the work's alone: the same
- * changes hash the same whichever gate run they carry. Each file's
+ * changes hash the same whichever gate run they carry. The dispatch briefs
+ * are in it, because they belong to the dispatches the changes came from. Each file's
  * blob sha is recomputed from its bytes and must equal the one it carries,
  * so the hash is over the bytes and not over a claim about them.
  */
