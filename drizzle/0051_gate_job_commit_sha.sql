@@ -1,0 +1,2 @@
+ALTER TABLE "gate_job" ADD COLUMN "commit_sha" text;--> statement-breakpoint
+ALTER TABLE "gate_job" ADD CONSTRAINT "gate_job_commit_sha_hex" CHECK ("gate_job"."commit_sha" is null or "gate_job"."commit_sha" ~ '^[0-9a-f]{40}$');

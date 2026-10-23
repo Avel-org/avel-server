@@ -10,6 +10,17 @@ export type CheckRunRequest = {
 	/** A full commit sha: the gate's integration commit. */
 	commitSha: string;
 	checks: readonly RunnableCheck[];
+	/**
+	 * Called before each check with how many are done and the index (in
+	 * `checks`) of the one starting, and once at the end with null. Awaited,
+	 * so a slow write holds the next check, never races it.
+	 */
+	onProgress?: (checksDone: number, current: number | null) => Promise<void>;
+	/**
+	 * Asked before each check. True stops the run: the checks not yet run
+	 * are errors. The gate job's time limit, read from its clock.
+	 */
+	shouldStop?: () => boolean;
 };
 
 /**
@@ -35,4 +46,9 @@ export type CheckRunResult = {
 export interface CheckRunner {
 	readonly id: string;
 	run(request: CheckRunRequest): Promise<CheckRunResult[]>;
+	/**
+	 * At startup: removes what a run left when the server stopped in the
+	 * middle of it (containers, for Docker). Assumes one server process.
+	 */
+	sweep?(): Promise<void>;
 }

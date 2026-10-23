@@ -39,6 +39,7 @@ const EXPECTED_TABLES = [
 	"export",
 	"file",
 	"finding",
+	"gate_job",
 	"intake",
 	"intake_files",
 	"knowledge_entry",

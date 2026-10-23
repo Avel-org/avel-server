@@ -1077,6 +1077,20 @@ J approved these on 2026-10-22, from BE Main's recommendations. None is built.
 - **Start wave refuses while an earlier wave has a queued or running dispatch,** and warns when one is blocked `[specced]`. No gate run is required between waves.
 - **The gate runner's first host is local Docker,** taken off hold `[specced]`. It is the only option that can deny the network for the check phase today, which `SANDBOX.md` requires. The runner sits behind one gateway, so the GitHub Actions mirror can be a second host.
 
+## Decided 2026-10-23: gate runs in the background
+
+J asked for the gate to run in the background before the Docker runner goes live (2026-10-23), with FE Main consulted. A test suite takes minutes; the gate ran inside the POST and its transaction. The shape was agreed with FE Main before it landed.
+
+- **The POST queues a job and answers 202.** It still checks every precondition, so a refusal is immediate. One path for every run, with or without a runner. Rejected: 201 when no runner is installed, which would give the client two paths.
+- **A tick runs one job at a time, server-wide,** oldest first. It judges, runs the checks outside any transaction, and judges again. A commit that moved meanwhile fails the job `integration_moved`, so checks never count for a commit they did not run on.
+- **A failed job leaves no run,** and its `failure.code` is a closed list (`GATE_JOB_FAILURES`). A runner that breaks is not a failure: its checks are errors and the run's result is fail.
+- **The client polls** `GET /api/gate-jobs/:id`, and the mission wire carries `activeGateJob` and `gateRunning`. Rejected: server-sent events, a second transport for a few minutes of waiting (FE Main).
+- **`gate_job` is the eighth exception to the schema freeze.** It supersedes "There is no GateRun table" (2026-10-19) only for jobs: a run is still its `mission.gate_run` row, which now names its job.
+- **The 2-hour limit is a guess** `[hypothesis]`. Past it the runner starts no more checks, and the job fails `timed_out`. Every docker step has its own time limit, so no step can hang the one-at-a-time queue.
+- **A job is bound to the commit its POST judged** (`gate_job.commit_sha`, drizzle/0051, from code review). The overrides name that commit, so a dispatch that closes while the job is queued fails it `integration_moved` instead of gating a commit the operator never asked about.
+- **Stopping the server does not wait for a running job.** The next start fails it `interrupted` and the runner removes its container. This assumes one server process: a second process starting would fail the first one's job. A job something else ended cannot be marked done afterwards, and its run is rolled back.
+- **Two code review findings stand as designed** (BE Main, 2026-10-23, for J to confirm). A POST that finds a job already running records nothing, neither its key nor its overrides; the client shows "Already running", and a retry after that job ends queues a new one. Idempotency keys used on gate runs before gate jobs no longer replay; only dev data predates them.
+
 ---
 
 ## Open questions

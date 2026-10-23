@@ -17,6 +17,7 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
+import { GATE_JOB_FAILURES, GATE_JOB_STATUSES } from "../../contract/gate-job";
 import { EXPORT_STATUSES, INTAKE_STATUSES } from "../../contract/shared/status";
 import { engagement } from "./agency";
 import { user } from "./auth";
@@ -185,6 +186,92 @@ export const exportTable = pgTable(
 			"export_gate_override_complete",
 			sql`(${t.gateOverrideGate} is null and ${t.gateOverrideJustification} is null and ${t.gateOverrideBy} is null and ${t.gateOverrideAt} is null)
 				or (${t.gateOverrideGate} is not null and ${t.gateOverrideJustification} is not null and btrim(${t.gateOverrideJustification}) <> '' and ${t.gateOverrideBy} is not null and ${t.gateOverrideAt} is not null)`,
+		),
+	],
+);
+
+export const gateJobStatus = pgEnum("gate_job_status", GATE_JOB_STATUSES);
+export const gateJobFailure = pgEnum("gate_job_failure", GATE_JOB_FAILURES);
+
+/**
+ * A gate run in the background (decided 2026-10-23). The POST queues it with
+ * the request's overrides; the gate tick runs it and, when done, names the
+ * mission.gate_run row it wrote. At most one queued or running job per
+ * mission. The eighth exception to the schema freeze, with J's approval of
+ * background gate runs.
+ */
+export const gateJob = pgTable(
+	"gate_job",
+	{
+		...id,
+		missionId: uuid("mission_id")
+			.notNull()
+			.references(() => mission.id),
+		status: gateJobStatus("status").notNull(),
+		// Who queued it: the actor of the run it makes.
+		operatorId: uuid("operator_id")
+			.notNull()
+			.references(() => user.id),
+		idempotencyKey: text("idempotency_key"),
+		requestSha256: text("request_sha256").notNull(),
+		overrides: jsonb("overrides").notNull(),
+		// The integration commit the POST judged, which the overrides bind to.
+		// Null only on jobs queued before drizzle/0051.
+		commitSha: text("commit_sha"),
+		// The mission.gate_run row it made. No foreign key: activity_log is
+		// append-only, and a reference would turn its TRUNCATE refusal into a
+		// foreign-key error instead of the append-only one.
+		gateRunId: uuid("gate_run_id"),
+		failureCode: gateJobFailure("failure_code"),
+		failureReason: text("failure_reason"),
+		failureMessage: text("failure_message"),
+		checksTotal: integer("checks_total"),
+		checksDone: integer("checks_done"),
+		currentCheckId: text("current_check_id"),
+		queuedAt: at("queued_at").notNull(),
+		startedAt: at("started_at"),
+		finishedAt: at("finished_at"),
+		...timestamps,
+	},
+	(t) => [
+		uniqueIndex("gate_job_one_active_per_mission_uq")
+			.on(t.missionId)
+			.where(sql`${t.status} in ('queued', 'running')`),
+		uniqueIndex("gate_job_idempotency_key_uq")
+			.on(t.missionId, t.idempotencyKey)
+			.where(sql`${t.idempotencyKey} is not null`),
+		index("gate_job_queue_idx").on(t.status, t.queuedAt, t.id),
+		check(
+			"gate_job_commit_sha_hex",
+			sql`${t.commitSha} is null or ${t.commitSha} ~ '^[0-9a-f]{40}$'`,
+		),
+		check(
+			"gate_job_request_sha256_hex",
+			sql`${t.requestSha256} ~ '^[0-9a-f]{64}$'`,
+		),
+		check(
+			"gate_job_run_iff_done",
+			sql`(${t.status} = 'done') = (${t.gateRunId} is not null)`,
+		),
+		check(
+			"gate_job_failure_iff_failed",
+			sql`(${t.status} = 'failed') = (${t.failureCode} is not null)`,
+		),
+		check(
+			"gate_job_reason_only_for_precondition",
+			sql`${t.failureReason} is null or ${t.failureCode} = 'precondition_failed'`,
+		),
+		check(
+			"gate_job_started_unless_queued",
+			sql`(${t.status} = 'queued') = (${t.startedAt} is null)`,
+		),
+		check(
+			"gate_job_finished_iff_ended",
+			sql`(${t.status} in ('done', 'failed')) = (${t.finishedAt} is not null)`,
+		),
+		check(
+			"gate_job_progress_counts",
+			sql`(${t.checksTotal} is null) = (${t.checksDone} is null) and (${t.checksDone} is null or (${t.checksDone} >= 0 and ${t.checksDone} <= ${t.checksTotal}))`,
 		),
 	],
 );

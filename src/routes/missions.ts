@@ -28,6 +28,7 @@ import {
 	client,
 	engagement,
 	exportTable,
+	gateJob,
 	mission,
 	playbook,
 	rosterEntry,
@@ -37,6 +38,7 @@ import { live, touch } from "../db/schema/columns";
 import { type Executor, withTx } from "../db/tx";
 import { ApiError } from "../middleware/errors";
 import { activityActor, actorColumns } from "./activity";
+import { jobsAhead, toJob } from "./gate";
 import {
 	containsPattern,
 	notFound,
@@ -275,6 +277,7 @@ type ListRow = {
 	exportStatusChangedAt: Date | null;
 	lastActivityAt: Date | string | null;
 	needsYou: "export_previewed" | "pr_open" | null;
+	gateRunning: boolean;
 	clientSortKey: string | null;
 	createdAt: Date;
 	updatedAt: Date;
@@ -313,6 +316,7 @@ function toItem(row: ListRow): MissionListItem {
 				: null,
 		lastActivityAt: iso(row.lastActivityAt),
 		needsYou: row.needsYou ? { reason: row.needsYou } : null,
+		gateRunning: row.gateRunning === true,
 		createdAt: row.createdAt.toISOString(),
 		updatedAt: row.updatedAt.toISOString(),
 	};
@@ -339,6 +343,9 @@ function itemFields(b: ReturnType<typeof base>) {
 		exportStatusChangedAt: b.lx.statusChangedAt,
 		lastActivityAt: b.la.at,
 		needsYou: b.needsYou,
+		// Qualified by hand: inside a raw select-list Drizzle leaves columns
+		// unqualified, and the subquery would bind to its own table.
+		gateRunning: sql<boolean>`exists (select 1 from "gate_job" where "gate_job"."mission_id" = "mission"."id" and "gate_job"."status" in ('queued', 'running'))`,
 		clientSortKey: sql<string | null>`lower(${client.name}) collate "C"`,
 		createdAt: mission.createdAt,
 		updatedAt: mission.updatedAt,
@@ -364,7 +371,7 @@ async function missionDetailOf(
 		.groupBy(rosterEntry.missionId)
 		.as("roster");
 
-	// Query 1 of 3: the mission with every join.
+	// Query 1 of 4: the mission with every join.
 	const [row] = await db
 		.select({
 			...itemFields(b),
@@ -402,7 +409,7 @@ async function missionDetailOf(
 		);
 	if (!row) throw notFound("mission", id);
 
-	// Query 2 of 3: the ten newest activity rows, with their actors,
+	// Query 2 of 4: the ten newest activity rows, with their actors,
 	// joined as the activity feed joins them (no live()).
 	const activity = await db
 		.select({
@@ -419,8 +426,20 @@ async function missionDetailOf(
 		.orderBy(desc(activityLog.at), desc(activityLog.id))
 		.limit(10);
 
-	// Query 3 of 3: what the mission's dispatches have spent.
+	// Query 3 of 4: what the mission's dispatches have spent.
 	const spentUsd = await missionSpentUsd(db, id);
+
+	// Query 4 of 4: the queued or running gate job, if any.
+	const [job] = await db
+		.select()
+		.from(gateJob)
+		.where(
+			and(
+				eq(gateJob.missionId, id),
+				sql`${gateJob.status} in ('queued', 'running')`,
+			),
+		);
+	const activeGateJob = job ? toJob(job, await jobsAhead(db, job)) : null;
 
 	const item = toItem(row as ListRow);
 	const detail: MissionDetail = {
@@ -446,6 +465,7 @@ async function missionDetailOf(
 			at: a.at.toISOString(),
 			actor: activityActor(a),
 		})),
+		activeGateJob,
 	};
 	return detail;
 }
