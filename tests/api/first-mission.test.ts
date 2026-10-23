@@ -432,7 +432,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					expect(run).toMatchObject({
 						result: "pass",
 						decideVersion: 4,
-						receiptVersion: 4,
+						receiptVersion: 5,
 					});
 					expect(
 						JSON.parse(run.receipt).decision.notChecked.map(

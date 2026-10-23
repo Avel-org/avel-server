@@ -58,6 +58,7 @@ function input(
 		config: gateConfig(),
 		findings,
 		overrides,
+		runner: null,
 		judges: [
 			{
 				dispatchId: "dj1",
@@ -363,6 +364,7 @@ describe("buildReceipt properties", () => {
 			config: gateConfig({ availableSources: s.config.availableSources }),
 			findings: s.findings,
 			overrides,
+			runner: null,
 			judges: ["dj2", "dj1", "dj3"].map((dispatchId, i) => ({
 				dispatchId,
 				agentVersionSha256: String(i).repeat(64),

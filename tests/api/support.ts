@@ -12,6 +12,7 @@ import { activityLog, user } from "../../src/db/schema";
 import * as authSchema from "../../src/db/schema/auth";
 import { type Tx, withTx } from "../../src/db/tx";
 import { memoryBlobs } from "../../src/gateways/blob";
+import type { CheckRunner } from "../../src/gateways/check-runner";
 import type { RepoSource } from "../../src/gateways/repo-source";
 import {
 	noTemplates,
@@ -145,6 +146,8 @@ export async function withApi(
 		roomSources?: RoomSourceResolver;
 		/** The Drive. Default: blobs in memory, the default upload cap. */
 		drive?: Drive;
+		/** The gate's check runner. Default: none installed. */
+		checkRunner?: CheckRunner;
 		/**
 		 * Run the whole app as avel_app, the runtime role, instead of the
 		 * owner. Row-level security applies only then: as the owner (a
@@ -227,6 +230,7 @@ async function runApi(
 				blobs: memoryBlobs(),
 				maxBytes: DEFAULT_UPLOAD_MAX_BYTES,
 			},
+			checkRunner: options.checkRunner ?? null,
 		});
 
 		let cookie = "";
