@@ -1054,6 +1054,19 @@ Built this way in the same change, for J to confirm:
 - **A preview of one target approves no other** (`preview_target_mismatch`).
 - **A missing branch is `BRANCH_NOT_FOUND` for every target.** `BLAST-RADIUS.md` says a PR compares against the base instead. That is slice 2's.
 
+## Decided 2026-10-22: the dispatch briefs ship in the package
+
+J decided these on 2026-10-22. It reverses part of *render and delivery* (2026-10-21), which took AVEL's own brief out of the package.
+
+- **Each complete dispatch's brief ships** at `.avel/dispatches/<dispatch id>.md`, one file per dispatch the integration commit was built from (`src/lib/export/package.ts`, `[built]`). Blocked, halted and failed dispatches ship none, as they integrate none.
+- **The brief only, byte for byte as frozen at start.** Its sha256 is the dispatch's `brief_sha256`, so a reader can check it. The identity is not shipped: it holds AVEL's role text and role skills. A dispatch started with no brief has no file.
+- **The briefs are in `packageSha256`,** with the version unchanged at 1: the encoding is the same, and the briefs are files. A brief whose text no longer hashes to its frozen sha refuses `DETERMINISM_VIOLATION`, on preview, create and download.
+- **The integration commit may not write under `.avel/dispatches/`** (`package_reserved_path`), as with the receipt.
+
+## Decided 2026-10-22: agents run their own checks, as advice
+
+J decided on 2026-10-22 that agents get a tool that runs their brief's checks while they work. Its results are advice to the agent and are never gate evidence: the gate runs its own checks on the integration commit. It uses the gate runner (not built), under the running room's rules. Where the runner runs, and whether rooms start from earlier dispatches' work, are open.
+
 ---
 
 ## Open questions

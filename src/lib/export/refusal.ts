@@ -18,6 +18,8 @@ export const EXPORT_REFUSALS = [
 	"receipt_path_written",
 	/** The integration commit itself wrote or deleted .avel/deletes.json. */
 	"deletes_path_written",
+	/** The integration commit itself wrote or deleted a path under .avel/dispatches/. */
+	"dispatch_brief_path_written",
 	/** The integration commit rebuilt from its inputs is not the one recorded. */
 	"integration_commit_moved",
 	/** A zip entry path that could write outside the extraction directory. */

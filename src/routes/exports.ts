@@ -1,5 +1,5 @@
 import { tsr } from "@ts-rest/serverless/fetch";
-import { and, asc, count, desc, eq } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
 import type { Context } from "hono";
 import type { Operator } from "../auth";
 import {
@@ -29,6 +29,7 @@ import type { RepoSource } from "../gateways/repo-source";
 import { requestSha256 } from "../lib/canonical";
 import {
 	type ClosedDispatch,
+	type DispatchBrief,
 	type ExportRefusal,
 	ExportRefused,
 	PACKAGE_HASH_VERSION,
@@ -53,6 +54,7 @@ import type { Caller } from "../middleware/caller";
 import { ApiError } from "../middleware/errors";
 import { IntegrationRefused } from "../rooms/snapshot";
 import type { RoomSourceResolver } from "../rooms/sources";
+import { briefSha256 } from "../runner/brief";
 import { missionRoomSource } from "../runner/room-source";
 import { type GateRunPayload, resultOfRun } from "./gate";
 import { connectionRefused, usableConnection } from "./intake";
@@ -113,6 +115,7 @@ const RENDER_REASONS: Record<ExportRefusal, PreconditionReason> = {
 	path_not_utf8: "package_path_not_utf8",
 	receipt_path_written: "package_reserved_path",
 	deletes_path_written: "package_reserved_path",
+	dispatch_brief_path_written: "package_reserved_path",
 	integration_commit_moved: "integration_commit_moved",
 	unsafe_path: "package_unsafe_path",
 	duplicate_path: "package_duplicate_path",
@@ -237,6 +240,43 @@ async function closedDispatches(
 	);
 }
 
+/**
+ * The frozen brief of each complete dispatch the integration commit is
+ * built from, for .avel/dispatches/ (J, 2026-10-22). A dispatch started
+ * with no brief has none to ship. A brief whose text no longer hashes to
+ * the sha frozen beside it is a DETERMINISM_VIOLATION: the package would
+ * not carry what the agent was told.
+ */
+async function dispatchBriefs(
+	db: Executor | Tx,
+	dispatches: readonly ClosedDispatch[],
+): Promise<DispatchBrief[]> {
+	const ids = dispatches
+		.filter((d) => d.status === "complete")
+		.map((d) => d.id);
+	if (ids.length === 0) return [];
+	const rows = await db
+		.select({
+			id: dispatch.id,
+			briefMd: dispatch.briefMd,
+			briefSha256: dispatch.briefSha256,
+		})
+		.from(dispatch)
+		.where(inArray(dispatch.id, ids))
+		.orderBy(asc(dispatch.id));
+	return rows.flatMap((r) => {
+		if (r.briefMd === null) return [];
+		if (briefSha256(r.briefMd) !== r.briefSha256) {
+			throw new ApiError(
+				"DETERMINISM_VIOLATION",
+				"A dispatch's brief no longer matches the hash frozen at its start",
+				{ details: { dispatchId: r.id } as never },
+			);
+		}
+		return [{ dispatchId: r.id, briefMd: r.briefMd }];
+	});
+}
+
 /** Where the package may write: every live roster entry's writable paths, plus .avel/ (added by the blast radius). */
 async function rosterWritablePaths(db: Executor | Tx, missionId: string) {
 	const rows = await db
@@ -295,12 +335,13 @@ async function missionSource(
 /**
  * The package for one gate run: its integration commit rebuilt from the
  * dispatch inputs, then the files that commit changed from the base, the
- * receipt, and the hash. Render refusals answer as precondition reasons.
+ * receipt, the dispatch briefs, and the hash. Render refusals answer as precondition reasons.
  */
 async function render(
 	repoPath: string,
 	run: { payload: GateRunPayload },
 	dispatches: readonly ClosedDispatch[],
+	briefs: readonly DispatchBrief[],
 	missionId: string,
 ) {
 	const { baseSha, commitSha, receipt } = run.payload;
@@ -312,7 +353,7 @@ async function render(
 			recordedSha: commitSha,
 		});
 		const read = await readPackage(repoPath, baseSha, commitSha);
-		const pkg = renderPackage({ read, receipt });
+		const pkg = renderPackage({ read, receipt, briefs });
 		return { pkg, sha256: packageSha256(pkg) };
 	} catch (e) {
 		if (e instanceof ExportRefused) {
@@ -437,7 +478,13 @@ export function exportRoutes(deps: ExportDeps) {
 		}
 
 		const dispatches = await closedDispatches(tx, m.id);
-		const rendered = await render(repoPath, run, dispatches, m.id);
+		const rendered = await render(
+			repoPath,
+			run,
+			dispatches,
+			await dispatchBriefs(tx, dispatches),
+			m.id,
+		);
 		const pkg = deliveryPackage(rendered.pkg);
 		const policy = {
 			writablePaths: await rosterWritablePaths(tx, m.id),
@@ -868,6 +915,7 @@ export function exportZipRoute(deps: ExportDeps) {
 			repoPath,
 			run,
 			manifest.dispatches,
+			await dispatchBriefs(db, manifest.dispatches),
 			row.missionId,
 		);
 		const zip = zipOf(rendered.pkg);
