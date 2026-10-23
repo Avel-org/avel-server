@@ -2,11 +2,13 @@ import path from "node:path";
 import { and, eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { dispatchBrief, successEnvelope } from "../../src/contract";
+import type { BriefCheck } from "../../src/contract/intake";
 import { closeDb } from "../../src/db/client";
 import { activityLog, mission } from "../../src/db/schema";
 import { worktreeRooms } from "../../src/rooms/provider";
 import { localSources } from "../../src/rooms/sources";
 import { briefSha256 } from "../../src/runner/brief";
+import { FakeHarness } from "../../src/runner/harness";
 import { DISPATCH_PLAN } from "../db/dispatch-fixtures";
 import { gitIn, makeRepo, removeDir, tempDir } from "../unit/git-fixtures";
 import { seedIds } from "./agent-fixtures";
@@ -154,6 +156,58 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					});
 				},
 				{
+					rooms: worktreeRooms(roomsRoot()),
+					roomSources: localSources(sources),
+				},
+			);
+		});
+
+		it("hands the harness the room's clone and commit, and only this dispatch's checks that need a runner", async () => {
+			const harness = new FakeHarness();
+			await withApi(
+				async (h) => {
+					await h.signIn();
+					const m = await activeClientMission(h, seedIds(h.ns), null);
+					const plan = structuredClone(DISPATCH_PLAN);
+					(plan.checks as BriefCheck[]).push({
+						id: "CK3",
+						requirementId: "R1",
+						kind: "file_exists",
+						path: "src/auth/signup.ts",
+					});
+					await h.tx
+						.update(mission)
+						.set({ brief: plan })
+						.where(eq(mission.id, m.missionId));
+					await approvedIntake(
+						h,
+						m,
+						{ repoUrl: CLIENT_REPO, commit: pinned },
+						"# The ask",
+					);
+					const id = await queued(h.tx, m, {
+						briefRef: { moduleId: "M6", requirementIds: ["R1"] },
+					});
+					expect((await start(h, id)).status).toBe(200);
+					expect(harness.sessionFor(id)).toMatchObject({
+						roomRepoPath: clone,
+						roomCommit: pinned,
+						checks: [
+							{
+								id: "CK1",
+								requirementId: "R1",
+								kind: "test",
+								command: "pnpm test R1",
+							},
+						],
+					});
+
+					const bare = await queued(h.tx, m, { briefRef: null });
+					expect((await start(h, bare)).status).toBe(200);
+					expect(harness.sessionFor(bare)?.checks).toEqual([]);
+				},
+				{
+					harness,
 					rooms: worktreeRooms(roomsRoot()),
 					roomSources: localSources(sources),
 				},

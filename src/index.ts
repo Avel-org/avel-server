@@ -97,12 +97,28 @@ const roomsRoot = path.join(
 	"rooms",
 );
 
+// The gate's check runner on local Docker. Unset, the gate reports test,
+// typecheck and command checks not_run. Throws, so the server refuses to
+// start, on an image not pinned by digest. The agents' run_checks uses
+// the same runner, as advice.
+const checkImage = process.env.AVEL_CHECK_IMAGE || undefined;
+const checkRunner = checkImage
+	? dockerCheckRunner({ image: checkImage, ids: randomIds })
+	: null;
+if (!checkRunner) {
+	logger.warn(
+		"No check runner: the gate reports test, typecheck and command checks not run, and agents' run_checks refuses",
+	);
+}
+
 // The harness and Canon's model (src/runner/wiring.ts): the FakeHarness and
 // the offline model unless AVEL_HARNESS=agent-sdk.
 const { harness, sdk, canonModel } = harnessFromEnv(process.env, {
 	stateDir: path.dirname(roomsRoot),
 	ids: randomIds,
 	logger,
+	clock: systemClock,
+	checkRunner,
 });
 if (sdk) {
 	logger.warn(
@@ -146,19 +162,6 @@ if (!Number.isInteger(uploadMaxBytes) || uploadMaxBytes <= 0) {
 }
 // Local clones only; unset, every start refuses source_unavailable.
 const roomSources = localSources(process.env.AVEL_SOURCES_DIR || undefined);
-
-// The gate's check runner on local Docker. Unset, the gate reports test,
-// typecheck and command checks not_run. Throws, so the server refuses to
-// start, on an image not pinned by digest.
-const checkImage = process.env.AVEL_CHECK_IMAGE || undefined;
-const checkRunner = checkImage
-	? dockerCheckRunner({ image: checkImage, ids: randomIds })
-	: null;
-if (!checkRunner) {
-	logger.warn(
-		"No check runner: the gate reports test, typecheck and command checks not run",
-	);
-}
 
 // Throws, so the server refuses to start, on a short or unprefixed credential.
 const runnerCredential = runnerCredentialSha256(

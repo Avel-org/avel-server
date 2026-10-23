@@ -8,6 +8,8 @@ import {
 	tool,
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
+import type { CheckRunner } from "../gateways/check-runner";
+import type { Clock } from "../lib/clock";
 import type { IdGenerator } from "../lib/ids";
 import type { Logger } from "../lib/logger";
 import type { TokenSplit } from "../lib/prices";
@@ -61,13 +63,14 @@ export const AVEL_TOOL_NAMES = [
 	"room_write",
 	"room_edit",
 	"skill_read",
+	"run_checks",
 	"report",
 	"finding",
 ].map((t) => `mcp__${SERVER}__${t}`);
 
 /** The first user message. The brief, in the system prompt, says the rest. */
 export const FIRST_MESSAGE =
-	"Do the module in your brief. You are done when every check under Done when would pass; the checks run outside you. Read the files under Read before you change anything. File your report with the report tool when you finish or are blocked, then stop.";
+	"Do the module in your brief. You are done when every check under Done when would pass; the checks run outside you. Read the files under Read before you change anything. run_checks runs your test, typecheck and command checks on your files as advice; the gate still runs its own. File your report with the report tool when you finish or are blocked, then stop.";
 
 export type QueryFn = (params: {
 	prompt: string;
@@ -81,6 +84,15 @@ export type AgentSdkHarnessOptions = {
 	configDir: string;
 	ids: IdGenerator;
 	logger: Logger;
+	/** Dates run_checks' commits. */
+	clock: Clock;
+	/** The gate's check runner, which run_checks uses. Null: run_checks refuses. */
+	checkRunner: CheckRunner | null;
+	/**
+	 * How many run_checks runs may go at once, across every session.
+	 * Default 2 (`[hypothesis]`); each is a container with the runner's caps.
+	 */
+	maxCheckRuns?: number;
 	/** Backstop on the SDK's own cost estimate, per dispatch. */
 	maxBudgetUsd: number;
 	maxTurns: number;
@@ -212,6 +224,12 @@ function avelServer(t: AgentTools) {
 				async (a) => result(await t.skillRead(a)),
 			),
 			tool(
+				"run_checks",
+				"Run your brief's test, typecheck and command checks on your room's files as they are now, in a sandbox with no network. Name checkIds to run only those. Advice only: the gate runs its own checks, and these results are not evidence. A run can take minutes.",
+				{ checkIds: z.array(z.string()).optional() },
+				async (a) => result(await t.runChecks(a)),
+			),
+			tool(
 				"report",
 				"File your completion report: complete with no blockers, or blocked with at least one. What you read is recorded for you. This ends your dispatch.",
 				{
@@ -244,6 +262,8 @@ export class AgentSdkHarness implements Harness {
 	private api: AgentApi | null = null;
 	private countUsage: UsageSink | null = null;
 	private writeStep: StepSink | null = null;
+	/** run_checks runs going now, across every session. */
+	private checkRuns = 0;
 
 	constructor(options: AgentSdkHarnessOptions) {
 		this.options = options;
@@ -296,6 +316,18 @@ export class AgentSdkHarness implements Harness {
 			const [e] = events.splice(i, 1);
 			if (e?.kind === "usage" && !(await sink(dispatchId, e.split))) return;
 		}
+	}
+
+	/** One of the server's run_checks places, or null when all are taken. */
+	private acquireCheckRun(): (() => void) | null {
+		if (this.checkRuns >= (this.options.maxCheckRuns ?? 2)) return null;
+		this.checkRuns += 1;
+		let released = false;
+		return () => {
+			if (released) return;
+			released = true;
+			this.checkRuns -= 1;
+		};
 	}
 
 	/** The session's tools, for tests that play the agent. */
@@ -360,6 +392,15 @@ export class AgentSdkHarness implements Harness {
 				onReported: (status) => {
 					running.reported = true;
 					events.push({ kind: status });
+				},
+				run: {
+					runner: this.options.checkRunner,
+					source: session.roomRepoPath,
+					commit: session.roomCommit,
+					checks: session.checks,
+					clock: this.options.clock,
+					acquire: () => this.acquireCheckRun(),
+					stopped: () => abort.signal.aborted,
 				},
 			}),
 			done: Promise.resolve(),

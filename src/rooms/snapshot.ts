@@ -94,22 +94,51 @@ export async function snapshotDispatch(
 		throw new Error(`The pinned commit ${pinnedSha} is not a full sha`);
 	}
 	if (!ISO.test(closedAtIso)) throw new Error(`closedAt ${closedAtIso}`);
+	const sha = await commitRoom(
+		room.root,
+		pinnedSha,
+		`dispatch ${dispatchId}`,
+		closedAtIso,
+	);
+	await git(["update-ref", dispatchRef(dispatchId), sha], {
+		cwd: room.repoPath,
+	});
+	return sha;
+}
+
+/**
+ * The room's state as a commit on the pinned commit, as snapshotDispatch
+ * makes it, but kept under no ref: what an agent's run_checks runs on. A
+ * worktree writes its objects to the source clone's store, so a runner
+ * reading the clone finds it. Unreferenced, git's gc may remove it after
+ * its prune grace (two weeks by default); nothing reads it after the run.
+ */
+export async function snapshotRoomForChecks(
+	room: { root: string },
+	pinnedSha: string,
+	dispatchId: string,
+	atIso: string,
+): Promise<string> {
+	if (!UUID.test(dispatchId)) throw new Error(`No dispatch ${dispatchId}`);
+	if (!COMMIT_SHA.test(pinnedSha)) {
+		throw new Error(`The pinned commit ${pinnedSha} is not a full sha`);
+	}
+	if (!ISO.test(atIso)) throw new Error(`at ${atIso}`);
+	return commitRoom(room.root, pinnedSha, `checks ${dispatchId}`, atIso);
+}
+
+/** Everything in the room, untracked and ignored files included, committed on `pinnedSha`. */
+function commitRoom(
+	root: string,
+	pinnedSha: string,
+	message: string,
+	atIso: string,
+): Promise<string> {
 	return withScratchIndex(async (env) => {
-		await git(["read-tree", pinnedSha], { cwd: room.root, env });
-		await git(["add", "--all", "--force", "--", "."], { cwd: room.root, env });
-		const tree = (await git(["write-tree"], { cwd: room.root, env })).trim();
-		const sha = await commitTree(
-			room.root,
-			env,
-			tree,
-			pinnedSha,
-			`dispatch ${dispatchId}`,
-			closedAtIso,
-		);
-		await git(["update-ref", dispatchRef(dispatchId), sha], {
-			cwd: room.repoPath,
-		});
-		return sha;
+		await git(["read-tree", pinnedSha], { cwd: root, env });
+		await git(["add", "--all", "--force", "--", "."], { cwd: root, env });
+		const tree = (await git(["write-tree"], { cwd: root, env })).trim();
+		return commitTree(root, env, tree, pinnedSha, message, atIso);
 	});
 }
 

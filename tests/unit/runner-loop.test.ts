@@ -1,5 +1,6 @@
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fixedClock } from "../../src/lib/clock";
 import { sequentialIds } from "../../src/lib/ids";
 import { AgentSdkHarness } from "../../src/runner/agent-sdk-harness";
 import { FakeCanonModel } from "../../src/runner/canon";
@@ -273,6 +274,8 @@ describe("harnessFromEnv", () => {
 		stateDir: path.join("state", "avel"),
 		ids: sequentialIds(),
 		logger: captureLogger().logger,
+		clock: fixedClock("2026-10-23T09:00:00.000Z"),
+		checkRunner: null,
 	});
 
 	it("runs the FakeHarness and the offline Canon model unless AVEL_HARNESS is agent-sdk", () => {
