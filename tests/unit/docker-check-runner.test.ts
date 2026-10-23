@@ -5,7 +5,12 @@ import type {
 	CheckRunRequest,
 	RunnableCheck,
 } from "../../src/gateways/check-runner";
-import { dockerCheckRunner } from "../../src/gateways/docker-check-runner";
+import {
+	dockerCheckRunner,
+	PINNED_PNPM,
+	tailOf,
+	unpack,
+} from "../../src/gateways/docker-check-runner";
 import { sequentialIds } from "../../src/lib/ids";
 import { makeRepo, removeDir, tempDir } from "./git-fixtures";
 
@@ -50,6 +55,23 @@ const leftover = () =>
 	)
 		.toString()
 		.trim();
+
+describe("tailOf", () => {
+	it("keeps the last bytes, holds at most twice the cap, and never splits a character", () => {
+		const t = tailOf(1024);
+		let most = 0;
+		for (let i = 0; i < 5000; i++) {
+			t.push(Buffer.from("é".repeat(700)));
+			most = Math.max(most, t.held());
+		}
+		t.push("END");
+		expect(most).toBeLessThanOrEqual(2048);
+		const text = t.text();
+		expect(Buffer.byteLength(text)).toBeLessThanOrEqual(1024);
+		expect(text.endsWith("END")).toBe(true);
+		expect(text.replace(/END$/, "").replace(/é/g, "")).toBe("");
+	});
+});
 
 describe("dockerCheckRunner", () => {
 	it("refuses an image that is not pinned by digest", () => {
@@ -176,5 +198,88 @@ describe.skipIf(!IMAGE)("dockerCheckRunner on Docker", () => {
 		);
 		expect(results.map((x) => x.outcome)).toEqual(["error", "error"]);
 		expect(results[0]?.output).toMatch(/no lockfile/);
+	});
+
+	it("installs a pnpm project with the pinned pnpm, never the one its packageManager names", async () => {
+		const pkg = `${JSON.stringify({
+			name: "probe",
+			version: "1.0.0",
+			private: true,
+			// A version the install would download and check against a hash
+			// it cannot match: following it fails the install.
+			packageManager: `pnpm@9.15.0+sha512.${"0".repeat(128)}`,
+		})}\n`;
+		const lock =
+			"lockfileVersion: '9.0'\n\nsettings:\n  autoInstallPeers: true\n  excludeLinksFromLockfile: false\n\nimporters:\n\n  .: {}\n";
+		const r = repo({ "package.json": pkg, "pnpm-lock.yaml": lock });
+		const [res] = await runner().run(
+			request(r.dir, r.commits[0] as string, [
+				// From HOME, so the check's own pnpm does not read the commit's packageManager.
+				check("cd /tmp/home && .avel-pm/node_modules/.bin/pnpm --version"),
+			]),
+		);
+		expect([res?.outcome, res?.output.trim()]).toEqual(["pass", PINNED_PNPM]);
+	});
+
+	it("keeps only the end of a check's output, however much it prints", async () => {
+		const r = repo({ "a.txt": "a\n" });
+		const run = dockerCheckRunner({
+			image: IMAGE as string,
+			ids: sequentialIds(),
+			outputBytes: 1024,
+		});
+		const [res] = await run.run(
+			request(r.dir, r.commits[0] as string, [
+				check(
+					`node -e "for (let i = 0; i < 2000; i++) process.stdout.write('x'.repeat(4096)); process.stdout.write('END')"`,
+				),
+			]),
+		);
+		expect(res?.outcome).toBe("pass");
+		expect(Buffer.byteLength(res?.output ?? "")).toBeLessThanOrEqual(1024);
+		expect(res?.output.endsWith("END")).toBe(true);
+	});
+
+	it("stops starting checks once told to, and leaves the rest as errors", async () => {
+		const r = repo({ "a.txt": "a\n" });
+		let started = 0;
+		const results = await runner().run({
+			...request(r.dir, r.commits[0] as string, [
+				check("true"),
+				check("true"),
+				check("true"),
+			]),
+			onProgress: async (_done, current) => {
+				if (current !== null) started++;
+			},
+			shouldStop: () => started >= 1,
+		});
+		expect(results.map((x) => x.outcome)).toEqual(["pass", "error", "error"]);
+		expect(results[1]?.output).toMatch(/time limit/);
+	});
+
+	it("rejects, never crashes, when tar exits while git archive is still writing", async () => {
+		// 8 MiB is more than a pipe holds, so git is mid-write when the
+		// exec into a container that does not exist gives up.
+		const r = repo({ "big.bin": "x".repeat(8 * 1024 * 1024) });
+		await expect(
+			unpack(
+				r.dir,
+				r.commits[0] as string,
+				"avel-check-no-such-container",
+				60_000,
+			),
+		).rejects.toThrow(/Unpacking/);
+	});
+
+	it("sweeps the containers a stopped run left behind", async () => {
+		execFileSync(
+			"docker",
+			["create", "--name", "avel-check-left-behind", IMAGE as string, "true"],
+			{ windowsHide: true },
+		);
+		expect(leftover()).toBe("avel-check-left-behind");
+		await runner().sweep?.();
+		expect(leftover()).toBe("");
 	});
 });

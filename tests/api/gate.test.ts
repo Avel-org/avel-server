@@ -37,7 +37,11 @@ import type {
 import { worktreeRooms } from "../../src/rooms/provider";
 import { snapshotDispatch } from "../../src/rooms/snapshot";
 import type { RoomSource, RoomSourceResolver } from "../../src/rooms/sources";
-import { GATE_JOB_LIMIT_MS, sweepGateJobs } from "../../src/runner/gate-job";
+import {
+	GATE_JOB_LIMIT_MS,
+	gateJobTick,
+	sweepGateJobs,
+} from "../../src/runner/gate-job";
 import {
 	DISPATCH_PLAN,
 	dispatchValues,
@@ -1123,6 +1127,137 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate jobs", () => {
 				"timed_out",
 				null,
 			]);
+		});
+	});
+
+	it("fails integration_moved when a dispatch closes while the job is queued, before its overrides could apply", async () => {
+		const r = repo();
+		await gated(r, async (h, m) => {
+			await closedDispatch(h, m, r, { "src/b.ts": "export const b = 2;\n" });
+			const queued = await jobOf(await postGate(h, m.missionId), 202);
+			await closedDispatch(h, m, r, { "src/c.ts": "export const c = 3;\n" });
+			await drain(h);
+			const failed = await getJob(h, queued.id);
+			expect([failed.status, failed.failure?.code]).toEqual([
+				"failed",
+				"integration_moved",
+			]);
+			expect(failed.failure?.message).toMatch(/while the job was queued/);
+			expect(failed.progress).toBeNull();
+		});
+	});
+
+	it("fails internal, writing no run, when its own progress write fails", async () => {
+		const r = repo();
+		const runner: CheckRunner = {
+			id: "progress-broken@1",
+			run: async (req) => {
+				await req.onProgress?.(0, 0);
+				return req.checks.map(() => PASS);
+			},
+		};
+		await gated(
+			r,
+			async (h, m) => {
+				await closedDispatch(h, m, r, { "src/b.ts": "export const b = 2;\n" });
+				await playbookFor(h, m, [...QA_AND_ACCEPTANCE], DISPATCH_PLAN);
+				const queued = await jobOf(await postGate(h, m.missionId), 202);
+				const deps = jobDeps(h, r.roomSources, runner);
+				let writes = 0;
+				const real = deps.db;
+				// Its second direct write is the first progress update inside the run.
+				deps.db = () =>
+					new Proxy(real(), {
+						get(target, prop, recv) {
+							if (prop === "update" && ++writes === 2) {
+								throw new Error("connection reset");
+							}
+							return Reflect.get(target, prop, recv);
+						},
+					}) as never;
+				await gateJobTick(deps);
+				const failed = await getJob(h, queued.id);
+				expect([failed.status, failed.failure?.code]).toEqual([
+					"failed",
+					"internal",
+				]);
+				expect(failed.failure?.message).toBe("connection reset");
+				expect(
+					(await h.logRows(m.missionId)).filter(
+						(x) => x.action === "mission.gate_run",
+					),
+				).toEqual([]);
+			},
+			runner,
+		);
+	});
+
+	it("records no run for a job that something else ended while it ran", async () => {
+		const r = repo();
+		let sweep: (() => Promise<unknown>) | undefined;
+		const runner: CheckRunner = {
+			id: "swept@1",
+			run: async (req) => {
+				await sweep?.();
+				return req.checks.map(() => PASS);
+			},
+		};
+		await gated(
+			r,
+			async (h, m) => {
+				await closedDispatch(h, m, r, { "src/b.ts": "export const b = 2;\n" });
+				await playbookFor(h, m, [...QA_AND_ACCEPTANCE], DISPATCH_PLAN);
+				const deps = jobDeps(h, r.roomSources, runner);
+				sweep = () => sweepGateJobs(deps);
+				const queued = await jobOf(await postGate(h, m.missionId), 202);
+				expect(await gateJobTick(deps)).toEqual({
+					jobId: queued.id,
+					status: "failed",
+					failure: null,
+				});
+				const job = await getJob(h, queued.id);
+				expect([job.status, job.failure?.code, job.gateRunId]).toEqual([
+					"failed",
+					"interrupted",
+					null,
+				]);
+				expect(
+					(await h.logRows(m.missionId)).filter(
+						(x) => x.action === "mission.gate_run",
+					),
+				).toEqual([]);
+			},
+			runner,
+		);
+	});
+
+	it("tells the runner to stop once the job is past its limit, and sweeps the runner at startup", async () => {
+		const r = repo();
+		let now = clock.now().getTime();
+		const tickClock = { now: () => new Date(now) };
+		const asked: boolean[] = [];
+		let swept = 0;
+		const runner: CheckRunner = {
+			id: "stopping@1",
+			sweep: async () => {
+				swept++;
+			},
+			run: async (req) => {
+				asked.push(req.shouldStop?.() ?? false);
+				now += GATE_JOB_LIMIT_MS + 1;
+				asked.push(req.shouldStop?.() ?? false);
+				return req.checks.map(() => PASS);
+			},
+		};
+		await gated(r, async (h, m) => {
+			await closedDispatch(h, m, r, { "src/b.ts": "export const b = 2;\n" });
+			await playbookFor(h, m, [...QA_AND_ACCEPTANCE], DISPATCH_PLAN);
+			const deps = jobDeps(h, r.roomSources, runner, tickClock);
+			await sweepGateJobs(deps);
+			expect(swept).toBe(1);
+			await jobOf(await postGate(h, m.missionId), 202);
+			await drain(h);
+			expect(asked).toEqual([false, true]);
 		});
 	});
 

@@ -124,6 +124,7 @@ export async function runChecks(
 		checksDone: number,
 		currentCheckId: string | null,
 	) => Promise<void>,
+	shouldStop?: () => boolean,
 ): Promise<Map<number, CheckRunResult>> {
 	const ran = new Map<number, CheckRunResult>();
 	if (runner === null) return ran;
@@ -132,20 +133,31 @@ export async function runChecks(
 	);
 	if (runnable.length === 0) return ran;
 	let results: CheckRunResult[];
+	// The caller's own progress write failing is the caller's error, not the
+	// runner's: it is rethrown, never read as every check erroring.
+	const progressFailures: unknown[] = [];
 	try {
 		results = await runner.run({
 			source,
 			commitSha,
 			checks: runnable.map((r) => r.check),
 			onProgress: onProgress
-				? (done, current) =>
-						onProgress(
-							done,
-							current === null ? null : (runnable[current]?.check.id ?? null),
-						)
+				? async (done, current) => {
+						try {
+							await onProgress(
+								done,
+								current === null ? null : (runnable[current]?.check.id ?? null),
+							);
+						} catch (err) {
+							progressFailures.push(err);
+							throw err;
+						}
+					}
 				: undefined,
+			shouldStop,
 		});
 	} catch {
+		if (progressFailures.length > 0) throw progressFailures[0];
 		results = runnable.map(() => ({
 			outcome: "error",
 			exitCode: null,
@@ -802,7 +814,7 @@ export function gateRoutes(deps: GateDeps) {
 				if (active) return { kind: "existing" as const, row: active };
 				// The preconditions, checked now so a refusal is immediate. The
 				// job judges again when it runs, with the checks' results.
-				await judge(tx, m, body.overrides, new Map());
+				const probed = await judge(tx, m, body.overrides, new Map());
 				const now = deps.clock.now();
 				const [row] = await tx
 					.insert(gateJob)
@@ -814,6 +826,7 @@ export function gateRoutes(deps: GateDeps) {
 						idempotencyKey: key,
 						requestSha256: hash,
 						overrides: body.overrides,
+						commitSha: probed.commitSha,
 						queuedAt: now,
 						createdAt: now,
 						updatedAt: now,

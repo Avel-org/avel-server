@@ -215,6 +215,9 @@ export const gateJob = pgTable(
 		idempotencyKey: text("idempotency_key"),
 		requestSha256: text("request_sha256").notNull(),
 		overrides: jsonb("overrides").notNull(),
+		// The integration commit the POST judged, which the overrides bind to.
+		// Null only on jobs queued before drizzle/0051.
+		commitSha: text("commit_sha"),
 		// The mission.gate_run row it made. No foreign key: activity_log is
 		// append-only, and a reference would turn its TRUNCATE refusal into a
 		// foreign-key error instead of the append-only one.
@@ -238,6 +241,10 @@ export const gateJob = pgTable(
 			.on(t.missionId, t.idempotencyKey)
 			.where(sql`${t.idempotencyKey} is not null`),
 		index("gate_job_queue_idx").on(t.status, t.queuedAt, t.id),
+		check(
+			"gate_job_commit_sha_hex",
+			sql`${t.commitSha} is null or ${t.commitSha} ~ '^[0-9a-f]{40}$'`,
+		),
 		check(
 			"gate_job_request_sha256_hex",
 			sql`${t.requestSha256} ~ '^[0-9a-f]{64}$'`,

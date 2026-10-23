@@ -23,7 +23,7 @@ type LoopOptions = { intervalMs: number; logger: Logger };
 
 function startLoop(
 	name: string,
-	options: LoopOptions & { unref: boolean },
+	options: LoopOptions & { unref: boolean; abandonOnStop?: boolean },
 	first: (() => Promise<void>) | null,
 	step: () => Promise<void>,
 ): StopLoop {
@@ -49,7 +49,9 @@ function startLoop(
 	return async () => {
 		stopped = true;
 		clearInterval(timer);
-		await inFlight;
+		// A step that can run for an hour is left behind; the next start's
+		// sweep cleans up after it.
+		if (!options.abandonOnStop) await inFlight;
 	};
 }
 
@@ -105,6 +107,8 @@ export function startCanonLoop(
  * server left running, once at startup, then runs the oldest queued job on
  * each tick. It always runs, runner or not, because nothing else finishes a
  * queued job. A step never overlaps the last, so one job runs at a time.
+ * Stopping does not wait for a running job, which can take an hour: the
+ * next start's sweep fails it interrupted and removes its container.
  */
 export function startGateJobLoop(
 	deps: GateJobDeps,
@@ -118,7 +122,7 @@ export function startGateJobLoop(
 	const doTick = options.tick ?? gateJobTick;
 	return startLoop(
 		"gate jobs",
-		{ ...options, unref: false },
+		{ ...options, unref: false, abandonOnStop: true },
 		async () => {
 			const failed = await doSweep(deps);
 			if (failed.length > 0) {

@@ -60,6 +60,9 @@ type Failure = {
 	message: string;
 };
 
+/** The job stopped being running before it could be marked done. */
+class Superseded extends Error {}
+
 /** A precondition refusal as the job's failure; anything else rethrows. */
 function preconditionOf(err: unknown): Failure | null {
 	if (err instanceof ApiError && err.code === "PRECONDITION_FAILED") {
@@ -122,9 +125,13 @@ async function fail(
 
 /**
  * At startup: a job left running by a stopped server can never finish, so
- * it fails interrupted. Returns the jobs it failed.
+ * it fails interrupted, and the runner removes what its runs left. Assumes
+ * one server process: a second one starting would fail the first's job.
+ * Returns the jobs it failed.
  */
 export async function sweepGateJobs(deps: GateJobDeps): Promise<string[]> {
+	// What a run left behind, such as a container, goes first.
+	await deps.checkRunner?.sweep?.();
 	const running = await deps
 		.db()
 		.select({ id: gateJob.id, missionId: gateJob.missionId })
@@ -183,6 +190,15 @@ export async function gateJobTick(
 			if (f) return ended(f);
 			throw err;
 		}
+		// The commit the POST judged: overrides bind to it, so a job that
+		// would gate another one fails instead.
+		if (claimed.commitSha !== null && first.commitSha !== claimed.commitSha) {
+			return ended({
+				code: "integration_moved",
+				reason: null,
+				message: `A dispatch closed while the job was queued: it was queued at ${claimed.commitSha}, and the mission is now at ${first.commitSha}`,
+			});
+		}
 
 		// 2. The checks, outside any transaction.
 		const total = deps.checkRunner ? runnableCount(first.checks) : 0;
@@ -198,6 +214,9 @@ export async function gateJobTick(
 				})
 				.where(and(eq(gateJob.id, claimed.id), eq(gateJob.status, "running")))
 				.then(() => undefined);
+		const overLimit = () =>
+			deps.clock.now().getTime() - claimed.startedAt.getTime() >
+			GATE_JOB_LIMIT_MS;
 		await progress(0, null);
 		const ran = await runChecks(
 			deps.checkRunner,
@@ -205,12 +224,10 @@ export async function gateJobTick(
 			first.commitSha,
 			first.checks,
 			progress,
+			overLimit,
 		);
 
-		if (
-			deps.clock.now().getTime() - claimed.startedAt.getTime() >
-			GATE_JOB_LIMIT_MS
-		) {
+		if (overLimit()) {
 			return ended({
 				code: "timed_out",
 				reason: null,
@@ -256,7 +273,7 @@ export async function gateJobTick(
 					deps.ids.next(),
 				);
 				const now = deps.clock.now();
-				await tx
+				const [marked] = await tx
 					.update(gateJob)
 					.set({
 						status: "done",
@@ -266,13 +283,19 @@ export async function gateJobTick(
 						finishedAt: now,
 						updatedAt: now,
 					})
-					.where(eq(gateJob.id, claimed.id));
+					.where(and(eq(gateJob.id, claimed.id), eq(gateJob.status, "running")))
+					.returning({ id: gateJob.id });
+				// Something else ended the job meanwhile: the run rolls back with it.
+				if (!marked) throw new Superseded();
 				return { failure: null };
 			},
 		);
 		if (outcome.failure) return ended(outcome.failure);
 		return { jobId: claimed.id, status: "done", failure: null };
 	} catch (err) {
+		if (err instanceof Superseded) {
+			return { jobId: claimed.id, status: "failed", failure: null };
+		}
 		return ended({
 			code: "internal",
 			reason: null,
