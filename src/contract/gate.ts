@@ -2,6 +2,7 @@ import { initContract } from "@ts-rest/core";
 import { z } from "zod";
 import { activityActor } from "./activity";
 import { findingSeverity } from "./agent";
+import { gateJob } from "./gate-job";
 import { gate, gatePolicy } from "./playbook";
 import { successEnvelope } from "./shared/envelope";
 import { idempotencyHeaders } from "./shared/idempotency";
@@ -185,13 +186,25 @@ export const gateContract = c.router({
 		pathParams: byId,
 		headers: idempotencyHeaders.partial(),
 		body: runGateBody,
-		/** 201 for a new run; 200 with Idempotency-Replayed: true for a replay. */
+		/**
+		 * 202 for a new job. 200 with Idempotency-Replayed: true for a replay,
+		 * and 200 with Gate-Job-Existing: true when the mission already has a
+		 * queued or running job, whose overrides stand. Preconditions are
+		 * checked here, so a refusal is immediate.
+		 */
 		responses: {
-			201: successEnvelope(gateRun),
-			200: successEnvelope(gateRun),
+			202: successEnvelope(gateJob),
+			200: successEnvelope(gateJob),
 		},
 		summary:
-			"Judge the mission's integration commit: findings in, result and receipt out",
+			"Queue a gate run of the mission's integration commit: findings in, result and receipt out",
+	},
+	job: {
+		method: "GET",
+		path: "/api/gate-jobs/:id",
+		pathParams: byId,
+		responses: { 200: successEnvelope(gateJob) },
+		summary: "One gate job: poll it until done or failed",
 	},
 	runs: {
 		method: "GET",

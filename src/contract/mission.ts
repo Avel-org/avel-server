@@ -1,6 +1,7 @@
 import { initContract } from "@ts-rest/core";
 import { z } from "zod";
 import { activityActor } from "./activity";
+import { gateJob } from "./gate-job";
 import { successEnvelope } from "./shared/envelope";
 import { pageMeta, pageQuery } from "./shared/pagination";
 import {
@@ -63,6 +64,8 @@ export const missionListItem = z.object({
 	/** The newest ActivityLog row for the mission. Never updatedAt. Null when there is none. */
 	lastActivityAt: iso.nullable(),
 	needsYou: z.object({ reason: needsYouReason }).nullable(),
+	/** A gate job is queued or running for the mission. */
+	gateRunning: z.boolean(),
 	createdAt: iso,
 	updatedAt: iso,
 });
@@ -188,6 +191,8 @@ export const missionDetail = missionListItem.extend({
 		.nullable(),
 	/** The mission's ten newest ActivityLog rows, newest first. */
 	recentActivity: z.array(missionActivity),
+	/** The mission's queued or running gate job; null when none is. */
+	activeGateJob: gateJob.nullable(),
 });
 
 export type MissionDetail = z.infer<typeof missionDetail>;

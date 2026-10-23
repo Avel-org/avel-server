@@ -107,6 +107,8 @@ export const activityAction = pgEnum("activity_action", [
 	"canon_session.renamed",
 	"canon_message.posted",
 	"agent_template.created",
+	"mission.gate_queued",
+	"mission.gate_failed",
 ]);
 
 export const activityEntityType = pgEnum("activity_entity_type", [

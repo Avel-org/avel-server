@@ -10,6 +10,12 @@ export type CheckRunRequest = {
 	/** A full commit sha: the gate's integration commit. */
 	commitSha: string;
 	checks: readonly RunnableCheck[];
+	/**
+	 * Called before each check with how many are done and the index (in
+	 * `checks`) of the one starting, and once at the end with null. Awaited,
+	 * so a slow write holds the next check, never races it.
+	 */
+	onProgress?: (checksDone: number, current: number | null) => Promise<void>;
 };
 
 /**

@@ -1077,6 +1077,17 @@ J approved these on 2026-10-22, from BE Main's recommendations. None is built.
 - **Start wave refuses while an earlier wave has a queued or running dispatch,** and warns when one is blocked `[specced]`. No gate run is required between waves.
 - **The gate runner's first host is local Docker,** taken off hold `[specced]`. It is the only option that can deny the network for the check phase today, which `SANDBOX.md` requires. The runner sits behind one gateway, so the GitHub Actions mirror can be a second host.
 
+## Decided 2026-10-23: gate runs in the background
+
+J asked for the gate to run in the background before the Docker runner goes live (2026-10-23), with FE Main consulted. A test suite takes minutes; the gate ran inside the POST and its transaction. The shape was agreed with FE Main before it landed.
+
+- **The POST queues a job and answers 202.** It still checks every precondition, so a refusal is immediate. One path for every run, with or without a runner. Rejected: 201 when no runner is installed, which would give the client two paths.
+- **A tick runs one job at a time, server-wide,** oldest first. It judges, runs the checks outside any transaction, and judges again. A commit that moved meanwhile fails the job `integration_moved`, so checks never count for a commit they did not run on.
+- **A failed job leaves no run,** and its `failure.code` is a closed list (`GATE_JOB_FAILURES`). A runner that breaks is not a failure: its checks are errors and the run's result is fail.
+- **The client polls** `GET /api/gate-jobs/:id`, and the mission wire carries `activeGateJob` and `gateRunning`. Rejected: server-sent events, a second transport for a few minutes of waiting (FE Main).
+- **`gate_job` is the eighth exception to the schema freeze.** It supersedes "There is no GateRun table" (2026-10-19) only for jobs: a run is still its `mission.gate_run` row, which now names its job.
+- **The 2-hour limit is a guess** `[hypothesis]`, and it is checked when the checks end; a check that hangs is stopped by its own time limit.
+
 ---
 
 ## Open questions

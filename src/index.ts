@@ -40,6 +40,7 @@ import {
 	type StopLoop,
 	startBlobSweepLoop,
 	startCanonLoop,
+	startGateJobLoop,
 } from "./runner/loop";
 import { harnessFromEnv, shutdown, startRealRunner } from "./runner/wiring";
 
@@ -123,6 +124,11 @@ const canonIntervalMs = intervalFromEnv(
 	"AVEL_CANON_INTERVAL_MS",
 	process.env.AVEL_CANON_INTERVAL_MS,
 	3000,
+);
+const gateIntervalMs = intervalFromEnv(
+	"AVEL_GATE_INTERVAL_MS",
+	process.env.AVEL_GATE_INTERVAL_MS,
+	2000,
 );
 const rooms = worktreeRooms(roomsRoot);
 // The Drive's bytes: AVEL_BLOB_DIR, else beside the rooms. R2 replaces this
@@ -231,6 +237,21 @@ stops.push(
 			sweepStuckTurns: sweepStuckCanonTurns,
 		},
 		{ intervalMs: canonIntervalMs, logger },
+	),
+);
+
+// Gate runs in the background: the POST queues a job, this tick runs it.
+// It always runs, because nothing else finishes a queued job.
+stops.push(
+	startGateJobLoop(
+		{
+			db: getDb,
+			clock: systemClock,
+			ids: randomIds,
+			roomSources,
+			checkRunner,
+		},
+		{ intervalMs: gateIntervalMs, logger },
 	),
 );
 

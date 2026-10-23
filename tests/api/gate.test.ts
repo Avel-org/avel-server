@@ -6,8 +6,11 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import {
 	errorEnvelope,
 	type Gate,
+	gateJob as gateJobSchema,
 	gateRunListEnvelope,
 	gateRun as gateRunSchema,
+	missionDetail,
+	missionListEnvelope,
 	preconditionDetails,
 	successEnvelope,
 } from "../../src/contract";
@@ -15,8 +18,11 @@ import { closeDb } from "../../src/db/client";
 import {
 	activityLog,
 	agentTemplate,
+	client,
 	completionReport,
+	engagement,
 	finding,
+	gateJob,
 	mission,
 	playbook,
 	rosterPreset,
@@ -31,6 +37,7 @@ import type {
 import { worktreeRooms } from "../../src/rooms/provider";
 import { snapshotDispatch } from "../../src/rooms/snapshot";
 import type { RoomSource, RoomSourceResolver } from "../../src/rooms/sources";
+import { GATE_JOB_LIMIT_MS, sweepGateJobs } from "../../src/runner/gate-job";
 import {
 	DISPATCH_PLAN,
 	dispatchValues,
@@ -40,6 +47,7 @@ import {
 	seedAgent,
 } from "../db/dispatch-fixtures";
 import { makeRepo, removeDir, tempDir, writeFiles } from "../unit/git-fixtures";
+import { drain, jobDeps, postGate, runGate } from "./gate-job-fixtures";
 import {
 	activeClientMission,
 	activeMission,
@@ -205,17 +213,7 @@ const RUNNABLE_PLAN = {
 	],
 };
 
-const run = (
-	h: ApiHarness,
-	missionId: string,
-	body: unknown = {},
-	key?: string,
-) =>
-	h.call(`/api/missions/${missionId}/gate`, {
-		method: "POST",
-		body,
-		headers: key ? { "idempotency-key": key } : {},
-	});
+const run = runGate;
 
 async function refusal(res: Response) {
 	expect(res.status, await res.clone().text()).toBe(422);
@@ -238,6 +236,7 @@ async function gated(
 				.update(mission)
 				.set({ brief: RUNNABLE_PLAN as never })
 				.where(eq(mission.id, m.missionId));
+			jobDeps(h, r.roomSources, checkRunner ?? null);
 			await fn(h, m);
 		},
 		{ roomSources: r.roomSources, checkRunner },
@@ -300,15 +299,20 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 			await closedDispatch(h, m, r, { "src/c.ts": "export const c = 3;\n" });
 
 			const res = await run(h, m.missionId);
-			expect(res.status, await res.clone().text()).toBe(201);
+			expect(res.status, await res.clone().text()).toBe(200);
 			const posted = successEnvelope(gateRunSchema).parse(
 				await res.json(),
 			).data;
 			expect(posted.baseSha).toBe(r.pinned);
-			// An internal mission is judged on its template at the pin.
-			expect(r.asked).toEqual([
-				{ kind: "template", slug: "template-booking", commit: r.pinned },
-			]);
+			// An internal mission is judged on its template at the pin: at the
+			// POST's precondition check, and twice by the job.
+			expect(r.asked).toEqual(
+				Array(3).fill({
+					kind: "template",
+					slug: "template-booking",
+					commit: r.pinned,
+				}),
+			);
 			expect(posted.commitSha).toMatch(/^[0-9a-f]{40}$/);
 			expect(posted.commitSha).not.toBe(r.pinned);
 			expect(posted.receiptSha256).toBe(
@@ -408,6 +412,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 		await withApi(
 			async (h) => {
 				await h.signIn();
+				jobDeps(h, r.roomSources);
 				const m = await activeClientMission(h, runnerIds(h.ns), {
 					repoUrl: CLIENT_REPO,
 					commit: r.pinned,
@@ -427,14 +432,34 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 					.where(eq(mission.id, m.missionId));
 				await closedDispatch(h, m, r, { "src/b.ts": "export const b = 2;\n" });
 				const res = await run(h, m.missionId);
-				expect(res.status, await res.clone().text()).toBe(201);
+				expect(res.status, await res.clone().text()).toBe(200);
 				const posted = successEnvelope(gateRunSchema).parse(
 					await res.json(),
 				).data;
 				expect(posted.baseSha).toBe(r.pinned);
-				expect(r.asked).toEqual([
-					{ kind: "repo", repoUrl: CLIENT_REPO, commit: r.pinned },
-				]);
+				expect(r.asked).toEqual(
+					Array(3).fill({
+						kind: "repo",
+						repoUrl: CLIENT_REPO,
+						commit: r.pinned,
+					}),
+				);
+
+				// A deleted client hides its missions' gate runs, as it hides their dispatches.
+				const [eng] = await h.tx
+					.select({ clientId: engagement.clientId })
+					.from(engagement)
+					.where(eq(engagement.id, m.engagementId as string));
+				await h.tx
+					.update(client)
+					.set({ deletedAt: clock.now() })
+					.where(eq(client.id, eng?.clientId as string));
+				for (const url of [
+					`/api/missions/${m.missionId}/gate-runs`,
+					`/api/missions/${m.missionId}/gate-runs/${posted.id}`,
+				]) {
+					expect((await h.call(url)).status, url).toBe(404);
+				}
 			},
 			{ roomSources: r.roomSources },
 		);
@@ -452,7 +477,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 				DISPATCH_PLAN,
 			);
 			const res = await run(h, m.missionId);
-			expect(res.status, await res.clone().text()).toBe(201);
+			expect(res.status, await res.clone().text()).toBe(200);
 			const posted = successEnvelope(gateRunSchema).parse(
 				await res.json(),
 			).data;
@@ -515,7 +540,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 					});
 					await playbookFor(h, m, [...QA_AND_ACCEPTANCE], DISPATCH_PLAN);
 					const res = await run(h, m.missionId);
-					expect(res.status, await res.clone().text()).toBe(201);
+					expect(res.status, await res.clone().text()).toBe(200);
 					const posted = successEnvelope(gateRunSchema).parse(
 						await res.json(),
 					).data;
@@ -572,7 +597,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 				RUNNABLE_PLAN,
 			);
 			const res = await run(h, m.missionId);
-			expect(res.status, await res.clone().text()).toBe(201);
+			expect(res.status, await res.clone().text()).toBe(200);
 			const posted = successEnvelope(gateRunSchema).parse(
 				await res.json(),
 			).data;
@@ -608,7 +633,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 				RUNNABLE_PLAN,
 			);
 			const res = await run(h, m.missionId);
-			expect(res.status, await res.clone().text()).toBe(201);
+			expect(res.status, await res.clone().text()).toBe(200);
 			const posted = successEnvelope(gateRunSchema).parse(
 				await res.json(),
 			).data;
@@ -696,14 +721,22 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 			await closedDispatch(h, m, r, { "src/b.ts": "export const b = 2;\n" });
 			const key = "00000000-0000-4000-8000-0000000000aa";
 			const first = await run(h, m.missionId, {}, key);
-			expect(first.status).toBe(201);
-			const again = await run(h, m.missionId, {}, key);
+			expect(first.status).toBe(200);
+			const firstRun = successEnvelope(gateRunSchema).parse(
+				await first.json(),
+			).data;
+			// The replay answers the job, which names the run it made.
+			const again = await postGate(h, m.missionId, {}, key);
 			expect(again.status).toBe(200);
 			expect(again.headers.get("idempotency-replayed")).toBe("true");
-			expect(
-				successEnvelope(gateRunSchema).parse(await again.json()).data.id,
-			).toBe(successEnvelope(gateRunSchema).parse(await first.json()).data.id);
-			const other = await run(
+			const replayed = successEnvelope(gateJobSchema).parse(
+				await again.json(),
+			).data;
+			expect([replayed.status, replayed.gateRunId]).toEqual([
+				"done",
+				firstRun.id,
+			]);
+			const other = await postGate(
 				h,
 				m.missionId,
 				{
@@ -825,7 +858,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 			});
 
 			const res = await run(h, m.missionId);
-			expect(res.status, await res.clone().text()).toBe(201);
+			expect(res.status, await res.clone().text()).toBe(200);
 			const posted = successEnvelope(gateRunSchema).parse(
 				await res.json(),
 			).data;
@@ -871,6 +904,277 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 			expect((await run(h, missing)).status).toBe(404);
 			expect(
 				(await h.call(`/api/missions/${m.missionId}/gate-runs/${missing}`))
+					.status,
+			).toBe(404);
+		});
+	});
+});
+
+// Background gate runs (2026-10-23): the POST queues a job, the tick runs it.
+describe.skipIf(!process.env.DATABASE_URL)("/api gate jobs", () => {
+	const jobOf = async (res: Response, status: number) => {
+		expect(res.status, await res.clone().text()).toBe(status);
+		return successEnvelope(gateJobSchema).parse(await res.json()).data;
+	};
+	const getJob = async (h: ApiHarness, id: string) =>
+		jobOf(await h.call(`/api/gate-jobs/${id}`), 200);
+	const detailOf = async (h: ApiHarness, id: string) =>
+		successEnvelope(missionDetail).parse(
+			await (await h.call(`/api/missions/${id}`)).json(),
+		).data;
+	const listed = async (h: ApiHarness, id: string) =>
+		missionListEnvelope
+			.parse(
+				await (await h.call("/api/missions?origin=internal&limit=100")).json(),
+			)
+			.data.find((x) => x.id === id);
+
+	it("queues a job, runs it in the background, and shows it on the mission while it is active", async () => {
+		const r = repo();
+		await gated(r, async (h, m) => {
+			await closedDispatch(h, m, r, { "src/b.ts": "export const b = 2;\n" });
+			const queued = await jobOf(await postGate(h, m.missionId), 202);
+			expect(queued).toMatchObject({
+				missionId: m.missionId,
+				status: "queued",
+				gateRunId: null,
+				failure: null,
+				progress: null,
+				ahead: 0,
+				startedAt: null,
+				finishedAt: null,
+			});
+			const logged = (await h.logRows(m.missionId)).filter(
+				(x) => x.action === "mission.gate_queued",
+			);
+			expect(logged.map((x) => x.payload)).toEqual([{ jobId: queued.id }]);
+			expect((await detailOf(h, m.missionId)).activeGateJob?.id).toBe(
+				queued.id,
+			);
+			expect((await listed(h, m.missionId))?.gateRunning).toBe(true);
+
+			// A second POST while it is queued answers the same job.
+			const again = await postGate(h, m.missionId);
+			expect(again.headers.get("gate-job-existing")).toBe("true");
+			expect((await jobOf(again, 200)).id).toBe(queued.id);
+
+			await drain(h);
+			const done = await getJob(h, queued.id);
+			expect(done).toMatchObject({
+				status: "done",
+				failure: null,
+				ahead: null,
+				// No runner is installed, so it ran no checks.
+				progress: { checksTotal: 0, checksDone: 0, currentCheckId: null },
+			});
+			expect(done.startedAt).not.toBeNull();
+			expect(done.finishedAt).not.toBeNull();
+			const runRes = await h.call(
+				`/api/missions/${m.missionId}/gate-runs/${done.gateRunId}`,
+			);
+			expect(runRes.status).toBe(200);
+			const [runRow] = (await h.logRows(m.missionId)).filter(
+				(x) => x.action === "mission.gate_run",
+			);
+			expect(runRow?.id).toBe(done.gateRunId);
+			expect((runRow?.payload as { jobId: string }).jobId).toBe(queued.id);
+			expect(runRow?.actorUserId).toBe(await h.operatorId());
+
+			expect((await detailOf(h, m.missionId)).activeGateJob).toBeNull();
+			expect((await listed(h, m.missionId))?.gateRunning).toBe(false);
+		});
+	});
+
+	it("reports progress check by check, naming the brief's check", async () => {
+		const r = repo();
+		const seen: unknown[] = [];
+		let harness: ApiHarness | undefined;
+		let jobId = "";
+		const runner: CheckRunner = {
+			id: "progress@1",
+			run: async (req) => {
+				for (const [i] of req.checks.entries()) {
+					await req.onProgress?.(i, i);
+					seen.push((await getJob(harness as ApiHarness, jobId)).progress);
+				}
+				await req.onProgress?.(req.checks.length, null);
+				return req.checks.map(() => PASS);
+			},
+		};
+		await gated(
+			r,
+			async (h, m) => {
+				harness = h;
+				await closedDispatch(h, m, r, { "src/b.ts": "export const b = 2;\n" });
+				await playbookFor(h, m, [...QA_AND_ACCEPTANCE], DISPATCH_PLAN);
+				jobId = (await jobOf(await postGate(h, m.missionId), 202)).id;
+				await drain(h);
+				expect(seen).toEqual([
+					{ checksTotal: 2, checksDone: 0, currentCheckId: "CK1" },
+					{ checksTotal: 2, checksDone: 1, currentCheckId: "CK2" },
+				]);
+				const done = await getJob(h, jobId);
+				expect([done.status, done.progress]).toEqual([
+					"done",
+					{ checksTotal: 2, checksDone: 2, currentCheckId: null },
+				]);
+			},
+			runner,
+		);
+	});
+
+	it("fails integration_moved when a dispatch closes while the checks run, and writes no run", async () => {
+		const r = repo();
+		let closeOne: (() => Promise<unknown>) | undefined;
+		const runner: CheckRunner = {
+			id: "moving@1",
+			run: async (req) => {
+				await closeOne?.();
+				return req.checks.map(() => PASS);
+			},
+		};
+		await gated(
+			r,
+			async (h, m) => {
+				await closedDispatch(h, m, r, { "src/b.ts": "export const b = 2;\n" });
+				await playbookFor(h, m, [...QA_AND_ACCEPTANCE], DISPATCH_PLAN);
+				closeOne = () =>
+					closedDispatch(h, m, r, { "src/c.ts": "export const c = 3;\n" });
+				const queued = await jobOf(await postGate(h, m.missionId), 202);
+				await drain(h);
+				const failed = await getJob(h, queued.id);
+				expect([
+					failed.status,
+					failed.failure?.code,
+					failed.failure?.reason,
+				]).toEqual(["failed", "integration_moved", null]);
+				expect(failed.gateRunId).toBeNull();
+				const rows = await h.logRows(m.missionId);
+				expect(rows.filter((x) => x.action === "mission.gate_run")).toEqual([]);
+				expect(
+					rows
+						.filter((x) => x.action === "mission.gate_failed")
+						.map((x) => [x.actorKind, x.payload]),
+				).toEqual([
+					[
+						"system",
+						{
+							jobId: queued.id,
+							failure: { code: "integration_moved", reason: null },
+						},
+					],
+				]);
+				// Once it has failed, the mission can be gated again.
+				closeOne = undefined;
+				await jobOf(await postGate(h, m.missionId), 202);
+			},
+			runner,
+		);
+	});
+
+	it("fails precondition_failed, naming the reason, when a precondition stops holding before the job runs", async () => {
+		const r = repo();
+		await gated(r, async (h, m) => {
+			await closedDispatch(h, m, r, { "src/b.ts": "export const b = 2;\n" });
+			const queued = await jobOf(await postGate(h, m.missionId), 202);
+			await h.tx
+				.update(mission)
+				.set({ status: "draft" })
+				.where(eq(mission.id, m.missionId));
+			await drain(h);
+			const failed = await getJob(h, queued.id);
+			expect([
+				failed.status,
+				failed.failure?.code,
+				failed.failure?.reason,
+			]).toEqual(["failed", "precondition_failed", "mission_not_active"]);
+		});
+	});
+
+	it("fails a job a stopped server left running as interrupted, and one past its limit as timed_out", async () => {
+		const r = repo();
+		let now = clock.now().getTime();
+		const tickClock = { now: () => new Date(now) };
+		const runner: CheckRunner = {
+			id: "slow@1",
+			run: async (req) => {
+				now += GATE_JOB_LIMIT_MS + 1;
+				return req.checks.map(() => PASS);
+			},
+		};
+		await gated(r, async (h, m) => {
+			await closedDispatch(h, m, r, { "src/b.ts": "export const b = 2;\n" });
+			await playbookFor(h, m, [...QA_AND_ACCEPTANCE], DISPATCH_PLAN);
+			const deps = jobDeps(h, r.roomSources, runner, tickClock);
+
+			const left = await jobOf(await postGate(h, m.missionId), 202);
+			await h.tx
+				.update(gateJob)
+				.set({ status: "running", startedAt: tickClock.now() })
+				.where(eq(gateJob.id, left.id));
+			expect(await sweepGateJobs(deps)).toEqual([left.id]);
+			expect((await getJob(h, left.id)).failure?.code).toBe("interrupted");
+
+			const slow = await jobOf(await postGate(h, m.missionId), 202);
+			await drain(h);
+			const timed = await getJob(h, slow.id);
+			expect([timed.status, timed.failure?.code, timed.gateRunId]).toEqual([
+				"failed",
+				"timed_out",
+				null,
+			]);
+		});
+	});
+
+	it("fails internal when the runner breaks its contract", async () => {
+		const r = repo();
+		const runner: CheckRunner = { id: "short@1", run: async () => [] };
+		await gated(
+			r,
+			async (h, m) => {
+				await closedDispatch(h, m, r, { "src/b.ts": "export const b = 2;\n" });
+				await playbookFor(h, m, [...QA_AND_ACCEPTANCE], DISPATCH_PLAN);
+				const queued = await jobOf(await postGate(h, m.missionId), 202);
+				await drain(h);
+				const failed = await getJob(h, queued.id);
+				expect([failed.status, failed.failure?.code]).toEqual([
+					"failed",
+					"internal",
+				]);
+				expect(failed.failure?.message).toMatch(/answered 0 results for 2/);
+			},
+			runner,
+		);
+	});
+
+	it("counts the jobs ahead, and hides a job whose mission is hidden", async () => {
+		const r = repo();
+		await gated(r, async (h, m) => {
+			await closedDispatch(h, m, r, { "src/b.ts": "export const b = 2;\n" });
+			const second = await activeMission(h.tx, m.ids);
+			await pinTo(h.tx, second, r.pinned);
+			await h.tx
+				.update(mission)
+				.set({ brief: RUNNABLE_PLAN as never })
+				.where(eq(mission.id, second.missionId));
+			await closedDispatch(h, second, r, {
+				"src/c.ts": "export const c = 3;\n",
+			});
+
+			const first = await jobOf(await postGate(h, m.missionId), 202);
+			const behind = await jobOf(await postGate(h, second.missionId), 202);
+			expect([first.ahead, behind.ahead]).toEqual([0, 1]);
+
+			await h.tx
+				.update(mission)
+				.set({ deletedAt: clock.now() })
+				.where(eq(mission.id, second.missionId));
+			expect((await h.call(`/api/gate-jobs/${behind.id}`)).status).toBe(404);
+			expect(
+				(await h.call(`/api/missions/${second.missionId}/gate-runs`)).status,
+			).toBe(404);
+			expect(
+				(await h.call("/api/gate-jobs/00000000-0000-4000-8000-00000000dead"))
 					.status,
 			).toBe(404);
 		});

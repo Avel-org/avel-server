@@ -151,7 +151,8 @@ export function dockerCheckRunner(opts: DockerCheckRunnerOptions): CheckRunner {
 				}
 
 				const results: CheckRunResult[] = [];
-				for (const check of request.checks) {
+				for (const [i, check] of request.checks.entries()) {
+					await request.onProgress?.(i, i);
 					const r = await inContainer(name, check.command, checkTimeoutMs);
 					// 124 is timeout's own exit, 137 a kill: either way it did not finish.
 					results.push(
@@ -164,6 +165,7 @@ export function dockerCheckRunner(opts: DockerCheckRunnerOptions): CheckRunner {
 								},
 					);
 				}
+				await request.onProgress?.(results.length, null);
 				return results;
 			} finally {
 				await docker(["rm", "--force", name]);

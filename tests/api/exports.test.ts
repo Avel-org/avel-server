@@ -6,7 +6,6 @@ import {
 	errorEnvelope,
 	exportListEnvelope,
 	exportSchema,
-	gateRun as gateRunSchema,
 	preconditionDetails,
 	successEnvelope,
 } from "../../src/contract";
@@ -37,6 +36,7 @@ import {
 } from "../db/dispatch-fixtures";
 import { makeRepo, removeDir, tempDir, writeFiles } from "../unit/git-fixtures";
 import { fixtureRepos } from "../unit/repo-fixtures";
+import { gateRunOf, jobDeps } from "./gate-job-fixtures";
 import {
 	activeClientMission,
 	activeMission,
@@ -160,6 +160,7 @@ async function prepared(
 	brief: unknown = RUNNABLE_PLAN,
 ) {
 	await h.signIn();
+	jobDeps(h, r.roomSources);
 	const m = await activeMission(h.tx, runnerIds(h.ns));
 	await h.tx
 		.update(mission)
@@ -170,14 +171,7 @@ async function prepared(
 	return m;
 }
 
-async function gate(h: ApiHarness, missionId: string) {
-	const res = await h.call(`/api/missions/${missionId}/gate`, {
-		method: "POST",
-		body: {},
-	});
-	expect(res.status, await res.clone().text()).toBe(201);
-	return successEnvelope(gateRunSchema).parse(await res.json()).data;
-}
+const gate = (h: ApiHarness, missionId: string) => gateRunOf(h, missionId);
 
 const post = (h: ApiHarness, url: string, body: unknown, key = randomUUID()) =>
 	h.call(url, { method: "POST", body, headers: { "idempotency-key": key } });
@@ -562,6 +556,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 		await withApi(
 			async (h) => {
 				await h.signIn();
+				jobDeps(h, r.roomSources);
 				const m = await activeClientMission(h, runnerIds(h.ns), {
 					repoUrl: CLIENT_REPO,
 					commit: r.pinned,

@@ -30,6 +30,7 @@ import { runCanonTurn } from "../../src/runner/canon";
 import { AgentSdkCanonModel } from "../../src/runner/canon/sdk-model";
 import { applyUsage, tick } from "../../src/runner/runner";
 import { seedIds } from "../api/agent-fixtures";
+import { jobDeps, runGate } from "../api/gate-job-fixtures";
 import { reportsOf, row, runnerDeps } from "../api/runner-fixtures";
 import { type ApiHarness, clock, withApi } from "../api/support";
 import { removeDir, tempDir } from "../unit/git-fixtures";
@@ -176,6 +177,7 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 			await withApi(
 				async (h) => {
 					const cookie = await h.signIn();
+					jobDeps(h, roomSources);
 					const post = (p: string, body: unknown = {}, headers = {}) =>
 						h.call(p, { method: "POST", body, headers });
 					const summary: string[] = [];
@@ -546,8 +548,8 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 						`${day()} · first-mission-live · item-6 · atlas · ${d.model} · ${d.tokensIn} · ${d.tokensOut} · ${d.spendUsd} · ${d.status}; report by ${report?.filedBy ?? "none"}, cache read ${d.cacheReadTokens}, cache write ${d.cacheWriteTokens}`,
 					);
 
-					// 4. The gate on the result.
-					const gateRes = await post(`/api/missions/${missionId}/gate`);
+					// 4. The gate on the result: queued, then run by the gate tick.
+					const gateRes = await runGate(h, missionId);
 					const gateText = await gateRes.clone().text();
 					console.log("GATE", gateRes.status, gateText.slice(0, 4000));
 					console.log(`SUMMARY\n${summary.join("\n")}`);
@@ -566,7 +568,7 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 						),
 					);
 					expect(d.status).toBe("complete");
-					const run = await ok(gateRes, 201, successEnvelope(gateRunSchema));
+					const run = await ok(gateRes, 200, successEnvelope(gateRunSchema));
 					console.log(
 						"RESULT",
 						run.result,

@@ -3,6 +3,7 @@ import { and, asc, count, desc, eq, sql } from "drizzle-orm";
 import {
 	type BriefCheck,
 	briefSchema,
+	type GateJob,
 	type GateRun,
 	type GateRunSummary,
 	gateContract,
@@ -15,9 +16,12 @@ import { logActivity } from "../db/activity";
 import {
 	activityLog,
 	agentTemplate,
+	client,
 	completionReport,
 	dispatch,
+	engagement,
 	finding,
+	gateJob,
 	mission,
 	playbook,
 	rosterEntry,
@@ -101,17 +105,25 @@ function configFor(runner: CheckRunner | null): GateConfig {
 			};
 }
 
+/** The checks a runner runs: every brief check but file_exists. */
+export const runnableCount = (checks: readonly BriefCheck[]) =>
+	checks.filter((c) => c.kind !== "file_exists").length;
+
 /**
  * Each check that needs a runner, run against the integration commit, keyed
  * by its index in `checks`. A runner that throws leaves every check it was
  * given as an error: the run cannot be verified, and nothing passes on a
  * runner that broke.
  */
-async function runChecks(
+export async function runChecks(
 	runner: CheckRunner | null,
 	source: string,
 	commitSha: string,
 	checks: readonly BriefCheck[],
+	onProgress?: (
+		checksDone: number,
+		currentCheckId: string | null,
+	) => Promise<void>,
 ): Promise<Map<number, CheckRunResult>> {
 	const ran = new Map<number, CheckRunResult>();
 	if (runner === null) return ran;
@@ -125,6 +137,13 @@ async function runChecks(
 			source,
 			commitSha,
 			checks: runnable.map((r) => r.check),
+			onProgress: onProgress
+				? (done, current) =>
+						onProgress(
+							done,
+							current === null ? null : (runnable[current]?.check.id ?? null),
+						)
+				: undefined,
 		});
 	} catch {
 		results = runnable.map(() => ({
@@ -165,6 +184,8 @@ export type GateRunPayload = {
 	excludedDispatches: GateRun["excludedDispatches"];
 	idempotencyKey: string | null;
 	requestSha256: string;
+	/** The job that made the run; absent on runs from before gate jobs. */
+	jobId?: string;
 };
 
 const refuse = (message: string, details: Record<string, unknown>) =>
@@ -231,7 +252,12 @@ function toRun(
 	};
 }
 
-async function liveMission(db: Executor | Tx, id: string) {
+/**
+ * The mission as its detail route sees it: live, and for a client mission,
+ * with a live engagement and client (as the dispatch routes read it). Its
+ * gate runs and jobs are hidden whenever it is.
+ */
+export async function gateMission(db: Executor | Tx, id: string) {
 	const [m] = await db
 		.select({
 			id: mission.id,
@@ -239,12 +265,25 @@ async function liveMission(db: Executor | Tx, id: string) {
 			type: mission.type,
 			brief: mission.brief,
 			engagementId: mission.engagementId,
+			origin: mission.origin,
+			clientId: client.id,
 		})
 		.from(mission)
+		.leftJoin(
+			engagement,
+			and(eq(engagement.id, mission.engagementId), live(engagement)),
+		)
+		.leftJoin(client, and(eq(client.id, engagement.clientId), live(client)))
 		.where(and(eq(mission.id, id), live(mission)));
-	if (!m) throw notFound("mission", id);
+	if (!m || (m.origin === "client" && m.clientId === null)) {
+		throw notFound("mission", id);
+	}
 	return m;
 }
+
+export type GateMission = Awaited<ReturnType<typeof gateMission>>;
+
+const liveMission = gateMission;
 
 /**
  * Module 9's gate, run by the operator (decided 2026-10-19). It judges one
@@ -253,11 +292,21 @@ async function liveMission(db: Executor | Tx, id: string) {
  * into findings, decide() turns findings into a result, and the receipt
  * records all of it. No model is in this path.
  */
-export function gateRoutes(deps: GateDeps) {
-	async function judge(
+export function gateJudge(deps: {
+	roomSources: RoomSourceResolver;
+	checkRunner: CheckRunner | null;
+}) {
+	/**
+	 * The run's inputs and decision, given what the runner reported (`ran`,
+	 * keyed by each check's index in the brief; empty for none). Throws the
+	 * precondition refusals. Deterministic for the same rows and clone, so
+	 * judging twice and comparing commitSha tells whether the work moved.
+	 */
+	return async function judge(
 		tx: Tx,
-		m: Awaited<ReturnType<typeof liveMission>>,
+		m: GateMission,
 		overrides: GateRunPayload["overrides"],
+		ran: ReadonlyMap<number, CheckRunResult>,
 	) {
 		if (m.status !== "active") {
 			throw refuse(`A ${m.status} mission is not gated`, {
@@ -461,7 +510,6 @@ export function gateRoutes(deps: GateDeps) {
 		}
 
 		const checks = brief.success ? brief.data.checks : [];
-		const ran = await runChecks(deps.checkRunner, source, commitSha, checks);
 		const findings: GateFinding[] = [
 			...specCheckFindings(m.brief, commitSha),
 			...secretScanFindings(scanned, commitSha, GATE_CONFIG.secretScan),
@@ -582,14 +630,137 @@ export function gateRoutes(deps: GateDeps) {
 				priceVersion: d.priceVersion,
 				spendUsd: Number(d.spendUsd),
 			})),
+			source,
+			checks,
 		};
-	}
+	};
+}
 
-	const gateRuns = (missionId: string) =>
-		and(
-			eq(activityLog.missionId, missionId),
-			eq(activityLog.action, "mission.gate_run"),
+export type Judged = Awaited<ReturnType<ReturnType<typeof gateJudge>>>;
+
+const gateRunRows = (missionId: string) =>
+	and(
+		eq(activityLog.missionId, missionId),
+		eq(activityLog.action, "mission.gate_run"),
+	);
+
+/** What a job carries into the run it makes. */
+export type JobRequest = {
+	jobId: string;
+	operatorId: string;
+	overrides: GateRunPayload["overrides"];
+	idempotencyKey: string | null;
+	requestSha256: string;
+};
+
+/**
+ * Writes the mission.gate_run row for a judged run: the receipt, its hash
+ * and the payload the run's routes read. The operator who queued the job is
+ * its actor.
+ */
+export async function recordGateRun(
+	tx: Tx,
+	deps: {
+		clock: RouteDeps["clock"];
+		ids: RouteDeps["ids"];
+		checkRunner: CheckRunner | null;
+	},
+	m: GateMission,
+	judged: Judged,
+	job: JobRequest,
+	requestId: string,
+) {
+	const receipt = buildReceipt({
+		missionId: m.id,
+		commitSha: judged.commitSha,
+		baseSha: judged.baseSha,
+		decision: judged.decision,
+		config: configFor(deps.checkRunner),
+		runner: deps.checkRunner?.id ?? null,
+		findings: judged.findings,
+		overrides: job.overrides.map((o) => ({ ...o, operatorId: job.operatorId })),
+		judges: judged.judges,
+		dispatches: judged.dispatches,
+	});
+	const parsed = JSON.parse(receipt.json) as { config: { sha256: string } };
+	const payload: GateRunPayload = {
+		commitSha: judged.commitSha,
+		baseSha: judged.baseSha,
+		result: judged.decision.result,
+		decideVersion: DECIDE_VERSION,
+		receiptVersion: RECEIPT_VERSION,
+		configSha256: parsed.config.sha256,
+		receiptSha256: receipt.sha256,
+		receipt: receipt.json,
+		overrides: job.overrides,
+		excludedDispatches: judged.excluded,
+		idempotencyKey: job.idempotencyKey,
+		requestSha256: job.requestSha256,
+		jobId: job.jobId,
+	};
+	return logActivity(tx, deps, {
+		actorKind: "operator",
+		actorUserId: job.operatorId,
+		action: "mission.gate_run",
+		entityType: "mission",
+		entityId: m.id,
+		missionId: m.id,
+		engagementId: m.engagementId,
+		requestId,
+		payload,
+	});
+}
+
+type GateJobRow = typeof gateJob.$inferSelect;
+
+/** Jobs that run before this one: every running job, and queued ones queued earlier. */
+export async function jobsAhead(db: Executor | Tx, row: GateJobRow) {
+	if (row.status !== "queued") return null;
+	const [n] = await db
+		.select({ n: count() })
+		.from(gateJob)
+		.where(
+			sql`${gateJob.status} = 'running' or (${gateJob.status} = 'queued' and (${gateJob.queuedAt}, ${gateJob.id}) < (${row.queuedAt.toISOString()}::timestamptz, ${row.id}::uuid))`,
 		);
+	return n?.n ?? 0;
+}
+
+/** The job's wire shape. */
+export function toJob(row: GateJobRow, ahead: number | null): GateJob {
+	return {
+		id: row.id,
+		missionId: row.missionId,
+		status: row.status,
+		gateRunId: row.gateRunId,
+		failure:
+			row.failureCode === null
+				? null
+				: {
+						code: row.failureCode,
+						reason: (row.failureReason ?? null) as never,
+						message: row.failureMessage ?? "",
+					},
+		progress:
+			row.checksTotal === null
+				? null
+				: {
+						checksTotal: row.checksTotal,
+						checksDone: row.checksDone ?? 0,
+						currentCheckId: row.currentCheckId,
+					},
+		ahead,
+		queuedAt: row.queuedAt.toISOString(),
+		startedAt: row.startedAt?.toISOString() ?? null,
+		finishedAt: row.finishedAt?.toISOString() ?? null,
+	};
+}
+
+/** Header on a POST that found the mission's job already queued or running. */
+const EXISTING = "gate-job-existing";
+
+export function gateRoutes(deps: GateDeps) {
+	const judge = gateJudge(deps);
+	const gateRuns = gateRunRows;
 
 	return tsr.platformContext<RequestContext>().router(gateContract, {
 		run: async ({ params, headers, body }, ctx) => {
@@ -598,90 +769,96 @@ export function gateRoutes(deps: GateDeps) {
 			const hash = requestSha256(body);
 			const result = await withTx(deps.db(), async (tx) => {
 				const m = await liveMission(tx, params.id);
-				// One gate run per mission at a time: a second waits, then runs.
+				// One POST per mission at a time, so two cannot both queue.
 				await tx.execute(
 					sql`select pg_advisory_xact_lock(hashtext(${`gate:${m.id}`}))`,
 				);
 				if (key) {
 					const [prior] = await tx
-						.select({
-							id: activityLog.id,
-							at: activityLog.at,
-							missionId: activityLog.missionId,
-							payload: activityLog.payload,
-						})
-						.from(activityLog)
+						.select()
+						.from(gateJob)
 						.where(
-							and(
-								gateRuns(m.id),
-								sql`${activityLog.payload}->>'idempotencyKey' = ${key}`,
-							),
+							and(eq(gateJob.missionId, m.id), eq(gateJob.idempotencyKey, key)),
 						);
 					if (prior) {
-						const p = prior.payload as GateRunPayload;
-						if (p.requestSha256 !== hash) {
+						if (prior.requestSha256 !== hash) {
 							throw new ApiError(
 								"IDEMPOTENCY_REPLAY",
 								"This idempotency key was used with a different body",
 							);
 						}
-						return { replayed: true, run: toRun(prior, p) };
+						return { kind: "replayed" as const, row: prior };
 					}
 				}
-				const judged = await judge(tx, m, body.overrides);
-				const receipt = buildReceipt({
-					missionId: m.id,
-					commitSha: judged.commitSha,
-					baseSha: judged.baseSha,
-					decision: judged.decision,
-					config: configFor(deps.checkRunner),
-					runner: deps.checkRunner?.id ?? null,
-					findings: judged.findings,
-					overrides: body.overrides.map((o) => ({
-						...o,
+				const [active] = await tx
+					.select()
+					.from(gateJob)
+					.where(
+						and(
+							eq(gateJob.missionId, m.id),
+							sql`${gateJob.status} in ('queued', 'running')`,
+						),
+					);
+				if (active) return { kind: "existing" as const, row: active };
+				// The preconditions, checked now so a refusal is immediate. The
+				// job judges again when it runs, with the checks' results.
+				await judge(tx, m, body.overrides, new Map());
+				const now = deps.clock.now();
+				const [row] = await tx
+					.insert(gateJob)
+					.values({
+						id: deps.ids.next(),
+						missionId: m.id,
+						status: "queued",
 						operatorId: operator.id,
-					})),
-					judges: judged.judges,
-					dispatches: judged.dispatches,
-				});
-				const parsed = JSON.parse(receipt.json) as {
-					config: { sha256: string };
-				};
-				const payload: GateRunPayload = {
-					commitSha: judged.commitSha,
-					baseSha: judged.baseSha,
-					result: judged.decision.result,
-					decideVersion: DECIDE_VERSION,
-					receiptVersion: RECEIPT_VERSION,
-					configSha256: parsed.config.sha256,
-					receiptSha256: receipt.sha256,
-					receipt: receipt.json,
-					overrides: body.overrides,
-					excludedDispatches: judged.excluded,
-					idempotencyKey: key,
-					requestSha256: hash,
-				};
-				const row = await logActivity(tx, deps, {
+						idempotencyKey: key,
+						requestSha256: hash,
+						overrides: body.overrides,
+						queuedAt: now,
+						createdAt: now,
+						updatedAt: now,
+					})
+					.returning();
+				if (!row) throw new Error("a gate_job insert returned no row");
+				await logActivity(tx, deps, {
 					actorKind: "operator",
 					actorUserId: operator.id,
-					action: "mission.gate_run",
+					action: "mission.gate_queued",
 					entityType: "mission",
 					entityId: m.id,
 					missionId: m.id,
 					engagementId: m.engagementId,
 					requestId: ctx.requestId,
-					payload,
+					payload: { jobId: row.id },
 				});
-				return {
-					replayed: false,
-					run: toRun({ id: row.id, at: row.at, missionId: m.id }, payload),
-				};
+				return { kind: "queued" as const, row };
 			});
-			if (result.replayed) {
+			const job = toJob(result.row, await jobsAhead(deps.db(), result.row));
+			if (result.kind === "replayed") {
 				ctx.responseHeaders.set(REPLAYED, "true");
-				return { status: 200, body: ok(result.run) };
+				return { status: 200, body: ok(job) };
 			}
-			return { status: 201, body: ok(result.run) };
+			if (result.kind === "existing") {
+				ctx.responseHeaders.set(EXISTING, "true");
+				return { status: 200, body: ok(job) };
+			}
+			return { status: 202, body: ok(job) };
+		},
+
+		job: async ({ params }) => {
+			const db = deps.db();
+			const [row] = await db
+				.select()
+				.from(gateJob)
+				.where(eq(gateJob.id, params.id));
+			if (!row) throw notFound("gate job", params.id);
+			await liveMission(db, row.missionId).catch((err) => {
+				if (err instanceof ApiError && err.code === "NOT_FOUND") {
+					throw notFound("gate job", params.id);
+				}
+				throw err;
+			});
+			return { status: 200, body: ok(toJob(row, await jobsAhead(db, row))) };
 		},
 
 		runs: async ({ params, query }) => {

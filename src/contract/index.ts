@@ -38,6 +38,7 @@ export * from "./engagement";
 export * from "./export";
 export * from "./finding";
 export * from "./gate";
+export * from "./gate-job";
 export * from "./intake";
 export * from "./intake-file";
 export * from "./mission";

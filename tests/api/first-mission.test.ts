@@ -7,7 +7,6 @@ import {
 	connectionSchema,
 	dispatch as dispatchWire,
 	engagementSchema,
-	gateRun as gateRunSchema,
 	intakeSchema,
 	missionPlanSchema,
 	successEnvelope,
@@ -24,6 +23,7 @@ import { gitIn, removeDir, tempDir } from "../unit/git-fixtures";
 import { fixtureRepos, snapshotOfCommit } from "../unit/repo-fixtures";
 import { SEED_RUN_AT } from "../unit/seed-run-at";
 import { bearer } from "./agent-fixtures";
+import { gateRunOf, jobDeps } from "./gate-job-fixtures";
 import { type ApiHarness, withApi } from "./support";
 
 // One mission through every built module, over the HTTP API the way
@@ -131,6 +131,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			await withApi(
 				async (h) => {
 					await h.signIn();
+					jobDeps(h, localSources(sources));
 					const post = (p: string, body: unknown = {}, headers = {}) =>
 						h.call(p, { method: "POST", body, headers });
 
@@ -364,11 +365,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					expect(closed.status).toBe("complete");
 
 					// 9. The gate on the integration commit.
-					const run = await ok(
-						await post(`/api/missions/${missionId}/gate`),
-						201,
-						successEnvelope(gateRunSchema),
-					);
+					// It runs in the background: queued by the POST, run by the tick.
+					const run = await gateRunOf(h, missionId);
 					expect(run.baseSha).toBe(read.repoCommitSha);
 					expect(run.commitSha).not.toBe(DEV_BOOKING_SHA);
 					expect(run.receiptSha256).toMatch(/^[0-9a-f]{64}$/);
@@ -457,6 +455,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						"dispatch.started",
 						"completion_report.filed",
 						"dispatch.closed",
+						"mission.gate_queued",
 						"mission.gate_run",
 					]);
 				},

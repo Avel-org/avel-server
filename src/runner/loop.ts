@@ -5,6 +5,7 @@ import {
 } from "../db/blob-sweep";
 import type { Logger } from "../lib/logger";
 import { type CanonDeps, canonTick } from "./canon";
+import { type GateJobDeps, gateJobTick, sweepGateJobs } from "./gate-job";
 import { type RunnerDeps, type SweepResult, sweep, tick } from "./runner";
 
 /**
@@ -97,6 +98,38 @@ export function startCanonLoop(
 		const results = await doTick(deps);
 		if (results.length > 0) logger.info({ results }, "canon turns ran");
 	});
+}
+
+/**
+ * The gate jobs' loop (src/runner/gate-job.ts): fails any job a stopped
+ * server left running, once at startup, then runs the oldest queued job on
+ * each tick. It always runs, runner or not, because nothing else finishes a
+ * queued job. A step never overlaps the last, so one job runs at a time.
+ */
+export function startGateJobLoop(
+	deps: GateJobDeps,
+	options: LoopOptions & {
+		sweep?: typeof sweepGateJobs;
+		tick?: typeof gateJobTick;
+	},
+): StopLoop {
+	const { logger } = options;
+	const doSweep = options.sweep ?? sweepGateJobs;
+	const doTick = options.tick ?? gateJobTick;
+	return startLoop(
+		"gate jobs",
+		{ ...options, unref: false },
+		async () => {
+			const failed = await doSweep(deps);
+			if (failed.length > 0) {
+				logger.info({ failed }, "gate jobs interrupted by a restart");
+			}
+		},
+		async () => {
+			const result = await doTick(deps);
+			if (result.jobId) logger.info(result, "gate job ran");
+		},
+	);
 }
 
 /**
