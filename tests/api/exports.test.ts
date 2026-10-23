@@ -12,9 +12,11 @@ import {
 } from "../../src/contract";
 import { closeDb } from "../../src/db/client";
 import {
+	client,
 	completionReport,
 	connection,
 	dispatch,
+	engagement,
 	exportTable,
 	mission,
 	playbook,
@@ -369,6 +371,21 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 					await post(h, "/api/exports/preview", body),
 				);
 				expect(again.code).toBe("DETERMINISM_VIOLATION");
+
+				// A deleted mission hides its exports, as it hides its dispatches.
+				await h.tx
+					.update(mission)
+					.set({ deletedAt: clock.now() })
+					.where(eq(mission.id, m.missionId));
+				for (const url of [
+					`/api/exports/${done.id}`,
+					`/api/exports/${done.id}/zip`,
+					`/api/dispatches/${d?.id}`,
+					`/api/missions/${m.missionId}/exports`,
+				]) {
+					const hidden = await refused(await h.call(url), 404);
+					expect(hidden.code, url).toBe("NOT_FOUND");
+				}
 			},
 			{ roomSources: r.roomSources },
 		);
@@ -624,6 +641,23 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 					}),
 				);
 				expect(reasonOf(noRepo)).toBe("export_target_repo_missing");
+
+				// A deleted client hides its missions' exports, as it hides their dispatches.
+				const [eng] = await h.tx
+					.select({ clientId: engagement.clientId })
+					.from(engagement)
+					.where(eq(engagement.id, m.engagementId as string));
+				await h.tx
+					.update(client)
+					.set({ deletedAt: clock.now() })
+					.where(eq(client.id, eng?.clientId as string));
+				for (const url of [
+					`/api/exports/${preview.id}`,
+					`/api/missions/${m.missionId}/exports`,
+				]) {
+					const hidden = await refused(await h.call(url), 404);
+					expect(hidden.code, url).toBe("NOT_FOUND");
+				}
 			},
 			{ roomSources: r.roomSources, repos },
 		);

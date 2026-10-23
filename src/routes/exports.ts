@@ -15,9 +15,11 @@ import { logActivity } from "../db/activity";
 import {
 	activityLog,
 	agentTemplate,
+	client,
 	completionReport,
 	connection,
 	dispatch,
+	engagement,
 	exportTable,
 	mission,
 	rosterEntry,
@@ -170,6 +172,11 @@ function toWire(row: ExportRow): ExportWire {
 	};
 }
 
+/**
+ * The mission as its detail route sees it: live, and for a client mission,
+ * with a live engagement and client (as the dispatch routes read it). An
+ * export, and every brief it carries, is hidden whenever its mission is.
+ */
 async function liveMission(db: Executor | Tx, id: string) {
 	const [m] = await db
 		.select({
@@ -177,12 +184,29 @@ async function liveMission(db: Executor | Tx, id: string) {
 			status: mission.status,
 			sprintN: mission.sprintN,
 			engagementId: mission.engagementId,
+			origin: mission.origin,
+			clientId: client.id,
 		})
 		.from(mission)
+		.leftJoin(
+			engagement,
+			and(eq(engagement.id, mission.engagementId), live(engagement)),
+		)
+		.leftJoin(client, and(eq(client.id, engagement.clientId), live(client)))
 		.where(and(eq(mission.id, id), live(mission)));
-	if (!m) throw notFound("mission", id);
+	if (!m || (m.origin === "client" && m.clientId === null)) {
+		throw notFound("mission", id);
+	}
 	return m;
 }
+
+/** An export whose mission is hidden answers as a missing export. */
+const hiddenAs = (entity: string, id: string) => (err: unknown) => {
+	if (err instanceof ApiError && err.code === "NOT_FOUND") {
+		throw notFound(entity, id);
+	}
+	throw err;
+};
 
 const gateRuns = (missionId: string) =>
 	and(
@@ -834,6 +858,9 @@ export function exportRoutes(deps: ExportDeps) {
 				.from(exportTable)
 				.where(eq(exportTable.id, params.id));
 			if (!row) throw notFound("export", params.id);
+			await liveMission(deps.db(), row.missionId).catch(
+				hiddenAs("export", params.id),
+			);
 			return { status: 200, body: ok(toWire(row)) };
 		},
 
@@ -904,6 +931,9 @@ export function exportZipRoute(deps: ExportDeps) {
 		) {
 			throw notFound("zip export", id ?? "");
 		}
+		await liveMission(db, row.missionId).catch(
+			hiddenAs("zip export", id ?? ""),
+		);
 		const manifest = row.versionManifest as ExportManifest;
 		const run = await gateRunById(db, row.missionId, manifest.gateRun.id);
 		const { repoPath } = await missionSource(
