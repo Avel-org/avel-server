@@ -1065,7 +1065,17 @@ J decided these on 2026-10-22. It reverses part of *render and delivery* (2026-1
 
 ## Decided 2026-10-22: agents run their own checks, as advice
 
-J decided on 2026-10-22 that agents get a tool that runs their brief's checks while they work. Its results are advice to the agent and are never gate evidence: the gate runs its own checks on the integration commit. It uses the gate runner (not built), under the running room's rules. Where the runner runs, and whether rooms start from earlier dispatches' work, are open.
+J decided on 2026-10-22 that agents get a tool that runs their brief's checks while they work. Its results are advice to the agent and are never gate evidence: the gate runs its own checks on the integration commit. It uses the gate runner (not built), under the running room's rules.
+
+## Decided 2026-10-22: rooms start from finished work, and the runner runs locally
+
+J approved these on 2026-10-22, from BE Main's recommendations. None is built.
+
+- **A dispatch's room starts from the work finished before it** `[specced]`: the mission's base plus every complete dispatch closed before the start, in close order, built as the gate builds its integration commit. A later wave sees the earlier waves' code, and a retry sees a fix made meanwhile. Rejected: one starting commit pinned per wave, which would hide a fix made during the wave from a retry in it.
+- **The dispatch records the commit it started from and the dispatches that built it** `[specced]`, so the start can be rebuilt and the gate knows who saw whom. It is the seventh exception to the schema freeze, and a contract change.
+- **Two dispatches conflict on a path only when neither saw the other's change** `[specced]`: neither started after the other closed. A later dispatch may change an earlier one's file. This replaces the 2026-10-19 rule that any path two complete dispatches touched is a conflict.
+- **Start wave refuses while an earlier wave has a queued or running dispatch,** and warns when one is blocked `[specced]`. No gate run is required between waves.
+- **The gate runner's first host is local Docker,** taken off hold `[specced]`. It is the only option that can deny the network for the check phase today, which `SANDBOX.md` requires. The runner sits behind one gateway, so the GitHub Actions mirror can be a second host.
 
 ---
 

@@ -240,6 +240,7 @@ describe.skipIf(!url)(
 					rooms: memoryRooms(),
 					roomSources: anySource,
 					drive: { blobs: memoryBlobs(), maxBytes: DEFAULT_UPLOAD_MAX_BYTES },
+					checkRunner: null,
 				});
 			const apps = {
 				first: app(prefixedIds("11111111"), first),

@@ -14,8 +14,9 @@ import type {
  * 2 (2026-10-21): assurance, and the decision's notChecked.
  * 3 (2026-10-21): one result replaces verdict and assurance.
  * 4 (2026-10-21): decide() version 4.
+ * 5 (2026-10-22): `runner`, the check runner that ran, or null.
  */
-export const RECEIPT_VERSION = 4;
+export const RECEIPT_VERSION = 5;
 
 /**
  * What `deterministicFindings` hashes: findings of these kinds, and checks
@@ -67,6 +68,8 @@ export type ReceiptInput = {
 	overrides: readonly ReceiptOverride[];
 	judges: readonly ReceiptJudge[];
 	dispatches: readonly ReceiptDispatch[];
+	/** The check runner's id (CheckRunner.id), or null when none is installed. */
+	runner: string | null;
 };
 
 export type Receipt = { json: string; sha256: string };
@@ -140,6 +143,7 @@ export function buildReceipt(input: ReceiptInput): Receipt {
 		baseSha: input.baseSha,
 		result: decision.result,
 		decideVersion: decision.version,
+		runner: input.runner,
 		config: { ...config, sha256: sha256Hex(canonicalJson(config)) },
 		overrides: overridesSection(input.overrides, decision),
 		degraded: decision.reasons

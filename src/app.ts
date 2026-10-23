@@ -8,6 +8,7 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { type Auth, REQUEST_ID_HEADER } from "./auth";
 import { contract } from "./contract";
 import type { Executor } from "./db/tx";
+import type { CheckRunner } from "./gateways/check-runner";
 import type { RepoSource } from "./gateways/repo-source";
 import type { TemplateSource } from "./gateways/template-source";
 import type { Clock } from "./lib/clock";
@@ -88,6 +89,8 @@ export type AppDeps = {
 	roomSources: RoomSourceResolver;
 	/** The Drive's blob store and upload cap (src/routes/files.ts). Local disk in dev, memory or a temp dir in tests. */
 	drive: Drive;
+	/** Runs the gate's test, typecheck and command checks (src/gateways/check-runner.ts). Null until a runner is installed: those checks report not_run. */
+	checkRunner: CheckRunner | null;
 };
 
 /**
@@ -120,7 +123,11 @@ export function createApp(deps: AppDeps) {
 		intakes: intakeRoutes({ ...routeDeps, repos: deps.repos }),
 		intakeFiles: intakeFileRoutes(routeDeps),
 		findings: findingRoutes(routeDeps),
-		gate: gateRoutes({ ...routeDeps, roomSources: deps.roomSources }),
+		gate: gateRoutes({
+			...routeDeps,
+			roomSources: deps.roomSources,
+			checkRunner: deps.checkRunner,
+		}),
 		exports: exportRoutes({
 			...routeDeps,
 			repos: deps.repos,

@@ -182,6 +182,7 @@ describe.skipIf(!url)(
 					rooms: memoryRooms(),
 					roomSources: anySource,
 					drive: { blobs: memoryBlobs(), maxBytes: DEFAULT_UPLOAD_MAX_BYTES },
+					checkRunner: null,
 				}),
 				creator: createApp({
 					clock,
@@ -199,6 +200,7 @@ describe.skipIf(!url)(
 					rooms: memoryRooms(),
 					roomSources: anySource,
 					drive: { blobs: memoryBlobs(), maxBytes: DEFAULT_UPLOAD_MAX_BYTES },
+					checkRunner: null,
 				}),
 			};
 			const { cookie } = await signInWithGitHub(apps.creator, OPERATOR);

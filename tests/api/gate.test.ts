@@ -23,6 +23,11 @@ import {
 } from "../../src/db/schema";
 import { stamp } from "../../src/db/schema/columns";
 import type { Tx } from "../../src/db/tx";
+import type {
+	CheckRunner,
+	CheckRunRequest,
+	CheckRunResult,
+} from "../../src/gateways/check-runner";
 import { worktreeRooms } from "../../src/rooms/provider";
 import { snapshotDispatch } from "../../src/rooms/snapshot";
 import type { RoomSource, RoomSourceResolver } from "../../src/rooms/sources";
@@ -222,6 +227,7 @@ async function refusal(res: Response) {
 async function gated(
 	r: Repo,
 	fn: (h: ApiHarness, m: Mission) => Promise<void>,
+	checkRunner?: CheckRunner,
 ) {
 	return withApi(
 		async (h) => {
@@ -234,9 +240,29 @@ async function gated(
 				.where(eq(mission.id, m.missionId));
 			await fn(h, m);
 		},
-		{ roomSources: r.roomSources },
+		{ roomSources: r.roomSources, checkRunner },
 	);
 }
+
+/** A check runner that answers by command, and records what it was asked. */
+function scriptedRunner(
+	answer: (command: string) => CheckRunResult | Error,
+): CheckRunner & { requests: CheckRunRequest[] } {
+	const requests: CheckRunRequest[] = [];
+	return {
+		id: "scripted@1",
+		requests,
+		run: async (req) => {
+			requests.push(req);
+			const results = req.checks.map((c) => answer(c.command));
+			const broke = results.find((x) => x instanceof Error);
+			if (broke) throw broke;
+			return results as CheckRunResult[];
+		},
+	};
+}
+
+const PASS: CheckRunResult = { outcome: "pass", exitCode: 0, output: "ok" };
 
 describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 	it("judges the integration commit of the complete dispatches, records the run, and serves it back", async () => {
@@ -291,7 +317,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 			// Every check ran and passed, so the run is verified.
 			expect(posted.reasons.filter((x) => x.degraded)).toEqual([]);
 			expect(posted.result).toBe("verified");
-			expect([posted.decideVersion, posted.receiptVersion]).toEqual([4, 4]);
+			expect([posted.decideVersion, posted.receiptVersion]).toEqual([4, 5]);
 			const receipt = JSON.parse(posted.receipt);
 			expect(receipt.result).toBe("verified");
 			expect(receipt.decision.notChecked).toEqual([]);
@@ -457,6 +483,77 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 				"Not checked: nothing reported on the rollback gate at this commit",
 			);
 		});
+	});
+
+	it("runs the brief's test checks on an installed runner: all passing verifies, one failing fails, a broken runner verifies nothing", async () => {
+		const cases = [
+			{ name: "pass", answer: () => PASS, result: "verified", ck2: "pass" },
+			{
+				name: "fail",
+				answer: (c: string) =>
+					c === "pnpm test R2"
+						? { outcome: "fail" as const, exitCode: 1, output: "1 failed" }
+						: PASS,
+				result: "fail",
+				ck2: "fail",
+			},
+			{
+				name: "broken",
+				answer: () => new Error("docker is not running"),
+				result: "fail",
+				ck2: "error",
+			},
+		];
+		for (const c of cases) {
+			const r = repo();
+			const runner = scriptedRunner(c.answer);
+			await gated(
+				r,
+				async (h, m) => {
+					await closedDispatch(h, m, r, {
+						"src/b.ts": "export const b = 2;\n",
+					});
+					await playbookFor(h, m, [...QA_AND_ACCEPTANCE], DISPATCH_PLAN);
+					const res = await run(h, m.missionId);
+					expect(res.status, await res.clone().text()).toBe(201);
+					const posted = successEnvelope(gateRunSchema).parse(
+						await res.json(),
+					).data;
+					expect(posted.result, c.name).toBe(c.result);
+					// The runner ran the brief's commands on the integration commit.
+					expect(runner.requests.map((q) => q.commitSha)).toEqual([
+						posted.commitSha,
+					]);
+					expect(runner.requests[0]?.checks.map((k) => k.command)).toEqual([
+						"pnpm test R1",
+						"pnpm test R2",
+					]);
+					const receipt = JSON.parse(posted.receipt);
+					expect(receipt.runner).toBe("scripted@1");
+					expect(receipt.config.availableSources).toContain("runner");
+					// A check the runner could not finish is not checked.
+					expect(
+						receipt.decision.notChecked.map(
+							(n: { findingId: string }) => n.findingId,
+						),
+					).toEqual(c.name === "broken" ? ["check:CK1:0", "check:CK2:1"] : []);
+					const ck2 = receipt.findings.find(
+						(f: { id: string }) => f.id === "check:CK2:1",
+					);
+					expect(ck2.outcome, c.name).toBe(c.ck2);
+					expect(ck2.subject).toBe(
+						c.ck2 === "fail"
+							? "CK2 (R2): test pnpm test R2 exited 1"
+							: c.ck2 === "error"
+								? "CK2 (R2): test pnpm test R2 did not finish"
+								: "CK2 (R2): test pnpm test R2",
+					);
+					// Its output stays out of the receipt.
+					expect(posted.receipt).not.toContain("1 failed");
+				},
+				runner,
+			);
+		}
 	});
 
 	it("fails security on a secret the work committed, and keeps the secret out of the receipt", async () => {

@@ -177,6 +177,8 @@ const app = createApp({
 		blobs,
 		maxBytes: uploadMaxBytes,
 	},
+	// No check runner is installed yet: the gate reports its checks not_run.
+	checkRunner: null,
 });
 
 // The real harness files reports and findings through the app itself, in

@@ -1,4 +1,5 @@
 import type { BriefCheck } from "../../../contract/intake";
+import type { CheckRunResult } from "../../../gateways/check-runner";
 import { matchesGlob, supportedGlob } from "../../../rooms/globs";
 import type { GateFinding } from "../types";
 
@@ -18,7 +19,10 @@ export const BRIEF_CHECK_SOURCES = [FILE_EXISTS_SOURCE, RUNNER_SOURCE] as const;
  * a blob `base` does not have at that path (J, 2026-10-21). A matching path
  * the work left as the base had it fails, because the base proves nothing
  * about the work. A glob the matcher does not understand is an error. test,
- * typecheck and command need a runner, so they are not_run from `runner`.
+ * typecheck and command need a runner: each takes its result from `ran`,
+ * keyed by its index in `checks`, and is not_run from `runner` without one.
+ * The runner's exit code goes in the subject; its output does not, since
+ * the receipt is kept and shared.
  * In the brief's order, which the ids carry, so the output is as stable as
  * the brief.
  */
@@ -27,6 +31,7 @@ export function briefCheckFindings(
 	head: Readonly<Record<string, string>>,
 	base: Readonly<Record<string, string>>,
 	commitSha: string,
+	ran: ReadonlyMap<number, CheckRunResult> = new Map(),
 ): GateFinding[] {
 	const paths = Object.keys(head);
 	return checks.map((ck, i): GateFinding => {
@@ -38,11 +43,18 @@ export function briefCheckFindings(
 			id: `check:${ck.id}:${i}`,
 		} as const;
 		if (ck.kind !== "file_exists") {
+			const subject = `${ck.id} (${ck.requirementId}): ${ck.kind} ${ck.command}`;
+			const r = ran.get(i);
 			return {
 				...finding,
 				source: RUNNER_SOURCE,
-				subject: `${ck.id} (${ck.requirementId}): ${ck.kind} ${ck.command}`,
-				outcome: "not_run",
+				subject:
+					r === undefined || r.outcome === "pass"
+						? subject
+						: r.outcome === "fail"
+							? `${subject} exited ${r.exitCode}`
+							: `${subject} did not finish`,
+				outcome: r === undefined ? "not_run" : r.outcome,
 			};
 		}
 		const subject = `${ck.id} (${ck.requirementId}): ${ck.path}`;

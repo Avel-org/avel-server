@@ -1,6 +1,7 @@
 import { tsr } from "@ts-rest/serverless/fetch";
 import { and, asc, count, desc, eq, sql } from "drizzle-orm";
 import {
+	type BriefCheck,
 	briefSchema,
 	type GateRun,
 	type GateRunSummary,
@@ -24,6 +25,11 @@ import {
 } from "../db/schema";
 import { live } from "../db/schema/columns";
 import { type Executor, type Tx, withTx } from "../db/tx";
+import type {
+	CheckRunner,
+	CheckRunResult,
+	RunnableCheck,
+} from "../gateways/check-runner";
 import { requestSha256 } from "../lib/canonical";
 import {
 	DECIDE_VERSION,
@@ -34,7 +40,7 @@ import {
 	type GateResult,
 	resultOf,
 } from "../lib/gate";
-import { GATE_CONFIG } from "../lib/gate/config";
+import { GATE_CONFIG, type GateConfig } from "../lib/gate/config";
 import {
 	type IntegrationDispatch,
 	planIntegration,
@@ -46,6 +52,7 @@ import {
 	type JudgeRun,
 	judgeCoverageFindings,
 	protectedPathFindings,
+	RUNNER_SOURCE,
 	type SecretScanFile,
 	secretScanFindings,
 	specCheckFindings,
@@ -74,7 +81,68 @@ import {
 	toPage,
 } from "./shared";
 
-type GateDeps = RouteDeps & { roomSources: RoomSourceResolver };
+type GateDeps = RouteDeps & {
+	roomSources: RoomSourceResolver;
+	/** Runs the brief's test, typecheck and command checks; null when none is installed. */
+	checkRunner: CheckRunner | null;
+};
+
+/**
+ * The config a run decides under: GATE_CONFIG, with `runner` an installed
+ * source only when a check runner is. Without one, a runner check's not_run
+ * is degraded, as before; with one, a check it did not run blocks.
+ */
+function configFor(runner: CheckRunner | null): GateConfig {
+	return runner === null
+		? GATE_CONFIG
+		: {
+				...GATE_CONFIG,
+				availableSources: [...GATE_CONFIG.availableSources, RUNNER_SOURCE],
+			};
+}
+
+/**
+ * Each check that needs a runner, run against the integration commit, keyed
+ * by its index in `checks`. A runner that throws leaves every check it was
+ * given as an error: the run cannot be verified, and nothing passes on a
+ * runner that broke.
+ */
+async function runChecks(
+	runner: CheckRunner | null,
+	source: string,
+	commitSha: string,
+	checks: readonly BriefCheck[],
+): Promise<Map<number, CheckRunResult>> {
+	const ran = new Map<number, CheckRunResult>();
+	if (runner === null) return ran;
+	const runnable = checks.flatMap((c, i) =>
+		c.kind === "file_exists" ? [] : [{ i, check: c as RunnableCheck }],
+	);
+	if (runnable.length === 0) return ran;
+	let results: CheckRunResult[];
+	try {
+		results = await runner.run({
+			source,
+			commitSha,
+			checks: runnable.map((r) => r.check),
+		});
+	} catch {
+		results = runnable.map(() => ({
+			outcome: "error",
+			exitCode: null,
+			output: "",
+		}));
+	}
+	if (results.length !== runnable.length) {
+		throw new Error(
+			`The check runner ${runner.id} answered ${results.length} results for ${runnable.length} checks`,
+		);
+	}
+	runnable.forEach((r, k) => {
+		ran.set(r.i, results[k] as CheckRunResult);
+	});
+	return ran;
+}
 
 /** Header on a replayed run (DATA-CONTRACTS-V2.md, Idempotency). */
 const REPLAYED = "idempotency-replayed";
@@ -392,16 +460,13 @@ export function gateRoutes(deps: GateDeps) {
 			});
 		}
 
+		const checks = brief.success ? brief.data.checks : [];
+		const ran = await runChecks(deps.checkRunner, source, commitSha, checks);
 		const findings: GateFinding[] = [
 			...specCheckFindings(m.brief, commitSha),
 			...secretScanFindings(scanned, commitSha, GATE_CONFIG.secretScan),
 			...dependencyFindings(manifests, commitSha),
-			...briefCheckFindings(
-				brief.success ? brief.data.checks : [],
-				head,
-				base,
-				commitSha,
-			),
+			...briefCheckFindings(checks, head, base, commitSha, ran),
 			...protectedPathFindings({
 				protectedPaths,
 				base,
@@ -490,7 +555,7 @@ export function gateRoutes(deps: GateDeps) {
 
 		const decision = decide(findings, policy, overrides, {
 			commitSha,
-			availableSources: GATE_CONFIG.availableSources,
+			availableSources: configFor(deps.checkRunner).availableSources,
 		});
 		const judgeIds = new Set(
 			judges.flatMap((j) => (j.dispatch ? [j.dispatch.id] : [])),
@@ -569,7 +634,8 @@ export function gateRoutes(deps: GateDeps) {
 					commitSha: judged.commitSha,
 					baseSha: judged.baseSha,
 					decision: judged.decision,
-					config: GATE_CONFIG,
+					config: configFor(deps.checkRunner),
+					runner: deps.checkRunner?.id ?? null,
 					findings: judged.findings,
 					overrides: body.overrides.map((o) => ({
 						...o,

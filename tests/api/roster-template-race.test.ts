@@ -221,6 +221,7 @@ describe.skipIf(!url)(
 					rooms: memoryRooms(),
 					roomSources: anySource,
 					drive: { blobs: memoryBlobs(), maxBytes: DEFAULT_UPLOAD_MAX_BYTES },
+					checkRunner: null,
 				});
 			const apps = {
 				adder: appFor(adder, "11111111"),
