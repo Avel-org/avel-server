@@ -14,6 +14,7 @@ import { dispatchByTokenSha256 } from "./db/dispatch";
 import { assertRuntimeRole, runtimeDatabaseUrl } from "./db/runtime";
 import * as authSchema from "./db/schema/auth";
 import { localDiskBlobs } from "./gateways/blob";
+import { dockerCheckRunner } from "./gateways/docker-check-runner";
 import { githubRepoSource } from "./gateways/repo-source";
 import {
 	fixtureTemplateSource,
@@ -140,6 +141,19 @@ if (!Number.isInteger(uploadMaxBytes) || uploadMaxBytes <= 0) {
 // Local clones only; unset, every start refuses source_unavailable.
 const roomSources = localSources(process.env.AVEL_SOURCES_DIR || undefined);
 
+// The gate's check runner on local Docker. Unset, the gate reports test,
+// typecheck and command checks not_run. Throws, so the server refuses to
+// start, on an image not pinned by digest.
+const checkImage = process.env.AVEL_CHECK_IMAGE || undefined;
+const checkRunner = checkImage
+	? dockerCheckRunner({ image: checkImage, ids: randomIds })
+	: null;
+if (!checkRunner) {
+	logger.warn(
+		"No check runner: the gate reports test, typecheck and command checks not run",
+	);
+}
+
 // Throws, so the server refuses to start, on a short or unprefixed credential.
 const runnerCredential = runnerCredentialSha256(
 	process.env.AVEL_RUNNER_CREDENTIAL,
@@ -177,8 +191,7 @@ const app = createApp({
 		blobs,
 		maxBytes: uploadMaxBytes,
 	},
-	// No check runner is installed yet: the gate reports its checks not_run.
-	checkRunner: null,
+	checkRunner,
 });
 
 // The real harness files reports and findings through the app itself, in
