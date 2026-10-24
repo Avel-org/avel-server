@@ -33,6 +33,8 @@ date · mission · slice · agent · model · in_tokens · out_tokens · usd · 
 2026-10-23 · first-mission-live · item-6 · atlas · claude-sonnet-5-5 · 6 · 314 · 0.018200 · complete; gate verified; trace still empty, confirmed as the test's missing step sink
 2026-10-23 · first-mission-live · item-6 · canon · claude-sonnet-5-5 · 1234 · 3232 · 0.057169 · replied; 3/3 citations resolve to the notes
 2026-10-23 · first-mission-live · item-6 · atlas · claude-sonnet-5-5 · 6 · 316 · 0.018179 · complete in 9 s; tools room_read, room_write, run_checks, report; run_checks 1 of 1 pass; gate verified, CK2 passed on Docker
+2026-10-24 · first-mission-live · item-6 · canon · claude-sonnet-5-5 · 1232 · 3487 · 0.072109 · replied; 3/3 citations resolve to the notes
+2026-10-24 · first-mission-live · item-6 · atlas · claude-sonnet-5-5 · 6 · 315 · 0.026842 · complete in 161 s; AVEL_LIVE_SLOW_CHECK_S=150, run_checks held open through the 150 s check, 1 of 1 pass; gate verified
 
 ---
 
