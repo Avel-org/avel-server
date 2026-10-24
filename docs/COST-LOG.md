@@ -35,6 +35,11 @@ date · mission · slice · agent · model · in_tokens · out_tokens · usd · 
 2026-10-23 · first-mission-live · item-6 · atlas · claude-sonnet-5-5 · 6 · 316 · 0.018179 · complete in 9 s; tools room_read, room_write, run_checks, report; run_checks 1 of 1 pass; gate verified, CK2 passed on Docker
 2026-10-24 · first-mission-live · item-6 · canon · claude-sonnet-5-5 · 1232 · 3487 · 0.072109 · replied; 3/3 citations resolve to the notes
 2026-10-24 · first-mission-live · item-6 · atlas · claude-sonnet-5-5 · 6 · 315 · 0.026842 · complete in 161 s; AVEL_LIVE_SLOW_CHECK_S=150, run_checks held open through the 150 s check, 1 of 1 pass; gate verified
+2026-10-24 · agent-room-spike · sandbox · probe · claude-sonnet-5-5 · ? · ? · 0.002653 · Claude Code in a container, key behind a proxy; one in-process tool call, nonce returned in 4.5 s
+2026-10-24 · first-mission-live · sandbox · canon · claude-sonnet-5-5 · ? · ? · ? · replied; then dispatch create answered 500: the spike worktree ran main's code on a test database already at drizzle/0053
+2026-10-24 · first-mission-live · sandbox · canon+atlas · claude-sonnet-5-5 · ? · ? · ? · passed with the agent in a container; numbers lost, vitest hid the output of a passing test
+2026-10-24 · first-mission-live · sandbox · canon · claude-sonnet-5-5 · ? · ? · ? · replied; 3/3 citations resolve to the notes; the smoke prints no Canon spend
+2026-10-24 · first-mission-live · sandbox · atlas · claude-sonnet-5-5 · 6 · 314 · 0.017773 · complete in 12 s with the agent's process in a container, no key in its environment, API through the key proxy only; tools room_read, room_write, run_checks, report; run_checks 1 of 1 pass; gate verified
 
 ---
 

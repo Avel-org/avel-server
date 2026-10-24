@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
+import { openAgentRoom } from "../../spike/agent-room/container";
 import {
 	agentTemplateSchema,
 	clientSchema,
@@ -70,6 +72,8 @@ const REPO = "https://github.com/meridian-co/app";
 const SLOTS = "src/features/scheduling/slots.ts";
 const SLOTS_TEST = "tests/unit/slots.test.ts";
 const CHECK_IMAGE = process.env.AVEL_CHECK_IMAGE || undefined;
+// Spike (2026-10-24): set, the agent's process runs in this image's container.
+const AGENT_IMAGE = process.env.AVEL_LIVE_AGENT_IMAGE || undefined;
 
 /** The client's own commit on the template: what makes CK2 runnable. */
 const CLIENT_FILES: Record<string, string> = {
@@ -251,7 +255,25 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 			const roomSources = localSources(sources);
 			const blobs = memoryBlobs();
 			const { logger, lines } = captureLogger();
+			const agentRoom = AGENT_IMAGE
+				? await openAgentRoom(AGENT_IMAGE, apiKey)
+				: undefined;
 			const harness = new AgentSdkHarness({
+				...(agentRoom
+					? {
+							query: ((a: Parameters<typeof sdkQuery>[0]) =>
+								sdkQuery({
+									...a,
+									options: {
+										...a.options,
+										spawnClaudeCodeProcess: (o) => {
+											console.log("AGENT_ROOM spawn", agentRoom.agent);
+											return agentRoom.spawn(o) as never;
+										},
+									},
+								})) as never,
+						}
+					: {}),
 				model: MODEL,
 				apiKey,
 				configDir: path.join(base, "runner-config"),
@@ -617,6 +639,21 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 					expect(room?.repoPath).toBe(clientClone);
 					expect(room?.commit).toBe(read.repoCommitSha);
 					await harness.settled(queued.id);
+					if (agentRoom) {
+						const env = agentRoom.agentEnv();
+						console.log(
+							"AGENT_ROOM",
+							JSON.stringify({
+								keyInAgentEnv: env.includes(apiKey),
+								envKeys: env
+									.split(/\n/)
+									.filter(Boolean)
+									.map((l: string) => l.split("=")[0]),
+								proxyLog: agentRoom.proxyLog().filter(Boolean),
+							}),
+						);
+						agentRoom.close();
+					}
 					await tick(deps);
 					const d = await row(h.tx, queued.id);
 					const [report] = await reportsOf(h.tx, queued.id);
