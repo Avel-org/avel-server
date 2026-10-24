@@ -1,4 +1,4 @@
-import { and, asc, eq, max, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, lt, max, sql } from "drizzle-orm";
 import {
 	type HaltReason,
 	type MissionStatus,
@@ -196,13 +196,65 @@ function refuse(
  * The caller has locked `m`. The harness is started last, inside the
  * transaction, so a harness that refuses rolls the start back.
  */
+/** What a start warns about without refusing. */
+export type StartWarnings = { earlierWaveBlocked: string[] };
+
+/**
+ * Wave order (decided 2026-10-22): a start refuses while a dispatch in an
+ * earlier wave of the mission is queued or running, naming the earliest
+ * such wave. Blocked ones in earlier waves only warn; they are returned,
+ * oldest first. No gate run is required between waves. The caller holds
+ * the mission's lock, so no earlier dispatch is created meanwhile.
+ */
+async function waveOrder(tx: Tx, d: DispatchRow): Promise<string[]> {
+	const earlier = await tx
+		.select({
+			id: dispatch.id,
+			wave: dispatch.wave,
+			status: dispatch.status,
+			createdAt: dispatch.createdAt,
+		})
+		.from(dispatch)
+		.where(
+			and(
+				eq(dispatch.missionId, d.missionId),
+				lt(dispatch.wave, d.wave),
+				inArray(dispatch.status, ["queued", "running", "blocked"]),
+			),
+		)
+		.orderBy(asc(dispatch.wave), asc(dispatch.createdAt), asc(dispatch.id));
+	const open = earlier.filter((e) => e.status !== "blocked");
+	const first = open[0];
+	if (first) {
+		const inFirst = open.filter((e) => e.wave === first.wave);
+		throw refuse(
+			`Wave ${first.wave} has ${inFirst.length} dispatch${inFirst.length === 1 ? "" : "es"} queued or running, before this wave ${d.wave} dispatch can start`,
+			{
+				details: {
+					reason: "earlier_wave_open",
+					dispatchId: d.id,
+					missionId: d.missionId,
+					wave: first.wave,
+					dispatchIds: inFirst.map((e) => e.id),
+				},
+			},
+		);
+	}
+	return earlier
+		.toSorted(
+			(a, b) =>
+				a.createdAt.getTime() - b.createdAt.getTime() || (a.id < b.id ? -1 : 1),
+		)
+		.map((e) => e.id);
+}
+
 export async function startDispatch(
 	step: Step,
 	deps: RunnerDeps,
 	m: LockedMission,
 	dispatchId: string,
 	by: Acting,
-): Promise<void> {
+): Promise<StartWarnings> {
 	const { tx } = step;
 	const d = await lockDispatch(tx, dispatchId);
 	if (!d || d.missionId !== m.id) {
@@ -219,6 +271,7 @@ export async function startDispatch(
 			details: { reason: "mission_not_active", ...at },
 		});
 	}
+	const earlierWaveBlocked = await waveOrder(tx, d);
 
 	const [entry] = await tx
 		.select({
@@ -321,6 +374,7 @@ export async function startDispatch(
 			briefSha256: briefHash,
 			startCommitSha: room.commit,
 			startDispatchIds,
+			earlierWaveBlocked,
 			model,
 			priceVersion: deps.prices.current,
 		},
@@ -345,6 +399,7 @@ export async function startDispatch(
 	}
 	// A commit that fails after this must not leave a session running.
 	step.onRollback.push(() => deps.harness.stop(d.id));
+	return { earlierWaveBlocked };
 }
 
 /**

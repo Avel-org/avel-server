@@ -315,6 +315,9 @@ export const dispatch = pgTable(
 			.notNull()
 			.references(() => mission.id),
 		briefRef: jsonb("brief_ref").$type<BriefRef>(),
+		// One of the roster entry's waves, chosen at create (decided
+		// 2026-10-22): a start refuses while an earlier wave is open.
+		wave: wave("wave").notNull(),
 		status: dispatchStatus("status").notNull(),
 		haltReason: haltReason("halt_reason"),
 		estimatedTokens: integer("estimated_tokens").notNull(),

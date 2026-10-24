@@ -119,6 +119,11 @@ export const PRECONDITION_REASONS = [
 	"dispatch_not_running",
 	"model_price_unknown",
 	"harness_unavailable",
+	// Waves (decided 2026-10-22): a dispatch's wave at create, and wave order at start.
+	"wave_required",
+	"wave_not_on_roster_entry",
+	"wave_not_applicable",
+	"earlier_wave_open",
 	// Module 7: the room's source cannot be resolved; retrying will not help.
 	"source_unavailable",
 	"room_unavailable",
@@ -194,11 +199,15 @@ export const preconditionDetails = z
 		dispatchId: z.string().uuid().optional(),
 		/** roster_entry_not_found, roster_entry_inactive, agent_identity_missing, estimate_missing, template_not_rosterable: the entries at fault, in roster order. */
 		rosterEntryIds: z.array(z.string().uuid()).optional(),
+		/** earlier_wave_open: that wave's queued and running dispatches, oldest first. */
+		dispatchIds: z.array(z.string().uuid()).optional(),
 		/** model_price_unknown: the model with no price. */
 		model: z.string().optional(),
 		/**
 		 * coherence_blocked: the earliest wave the playbook declares, which no
-		 * active agent is in; null when it declares none. Written out rather
+		 * active agent is in; null when it declares none. wave_not_on_roster_entry,
+		 * wave_not_applicable: the wave asked for. earlier_wave_open: the
+		 * earliest wave with a queued or running dispatch. Written out rather
 		 * than imported, to keep this module free of cycles; a test pins it
 		 * to WAVES.
 		 */

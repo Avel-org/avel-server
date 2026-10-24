@@ -17,7 +17,9 @@ import { DEFAULT_PRICE_BOOK } from "../../src/runner/budget";
 import { FakeHarness } from "../../src/runner/harness";
 import { missionRoomSource } from "../../src/runner/room-source";
 import {
+	closeBySystem,
 	inStep,
+	lockDispatch,
 	lockMission,
 	type RunnerDeps,
 	startDispatch,
@@ -151,7 +153,7 @@ describe.skipIf(!url)("the dev seed's sources", () => {
 	);
 
 	it(
-		"starts the seeded queued dispatch in a room on its client's clone",
+		"starts the seeded queued dispatch in a room on its client's clone, once its earlier wave is closed",
 		async () => {
 			const db = await seeded();
 			await buildDevSources(sources);
@@ -174,14 +176,63 @@ describe.skipIf(!url)("the dev seed's sources", () => {
 				rooms,
 				roomSources: localSources(sources),
 			};
+			const by = {
+				actor: {
+					actorKind: "operator" as const,
+					actorUserId: SEED_OPERATOR_ID,
+				},
+				requestId: "seed-sources-test",
+			};
+			const start = () =>
+				inStep(deps, async (step) => {
+					const m = await lockMission(step.tx, queued.missionId);
+					if (!m) throw new Error("no mission");
+					return startDispatch(step, deps, m, queued.id, by);
+				});
+			// The seed's queued dispatch is Zane's, in wave D, while one of
+			// Atlas's wave B dispatches is still running: wave order holds it.
+			const running = await db
+				.select({ id: schema.dispatch.id, wave: schema.dispatch.wave })
+				.from(schema.dispatch)
+				.where(
+					and(
+						eq(schema.dispatch.missionId, queued.missionId),
+						eq(schema.dispatch.status, "running"),
+					),
+				);
+			expect(running.map((r) => r.wave)).toEqual(["B"]);
+			await expect(start()).rejects.toMatchObject({
+				details: {
+					reason: "earlier_wave_open",
+					wave: "B",
+					dispatchIds: running.map((r) => r.id),
+				},
+			});
 			await inStep(deps, async (step) => {
 				const m = await lockMission(step.tx, queued.missionId);
-				if (!m) throw new Error("no mission");
-				await startDispatch(step, deps, m, queued.id, {
-					actor: { actorKind: "operator", actorUserId: SEED_OPERATOR_ID },
-					requestId: "seed-sources-test",
-				});
+				const d = await lockDispatch(step.tx, running[0]?.id ?? "");
+				if (!m || !d) throw new Error("no mission or dispatch");
+				await closeBySystem(
+					step,
+					deps,
+					m,
+					d,
+					{ status: "halted", haltReason: "operator" },
+					by,
+				);
 			});
+			// Iyo's wave C dispatch is blocked: a warning, not a refusal.
+			const [blocked] = await db
+				.select({ id: schema.dispatch.id, wave: schema.dispatch.wave })
+				.from(schema.dispatch)
+				.where(
+					and(
+						eq(schema.dispatch.missionId, queued.missionId),
+						eq(schema.dispatch.status, "blocked"),
+					),
+				);
+			expect(blocked?.wave).toBe("C");
+			expect(await start()).toEqual({ earlierWaveBlocked: [blocked?.id] });
 			const [d] = await db
 				.select({ status: schema.dispatch.status })
 				.from(schema.dispatch)

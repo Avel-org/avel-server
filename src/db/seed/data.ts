@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Brief } from "../../contract/intake";
+import { WAVES } from "../../contract/shared/wave";
 import { fixedClock } from "../../lib/clock";
 import { generateIdentity, type IdentitySkill } from "../../lib/identity";
 import type { IdGenerator } from "../../lib/ids";
@@ -1664,6 +1665,8 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 			rosterEntryId: entry.id,
 			missionId: d.missionId,
 			briefRef: d.briefRef,
+			// The entry's earliest wave, as drizzle/0053 backfills.
+			wave: WAVES.find((w) => entry.waves.includes(w)) ?? "A",
 			status: d.status,
 			haltReason: d.haltReason ?? null,
 			estimatedTokens: estimate,

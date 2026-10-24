@@ -9,6 +9,7 @@ import { successEnvelope } from "./shared/envelope";
 import { pageEnvelope, pageQuery } from "./shared/pagination";
 import { oneOrMany, searchQuery } from "./shared/query";
 import { missionStatus } from "./shared/status";
+import { wave } from "./shared/wave";
 
 const c = initContract();
 
@@ -78,12 +79,7 @@ export const FIRM_ROLES = [
 	"client-ops",
 ] as const satisfies readonly Role[];
 
-/** The global phases A to E; E is Operate. The wave pgEnum is built from it. */
-export const WAVES = ["A", "B", "C", "D", "E"] as const;
-
-export const wave = z.enum(WAVES);
-
-export type Wave = z.infer<typeof wave>;
+export { WAVES, type Wave, wave } from "./shared/wave";
 
 /** Must equal the agent_kind pgEnum. */
 export const agentKind = z.enum(["horizontal", "feature"]);
