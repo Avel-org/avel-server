@@ -138,6 +138,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						// The first dispatch starts from the base: nothing finished yet.
 						startCommitSha: d.startCommitSha,
 						startDispatchIds: [],
+						earlierWaveBlocked: [],
 						model: "fake-harness",
 						priceVersion: PRICE_VERSION,
 					});

@@ -27,6 +27,7 @@ const queued = {
 	},
 	territory: null,
 	briefRef: { moduleId: "M1", requirementIds: ["R1"] },
+	wave: "B",
 	status: "queued",
 	haltReason: null,
 	estimatedTokens: 1000,

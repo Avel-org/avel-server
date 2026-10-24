@@ -114,6 +114,7 @@ export function toDispatchWire(r: DispatchWireRow): Dispatch {
 					requirementIds: [...d.briefRef.requirementIds],
 				}
 			: null,
+		wave: d.wave,
 		status: d.status,
 		haltReason: d.haltReason,
 		estimatedTokens: d.estimatedTokens,

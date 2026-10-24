@@ -13,6 +13,7 @@ import {
 	missionStatus,
 	versionSource,
 } from "./shared/status";
+import { wave } from "./shared/wave";
 
 /**
  * Module 6 wire shapes and the operator's dispatch routes
@@ -53,6 +54,11 @@ export const dispatch = z.object({
 	}),
 	territory: z.string().nullable(),
 	briefRef: briefRef.nullable(),
+	/**
+	 * One of the roster entry's waves, chosen at create. A start refuses
+	 * while a dispatch in an earlier wave of the mission is queued or running.
+	 */
+	wave,
 	status: dispatchStatus,
 	/** Set exactly when status is halted. */
 	haltReason: haltReason.nullable(),
@@ -188,12 +194,14 @@ export const MAX_WALL_CLOCK_MINUTES = 480;
  * Creates a queued dispatch. Omitted estimate and ceilings come from the
  * roster entry; omitted ceilings default to 1.5× and 3× the estimate.
  * briefRef names a module of the mission's plan, and requirements that
- * module lists.
+ * module lists. wave must be one of the roster entry's waves and on in the
+ * mission's playbook; omitted, it is the entry's only wave.
  */
 export const createDispatchBody = z
 	.object({
 		rosterEntryId: uuid,
 		briefRef,
+		wave: wave.optional(),
 		estimatedTokens: z.number().int().positive().optional(),
 		tokenSoftCeiling: z.number().int().positive().optional(),
 		tokenHardCeiling: z.number().int().positive().optional(),
@@ -277,6 +285,17 @@ export const dispatchListQuery = pageQuery.extend({
 
 const byId = z.object({ id: uuid });
 
+/**
+ * A start's answer. earlierWaveBlocked is a warning, not a refusal: the
+ * blocked dispatches in earlier waves of the mission, oldest first, empty
+ * when there are none.
+ */
+export const startDispatchEnvelope = z.object({
+	success: z.literal(true),
+	data: dispatch,
+	meta: z.object({ earlierWaveBlocked: z.array(uuid) }),
+});
+
 export const dispatchContract = c.router({
 	list: {
 		method: "GET",
@@ -327,7 +346,7 @@ export const dispatchContract = c.router({
 		path: "/api/dispatches/:id/start",
 		pathParams: byId,
 		body: c.noBody(),
-		responses: { 200: successEnvelope(dispatch) },
+		responses: { 200: startDispatchEnvelope },
 		summary:
 			"queued → running: freezes the identity, skills, model and price version, and hands the token to the harness",
 	},

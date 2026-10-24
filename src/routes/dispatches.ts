@@ -8,6 +8,7 @@ import {
 	dispatchContract,
 	ok,
 	page,
+	type Wave,
 } from "../contract";
 import { logActivity } from "../db/activity";
 import {
@@ -25,6 +26,7 @@ import {
 	dispatchStep,
 	engagement,
 	mission,
+	playbook,
 	rosterEntry,
 } from "../db/schema";
 import { live } from "../db/schema/columns";
@@ -56,6 +58,7 @@ const REPLAYED = "Idempotency-Replayed";
 
 type VisibleMission = {
 	id: string;
+	type: string;
 	status: string;
 	brief: unknown;
 	engagementId: string | null;
@@ -74,6 +77,7 @@ async function visibleMission(
 	const q = db
 		.select({
 			id: mission.id,
+			type: mission.type,
 			status: mission.status,
 			brief: mission.brief,
 			engagementId: mission.engagementId,
@@ -141,6 +145,50 @@ const hiddenAs = (entity: string, id: string) => (err: unknown) => {
 	throw err;
 };
 
+/**
+ * The dispatch's wave (decided 2026-10-22): the one asked for, else the
+ * entry's only wave. It must be one of the entry's waves and on in the
+ * mission's playbook, which cannot change while the mission is active
+ * (playbook_in_use).
+ */
+async function dispatchWave(
+	tx: Tx,
+	m: VisibleMission,
+	waves: Wave[],
+	asked: Wave | undefined,
+	at: { missionId: string; rosterEntryIds: string[] },
+): Promise<Wave> {
+	if (asked === undefined && waves.length > 1) {
+		throw new ApiError(
+			"PRECONDITION_FAILED",
+			`The roster entry is in waves ${waves.join(", ")}: name the wave`,
+			{ details: { reason: "wave_required", ...at } },
+		);
+	}
+	const wave = asked ?? waves[0];
+	if (wave === undefined || !waves.includes(wave)) {
+		throw new ApiError(
+			"PRECONDITION_FAILED",
+			wave === undefined
+				? "The roster entry is in no wave"
+				: `The roster entry is not in wave ${wave}`,
+			{ details: { reason: "wave_not_on_roster_entry", ...at, wave } },
+		);
+	}
+	const [book] = await tx
+		.select({ wavesApplicable: playbook.wavesApplicable })
+		.from(playbook)
+		.where(and(eq(playbook.missionType, m.type), live(playbook)));
+	if (!book?.wavesApplicable.includes(wave)) {
+		throw new ApiError(
+			"PRECONDITION_FAILED",
+			`The mission's playbook does not run wave ${wave}`,
+			{ details: { reason: "wave_not_applicable", missionId: m.id, wave } },
+		);
+	}
+	return wave;
+}
+
 type Created = { replayed: boolean; id: string };
 
 async function create(
@@ -185,6 +233,7 @@ async function create(
 			.select({
 				id: rosterEntry.id,
 				active: rosterEntry.active,
+				waves: rosterEntry.waves,
 				estimatedTokens: rosterEntry.estimatedTokens,
 				tokenSoftCeiling: rosterEntry.tokenSoftCeiling,
 				tokenHardCeiling: rosterEntry.tokenHardCeiling,
@@ -232,6 +281,8 @@ async function create(
 				{ details: { reason: "agent_identity_missing", ...at } },
 			);
 		}
+
+		const wave = await dispatchWave(tx, m, entry.waves, body.wave, at);
 
 		const refIssues = briefRefIssues(m.brief, body.briefRef);
 		if (refIssues.length > 0) throw invalid(refIssues);
@@ -299,6 +350,7 @@ async function create(
 			rosterEntryId: entry.id,
 			missionId: m.id,
 			briefRef: body.briefRef,
+			wave,
 			status: "queued",
 			haltReason: null,
 			estimatedTokens: estimate,
@@ -327,6 +379,7 @@ async function create(
 			payload: {
 				rosterEntryId: entry.id,
 				moduleId: body.briefRef.moduleId,
+				wave,
 				estimatedTokens: estimate,
 				tokenSoftCeiling: soft,
 				tokenHardCeiling: hard,
@@ -478,14 +531,17 @@ export function dispatchRoutes(deps: RouteDeps & RunnerDeps) {
 
 		start: async ({ params }, ctx) => {
 			const by = operatorActing(ctx);
-			await inStep(deps, async (step) => {
+			const started = await inStep(deps, async (step) => {
 				const m = await lockedMissionOf(step.tx, params.id);
 				await refuseFirmStart(step.tx, params.id);
-				await startDispatch(step, deps, m, params.id, by);
+				return startDispatch(step, deps, m, params.id, by);
 			});
 			const wire = await dispatchWire(deps.db(), params.id);
 			if (!wire) throw new Error(`dispatch ${params.id} vanished`);
-			return { status: 200, body: ok(wire) };
+			return {
+				status: 200,
+				body: { success: true, data: wire, meta: started },
+			};
 		},
 
 		halt: async ({ params }, ctx) => {

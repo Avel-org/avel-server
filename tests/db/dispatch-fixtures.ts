@@ -1,11 +1,14 @@
 import type { DispatchStatus } from "../../src/contract/shared/status";
+import { WAVES, type Wave } from "../../src/contract/shared/wave";
 import type { NewDispatch } from "../../src/db/dispatch";
 import {
 	agentIdentityVersion,
 	agentTemplate,
 	type completionReport,
 	dispatch,
+	playbook,
 	rosterEntry,
+	rosterPreset,
 } from "../../src/db/schema";
 import { stamp } from "../../src/db/schema/columns";
 import type { Tx } from "../../src/db/tx";
@@ -125,6 +128,40 @@ export async function seedAgent(
 	};
 }
 
+/**
+ * A live playbook for the mission's type, with an empty default preset:
+ * dispatch create reads its wavesApplicable (wave_not_applicable).
+ */
+export async function seedPlaybook(
+	tx: Tx,
+	ids: IdGenerator,
+	missionType: string,
+	waves: readonly Wave[] = WAVES,
+): Promise<void> {
+	const presetId = ids.next();
+	await tx.insert(rosterPreset).values({
+		id: presetId,
+		name: `Preset ${missionType}`,
+		description: null,
+		cut: "horizontal",
+		agents: [],
+		version: 1,
+		...stamp(clock),
+	});
+	await tx.insert(playbook).values({
+		id: ids.next(),
+		missionType,
+		name: `Playbook ${missionType}`,
+		wavesApplicable: [...waves],
+		gates: [{ gate: "acceptance", policy: "mandatory" }],
+		deliverable: "pr",
+		requiredFields: [],
+		defaultPresetId: presetId,
+		version: 1,
+		...stamp(clock),
+	});
+}
+
 const ENDED: readonly DispatchStatus[] = [
 	"complete",
 	"blocked",
@@ -144,6 +181,7 @@ export function dispatchValues(
 		rosterEntryId: agent.entryId,
 		missionId: agent.missionId,
 		briefRef: { moduleId: "M6", requirementIds: ["R1", "R2"] },
+		wave: "B",
 		status,
 		haltReason: status === "halted" ? "token_hard_ceiling" : null,
 		estimatedTokens: 1000,

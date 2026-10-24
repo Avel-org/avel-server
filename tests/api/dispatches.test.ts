@@ -18,9 +18,10 @@ import {
 	dispatch,
 	engagement,
 	mission,
+	playbook,
 	rosterEntry,
 } from "../../src/db/schema";
-import { stamp } from "../../src/db/schema/columns";
+import { remove, stamp } from "../../src/db/schema/columns";
 import type { Tx } from "../../src/db/tx";
 import type { IdGenerator } from "../../src/lib/ids";
 import {
@@ -28,6 +29,7 @@ import {
 	insertDispatchRow,
 	reportValues,
 	seedAgent,
+	seedPlaybook,
 } from "../db/dispatch-fixtures";
 import { type ApiHarness, clock, withApi } from "./support";
 
@@ -101,6 +103,7 @@ async function seed(tx: Tx, ns: string) {
 		spendCeilingUsd: "40.00",
 		...stamp(clock),
 	});
+	await seedPlaybook(tx, ids, `accounts-${ns}`);
 	const kel = await seedAgent(tx, ids, missionId);
 	await tx
 		.update(rosterEntry)
@@ -168,6 +171,8 @@ describe.skipIf(!process.env.DATABASE_URL)("dispatches", () => {
 				},
 				territory: "accounts",
 				briefRef: { moduleId: "M6", requirementIds: ["R1"] },
+				// The entry's only wave.
+				wave: "B",
 				status: "queued",
 				haltReason: null,
 				estimatedTokens: 10000,
@@ -197,11 +202,99 @@ describe.skipIf(!process.env.DATABASE_URL)("dispatches", () => {
 				payload: {
 					rosterEntryId: s.kel.entryId,
 					moduleId: "M6",
+					wave: "B",
 					estimatedTokens: 10000,
 					tokenSoftCeiling: 15000,
 					tokenHardCeiling: 30000,
 				},
 			});
+		});
+	});
+
+	it("takes the wave asked for from an entry in several, and refuses none named", async () => {
+		await withApi(async ({ signIn, call, tx, ns }) => {
+			await signIn();
+			const s = await seed(tx, ns);
+			await tx
+				.update(rosterEntry)
+				.set({ waves: ["B", "C"] })
+				.where(eq(rosterEntry.id, s.kel.entryId));
+			const unnamed = await refusal(
+				await create(call, s.missionId, body(s.kel.entryId)),
+			);
+			expect(unnamed).toEqual({
+				reason: "wave_required",
+				missionId: s.missionId,
+				rosterEntryIds: [s.kel.entryId],
+			});
+			const res = await create(
+				call,
+				s.missionId,
+				body(s.kel.entryId, { wave: "C" }),
+			);
+			expect(res.status).toBe(201);
+			expect(one.parse(await res.json()).data.wave).toBe("C");
+		});
+	});
+
+	it("refuses a wave the entry is not in, and an entry in no wave", async () => {
+		await withApi(async ({ signIn, call, tx, ns }) => {
+			await signIn();
+			const s = await seed(tx, ns);
+			const off = await refusal(
+				await create(call, s.missionId, body(s.kel.entryId, { wave: "A" })),
+			);
+			expect(off).toEqual({
+				reason: "wave_not_on_roster_entry",
+				missionId: s.missionId,
+				rosterEntryIds: [s.kel.entryId],
+				wave: "A",
+			});
+			await tx
+				.update(rosterEntry)
+				.set({ waves: [] })
+				.where(eq(rosterEntry.id, s.kel.entryId));
+			const none = await refusal(
+				await create(call, s.missionId, body(s.kel.entryId)),
+			);
+			expect(none).toEqual({
+				reason: "wave_not_on_roster_entry",
+				missionId: s.missionId,
+				rosterEntryIds: [s.kel.entryId],
+			});
+			expect(
+				await tx
+					.select()
+					.from(dispatch)
+					.where(eq(dispatch.missionId, s.missionId)),
+			).toEqual([]);
+		});
+	});
+
+	it("refuses a wave the mission's playbook does not run, and fails closed with no playbook", async () => {
+		await withApi(async ({ signIn, call, tx, ns }) => {
+			await signIn();
+			const s = await seed(tx, ns);
+			await tx
+				.update(playbook)
+				.set({ wavesApplicable: ["A", "C"] })
+				.where(eq(playbook.missionType, `accounts-${ns}`));
+			const off = await refusal(
+				await create(call, s.missionId, body(s.kel.entryId)),
+			);
+			expect(off).toEqual({
+				reason: "wave_not_applicable",
+				missionId: s.missionId,
+				wave: "B",
+			});
+			await tx
+				.update(playbook)
+				.set({ wavesApplicable: ["B"], ...remove(clock) })
+				.where(eq(playbook.missionType, `accounts-${ns}`));
+			const gone = await refusal(
+				await create(call, s.missionId, body(s.kel.entryId)),
+			);
+			expect(gone).toMatchObject({ reason: "wave_not_applicable", wave: "B" });
 		});
 	});
 
