@@ -88,7 +88,8 @@ export async function seedAgent(
 			agentTemplateId: templateId,
 			number,
 			identityMd: `# ${slug} v${number}\n`,
-			depthMd: "",
+			// Its role skills in full, as the generator writes them.
+			depthMd: `# ${slug} v${number}: depth\n\nA role skill in full.\n`,
 			sha256: sha(c),
 			identityTokens: 1,
 			depthTokens: 0,

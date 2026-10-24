@@ -179,6 +179,8 @@ export const PRECONDITION_REASONS = [
 	"export_target_not_built",
 	// GitHub PR delivery (2026-10-24): refresh reads only a delivering or pr-open github_pr export.
 	"export_not_pr_open",
+	// Role skills (2026-10-24): only a role-layer skill attaches to roles.
+	"skill_not_role_layer",
 ] as const;
 
 export const preconditionReason = z.enum(PRECONDITION_REASONS);

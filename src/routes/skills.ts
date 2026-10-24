@@ -13,13 +13,15 @@ import {
 import {
 	ok,
 	page,
+	ROLES,
+	type Role,
 	type Skill,
 	type SkillListItem,
 	type SkillListQuery,
 	skillContract,
 } from "../contract";
 import { logActivity } from "../db/activity";
-import { skill, skillSource } from "../db/schema";
+import { roleSkills, skill, skillSource } from "../db/schema";
 import { live, stamp, touch } from "../db/schema/columns";
 import { type Executor, type Tx, withTx } from "../db/tx";
 import { skillContentSha256 } from "../lib/skill-hash";
@@ -132,12 +134,28 @@ export function toSkillListItem(row: ListRow): SkillListItem {
 	};
 }
 
-function toWire(row: FullRow): Skill {
+function toWire(row: FullRow, attachedRoles: Role[]): Skill {
 	return {
 		...toSkillListItem(row),
 		contentMd: row.contentMd,
 		avelEnhancementMd: row.avelEnhancementMd,
+		attachedRoles,
 	};
+}
+
+/** The roles role_skills attaches the skill to, in ROLES order. */
+async function attachedRolesOf(db: Executor | Tx, id: string): Promise<Role[]> {
+	const rows = await db
+		.select({ role: roleSkills.role })
+		.from(roleSkills)
+		.where(eq(roleSkills.skillId, id));
+	const held = new Set(rows.map((r) => r.role));
+	return ROLES.filter((r) => held.has(r));
+}
+
+/** The skill's wire, with the roles it is attached to read in the same executor. */
+async function wireOf(db: Executor | Tx, row: FullRow): Promise<Skill> {
+	return toWire(row, await attachedRolesOf(db, row.id));
 }
 
 function filtersFor(query: SkillListQuery): SQL | undefined {
@@ -272,7 +290,7 @@ export function skillRoutes(deps: RouteDeps) {
 		get: async ({ params }) => {
 			const row = await findLive(deps.db(), eq(skill.id, params.id));
 			if (!row) throw notFound("skill", params.id);
-			return { status: 200, body: ok(toWire(row)) };
+			return { status: 200, body: ok(await wireOf(deps.db(), row)) };
 		},
 
 		// The slug is unique among live skills (skill_slug_live_uq).
@@ -281,7 +299,7 @@ export function skillRoutes(deps: RouteDeps) {
 			if (!row) {
 				throw new ApiError("NOT_FOUND", `No skill with slug ${params.slug}`);
 			}
-			return { status: 200, body: ok(toWire(row)) };
+			return { status: 200, body: ok(await wireOf(deps.db(), row)) };
 		},
 
 		create: async ({ body }, ctx) => {
@@ -333,7 +351,7 @@ export function skillRoutes(deps: RouteDeps) {
 				}),
 			);
 			if (!row) throw new Error("a created skill was not readable");
-			return { status: 201, body: ok(toWire(row)) };
+			return { status: 201, body: ok(await wireOf(deps.db(), row)) };
 		},
 
 		update: async ({ params, body }, ctx) => {
@@ -439,7 +457,7 @@ export function skillRoutes(deps: RouteDeps) {
 				}),
 			);
 			if (!row) throw notFound("skill", params.id);
-			return { status: 200, body: ok(toWire(row)) };
+			return { status: 200, body: ok(await wireOf(deps.db(), row)) };
 		},
 
 		approve: async ({ params, body }, ctx) => {
@@ -479,7 +497,7 @@ export function skillRoutes(deps: RouteDeps) {
 				return findLive(tx, eq(skill.id, params.id));
 			});
 			if (!row) throw notFound("skill", params.id);
-			return { status: 200, body: ok(toWire(row)) };
+			return { status: 200, body: ok(await wireOf(deps.db(), row)) };
 		},
 
 		retire: async ({ params }, ctx) => {
@@ -505,7 +523,62 @@ export function skillRoutes(deps: RouteDeps) {
 				return findLive(tx, eq(skill.id, params.id));
 			});
 			if (!row) throw notFound("skill", params.id);
-			return { status: 200, body: ok(toWire(row)) };
+			return { status: 200, body: ok(await wireOf(deps.db(), row)) };
+		},
+
+		setRoles: async ({ params, body }, ctx) => {
+			const operator = operatorOf(ctx);
+			const wire = await withTx(deps.db(), async (tx) => {
+				const current = await lockSkill(tx, params.id);
+				if (current.layer !== "role") {
+					throw new ApiError(
+						"PRECONDITION_FAILED",
+						`A ${current.layer} skill goes on missions, not roles`,
+						{ details: { reason: "skill_not_role_layer" } },
+					);
+				}
+				if (current.status === "retired") {
+					throw new ApiError(
+						"CONFLICT",
+						"A retired skill cannot be attached to roles",
+					);
+				}
+				const from = await attachedRolesOf(tx, params.id);
+				const wanted = new Set(body.roles);
+				const to = ROLES.filter((r) => wanted.has(r));
+				const gone = from.filter((r) => !wanted.has(r));
+				const added = to.filter((r) => !from.includes(r));
+				if (gone.length > 0) {
+					await tx
+						.delete(roleSkills)
+						.where(
+							and(
+								eq(roleSkills.skillId, params.id),
+								inArray(roleSkills.role, gone),
+							),
+						);
+				}
+				if (added.length > 0) {
+					await tx
+						.insert(roleSkills)
+						.values(added.map((role) => ({ role, skillId: params.id })));
+				}
+				if (gone.length > 0 || added.length > 0) {
+					await logActivity(tx, deps, {
+						actorKind: "operator",
+						actorUserId: operator.id,
+						action: "skill.roles_set",
+						entityType: "skill",
+						entityId: params.id,
+						requestId: ctx.requestId,
+						payload: { skillId: params.id, from, to },
+					});
+				}
+				const row = await findLive(tx, eq(skill.id, params.id));
+				if (!row) throw notFound("skill", params.id);
+				return toWire(row, to);
+			});
+			return { status: 200, body: ok(wire) };
 		},
 	});
 }

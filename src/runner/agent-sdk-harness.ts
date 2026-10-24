@@ -72,6 +72,21 @@ export const AVEL_TOOL_NAMES = [
 export const FIRST_MESSAGE =
 	"Do the module in your brief. You are done when every check under Done when would pass; the checks run outside you. Read the files under Read before you change anything. run_checks runs your test, typecheck and command checks on your files as advice; the gate still runs its own. File your report with the report tool when you finish or are blocked, then stop.";
 
+/**
+ * What the agent's system prompt adds to the preset: its identity, its
+ * depth file when it has one (the role skills the identity names), and
+ * the brief, in that order. The brief goes in byte for byte, as frozen.
+ */
+export function systemAppend(
+	session: Pick<HarnessSession, "identityMd" | "depthMd" | "briefMd">,
+): string {
+	const head = [session.identityMd, session.depthMd]
+		.map((part) => part.trimEnd())
+		.filter((part) => part !== "")
+		.join("\n\n");
+	return session.briefMd ? `${head}\n\n${session.briefMd}` : head;
+}
+
 export type QueryFn = (params: {
 	prompt: string;
 	options?: Options;
@@ -361,7 +376,7 @@ export class AgentSdkHarness implements Harness {
 			systemPrompt: {
 				type: "preset",
 				preset: "claude_code",
-				append: `${session.identityMd.trimEnd()}\n\n${session.briefMd ?? ""}`,
+				append: systemAppend(session),
 			},
 			maxTurns: o.maxTurns,
 			maxBudgetUsd: o.maxBudgetUsd,
