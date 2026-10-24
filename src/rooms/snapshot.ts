@@ -197,8 +197,9 @@ const refuse = (
  * The commit the gate judges: the plan's steps laid onto its base in a
  * scratch index, each write taken from that step's dispatch commit, by AVEL
  * at the last step's closedAt. Refused (IntegrationRefused) for a conflict, an empty plan,
- * a missing dispatch commit, one made on another base, or a write its
- * dispatch commit does not hold.
+ * a missing dispatch commit, one not made on its step's start commit, or a
+ * write its dispatch commit does not hold. A step that started from earlier
+ * work holds that work too; only the paths it changed are laid down.
  */
 export async function buildIntegrationCommit(
 	source: string,
@@ -235,8 +236,10 @@ export async function buildIntegrationCommit(
 				dispatchId: step.dispatchId,
 			});
 		}
-		if (parent !== plan.baseSha) {
-			throw refuse("A dispatch's commit is not on the mission's base", {
+		// On the commit its room opened on: the base, or a start built from
+		// earlier work (decided 2026-10-22).
+		if (parent !== step.startSha) {
+			throw refuse("A dispatch's commit is not on the commit it started from", {
 				reason: "dispatch_commit_off_base",
 				dispatchId: step.dispatchId,
 			});

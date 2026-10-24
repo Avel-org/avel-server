@@ -8,7 +8,19 @@ export type IntegrationDispatch = {
 	status: CompletionStatus;
 	/** When the dispatch closed, as Date.toISOString() writes it. */
 	closedAt: string;
+	/**
+	 * Every path its room changed since the commit it started from:
+	 * `startSha`, or the mission's base for a dispatch with none.
+	 */
 	changes: readonly FileChange[];
+	/**
+	 * The commit its room opened on (decided 2026-10-22: rooms start from
+	 * finished work), its result commit's parent. Absent on a dispatch
+	 * started before that: it started from the base.
+	 */
+	startSha?: string;
+	/** The complete dispatches its start commit was built from; none when absent. */
+	saw?: readonly string[];
 };
 
 /** Write the path as the dispatch left it, or delete it. */
@@ -17,6 +29,8 @@ export type IntegrationOp = { op: "write" | "delete"; path: string };
 export type IntegrationStep = {
 	dispatchId: string;
 	closedAt: string;
+	/** The parent its result commit must have: its start commit, or the base. */
+	startSha: string;
 	/** One op per path, sorted by path. */
 	ops: IntegrationOp[];
 };
@@ -52,9 +66,14 @@ const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
  * are listed as excluded, and their paths are never laid down.
  *
  * A path that two complete dispatches touched, by any change (a rename
- * touches both its paths), is a conflict, even when both made the same
- * change. Every such path is listed with every dispatch that touched it, and
- * nothing is planned: there is no merging and no guessing.
+ * touches both its paths), is a conflict when neither saw the other's
+ * change: neither started from work that held the other (decided
+ * 2026-10-22; it replaces the 2026-10-19 rule that any shared path is a
+ * conflict). A later dispatch may change an earlier one's file, and its
+ * change, laid down after, wins. A conflict stands even when both made the
+ * same change. Every conflicting path is listed with each dispatch in a
+ * pair that did not see each other, and nothing is planned: there is no
+ * merging and no guessing.
  *
  * Otherwise each dispatch is one step, in close order (ties by id). Each
  * touched path is written when the dispatch left it in place (added,
@@ -76,7 +95,15 @@ export function planIntegration(input: {
 		if (!ISO.test(d.closedAt)) {
 			throw new Error(`Dispatch ${d.id} has closedAt ${d.closedAt}`);
 		}
+		if (d.startSha !== undefined && !COMMIT_SHA.test(d.startSha)) {
+			throw new Error(`Dispatch ${d.id} has start ${d.startSha}`);
+		}
 	}
+	const saw = new Map(
+		input.dispatches.map((d) => [d.id, new Set(d.saw ?? [])] as const),
+	);
+	const seenBetween = (a: string, b: string) =>
+		(saw.get(a)?.has(b) ?? false) || (saw.get(b)?.has(a) ?? false);
 
 	const ordered = [...input.dispatches].sort(
 		(a, b) => cmp(a.closedAt, b.closedAt) || cmp(a.id, b.id),
@@ -112,6 +139,7 @@ export function planIntegration(input: {
 		return {
 			dispatchId: d.id,
 			closedAt: d.closedAt,
+			startSha: d.startSha ?? input.baseSha,
 			ops: [...touched].sort(cmp).map((path) => ({
 				op: written.has(path) ? "write" : "delete",
 				path,
@@ -120,8 +148,19 @@ export function planIntegration(input: {
 	});
 
 	const conflicts = [...touchedBy]
-		.filter(([, ids]) => ids.length > 1)
-		.map(([path, ids]) => ({ path, dispatchIds: [...ids].sort(cmp) }))
+		.map(([path, ids]) => {
+			const unseen = new Set<string>();
+			for (const [i, a] of ids.entries()) {
+				for (const b of ids.slice(i + 1)) {
+					if (!seenBetween(a, b)) {
+						unseen.add(a);
+						unseen.add(b);
+					}
+				}
+			}
+			return { path, dispatchIds: [...unseen].sort(cmp) };
+		})
+		.filter((c) => c.dispatchIds.length > 0)
 		.sort((a, b) => cmp(a.path, b.path));
 	if (conflicts.length > 0) {
 		return { ok: false, baseSha: input.baseSha, conflicts, excluded };

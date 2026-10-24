@@ -290,6 +290,8 @@ describe.skipIf(!process.env.DATABASE_URL)("dispatch table", () => {
 					"model",
 					"price_version",
 					"skills_sha256",
+					"start_commit_sha",
+					"start_dispatch_ids",
 					"started_at",
 					"token_sha256",
 				].sort(),

@@ -44,6 +44,8 @@ const queued = {
 	agentVersionRef: null,
 	skillsSha256: null,
 	briefSha256: null,
+	startCommitSha: null,
+	startDispatchIds: null,
 	model: null,
 	harnessVersion: null,
 	reportId: null,

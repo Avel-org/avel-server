@@ -96,11 +96,15 @@ const CLIENT_FILES: Record<string, string> = {
 	].join("\n"),
 };
 
+// AVEL_LIVE_SLOW_CHECK_S makes CK2 wait that long first, so the agent's
+// run_checks call stays open for minutes: does the SDK hold it?
+const SLOW_S = Number(process.env.AVEL_LIVE_SLOW_CHECK_S || 0);
+
 const TEST_CHECK = {
 	id: "CK2",
 	requirementId: "R1",
 	kind: "test" as const,
-	command: `node --test ${SLOTS_TEST}`,
+	command: `${SLOW_S > 0 ? `sleep ${SLOW_S} && ` : ""}node --test ${SLOTS_TEST}`,
 	note: `The client's test of AC1, ${SLOTS_TEST}, passes. Import with the .ts extension: Node runs the TypeScript directly.`,
 };
 
@@ -176,7 +180,8 @@ const day = () => new Date().toISOString().slice(0, 10);
 
 describe.skipIf(!live || !process.env.DATABASE_URL)(
 	"live: the first mission on the Claude Agent SDK",
-	{ timeout: 600_000 },
+	// The preflight, the agent's run_checks and the gate each wait SLOW_S.
+	{ timeout: 600_000 + 4 * SLOW_S * 1000 },
 	() => {
 		const base = tempDir("first-mission-live");
 		afterAll(async () => {

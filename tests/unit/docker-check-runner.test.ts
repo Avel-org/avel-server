@@ -18,6 +18,13 @@ import { makeRepo, removeDir, tempDir } from "./git-fixtures";
 // AVEL_DOCKER_TEST_IMAGE=node@sha256:... (a Node image with sh, timeout and
 // tar); without it the suite skips. CI does not set it.
 const IMAGE = process.env.AVEL_DOCKER_TEST_IMAGE;
+// CI sets it (.github/workflows/ci.yml): there, a missing image is an
+// error, never a quiet skip.
+if (process.env.CI && !IMAGE) {
+	throw new Error(
+		"CI must run the check runner's tests: set AVEL_DOCKER_TEST_IMAGE",
+	);
+}
 
 vi.setConfig({ testTimeout: 120_000 });
 

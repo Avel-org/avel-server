@@ -131,6 +131,8 @@ export function toDispatchWire(r: DispatchWireRow): Dispatch {
 		agentVersionRef: ref(r.versionSlug, r.versionNumber),
 		skillsSha256: d.skillsSha256,
 		briefSha256: d.briefSha256,
+		startCommitSha: d.startCommitSha,
+		startDispatchIds: d.startDispatchIds ? [...d.startDispatchIds] : null,
 		model: d.model,
 		harnessVersion: d.harnessVersion,
 		reportId: r.reportId,
