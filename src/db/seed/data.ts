@@ -8,6 +8,7 @@ import { PRICE_VERSION } from "../../lib/prices";
 import { skillContentSha256 } from "../../lib/skill-hash";
 import { DEV_BOOKING_SHA } from "../../lib/templates";
 import { ownerRepo } from "../../rooms/sources";
+import type { ExportManifest } from "../../routes/exports";
 import { skillsSha256 } from "../../runner/skills";
 import type {
 	activityLog,
@@ -907,7 +908,7 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 		dryRun?: boolean;
 		previewOf?: string;
 		prStatus?: string;
-		rendered?: string;
+		rendered: string;
 	}) => {
 		const id = ids.next();
 		rows.export.push({
@@ -925,8 +926,8 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 			previewExportId: x.previewOf ?? null,
 			baseRef: x.target === "zip" ? null : "main",
 			baseCommitSha: x.target === "zip" ? null : "0".repeat(40),
-			packageSha256: x.rendered === undefined ? null : x.rendered.repeat(64),
-			packageHashVersion: x.rendered === undefined ? null : 1,
+			packageSha256: x.rendered.repeat(64),
+			packageHashVersion: 1,
 			createdAt: at(x.day),
 			updatedAt: at(x.endDay, 5),
 		});
@@ -1005,6 +1006,7 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 		status: "failed",
 		day: 25,
 		endDay: 25,
+		rendered: "f",
 	});
 	addExport({
 		missionId: routes1,
@@ -2111,6 +2113,29 @@ ${(m.brief as { summary: string }).summary}
 			{ missionId: m.id, acknowledged: [] },
 			{ missionId: m.id, engagementId: m.engagementId },
 		);
+	}
+
+	// Added last, so every earlier seed id stays where it was. Every export
+	// carries the manifest and package the routes always write, or reading
+	// it is a 500. The seed has no gate runs, so each manifest's gate run id
+	// names none, and its package lists no files.
+	for (const e of rows.export) {
+		const letter = (e.packageSha256 as string).slice(0, 1);
+		const manifest: ExportManifest = {
+			gateRun: {
+				id: ids.next(),
+				result: "verified",
+				commitSha: letter.repeat(40),
+				baseSha: "0".repeat(40),
+				receiptSha256: letter.repeat(64),
+			},
+			dispatches: [],
+			package: { files: [], deletes: [] },
+			violations: [],
+			blocked: null,
+			requestSha256: "0".repeat(64),
+		};
+		e.versionManifest = manifest;
 	}
 
 	return rows;

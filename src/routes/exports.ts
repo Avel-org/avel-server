@@ -136,7 +136,7 @@ const REPLAYED = "idempotency-replayed";
  * renders the same bytes later, whatever closed since), the package's file
  * list and violations, and the request hash replays are told apart by.
  */
-type ExportManifest = {
+export type ExportManifest = {
 	gateRun: ExportWire["gateRun"];
 	dispatches: ClosedDispatch[];
 	package: Pick<ExportWire["package"], "files" | "deletes">;
@@ -195,7 +195,7 @@ function prState(s: string | null): "open" | "merged" | "closed" {
 	return s === "merged" || s === "closed" ? s : "open";
 }
 
-function toWire(row: ExportRow): ExportWire {
+export function toWire(row: ExportRow): ExportWire {
 	const m = row.versionManifest as ExportManifest;
 	return {
 		id: row.id,

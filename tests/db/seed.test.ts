@@ -4,6 +4,7 @@ import {
 	completionReport as completionReportWire,
 	dispatch as dispatchWireSchema,
 } from "../../src/contract/dispatch";
+import { exportSchema } from "../../src/contract/export";
 import { MISSION_STATUSES } from "../../src/contract/shared/status";
 import {
 	dispatchWire,
@@ -17,6 +18,7 @@ import {
 	SEED_OPERATOR_ID,
 } from "../../src/db/seed/data";
 import { fixedClock } from "../../src/lib/clock";
+import { toWire as exportWire } from "../../src/routes/exports";
 import { OPERATOR, testAuthConfig } from "../unit/support";
 
 /** Fixed, so two seeded databases match: running dispatches are timed from it. */
@@ -250,6 +252,33 @@ describe.skipIf(!url)("pnpm db:seed", () => {
 					select id from mission
 					where repo_url = 'https://github.com/halvorsen-pike/billing' and sprint_n = 2`;
 				expect(await missionSpentUsd(db, active?.id ?? "")).toBe(35.6);
+			} finally {
+				await conn.end();
+			}
+		},
+		BUDGET_MS,
+	);
+
+	it(
+		"renders every seeded export exactly as the contract says",
+		async () => {
+			const { drizzle } = await import("drizzle-orm/postgres-js");
+			const conn = postgres(withDatabase(url ?? "", first), {
+				max: 1,
+				onnotice: () => {},
+			});
+			try {
+				// A seeded export with no manifest made its mission's exports
+				// list answer 500 (2026-10-24).
+				const rows = await drizzle(conn, { schema })
+					.select()
+					.from(schema.exportTable)
+					.orderBy(schema.exportTable.id);
+				expect(rows).toHaveLength(7);
+				for (const row of rows) {
+					const wire = exportWire(row);
+					expect(exportSchema.strict().parse(wire)).toEqual(wire);
+				}
 			} finally {
 				await conn.end();
 			}
