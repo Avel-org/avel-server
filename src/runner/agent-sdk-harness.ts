@@ -225,7 +225,7 @@ function avelServer(t: AgentTools) {
 			),
 			tool(
 				"run_checks",
-				"Run your brief's test, typecheck and command checks on your room's files as they are now, in a sandbox with no network. Name checkIds to run only those. Advice only: the gate runs its own checks, and these results are not evidence. A run can take minutes.",
+				"Run your brief's test, typecheck and command checks on your room's files as they are now, in a container: the install from your lockfile has the network, and the checks do not. Name checkIds to run only those. Advice only: the gate runs its own checks, and these results are not evidence. A run can take minutes.",
 				{ checkIds: z.array(z.string()).optional() },
 				async (a) => result(await t.runChecks(a)),
 			),

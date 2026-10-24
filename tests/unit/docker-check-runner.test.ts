@@ -255,7 +255,9 @@ describe.skipIf(!IMAGE)("dockerCheckRunner on Docker", () => {
 			shouldStop: () => started >= 1,
 		});
 		expect(results.map((x) => x.outcome)).toEqual(["pass", "error", "error"]);
-		expect(results[1]?.output).toMatch(/time limit/);
+		expect(results[1]?.output).toBe(
+			"Not run: the run was stopped before this check started",
+		);
 	});
 
 	it("rejects, never crashes, when tar exits while git archive is still writing", async () => {
