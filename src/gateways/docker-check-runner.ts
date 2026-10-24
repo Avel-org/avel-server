@@ -80,7 +80,7 @@ export type DockerCheckRunnerOptions = {
 	pids?: number;
 };
 
-type Exec = { code: number | null; output: string };
+export type Exec = { code: number | null; output: string };
 
 /**
  * The gate's check runner on local Docker (decided 2026-10-22), under
@@ -561,12 +561,20 @@ export function tailOf(max: number) {
 }
 
 /** The docker CLI on the host. The container sees only the --env values create and exec pass. */
-function docker(
+/**
+ * One docker CLI call with a time limit, holding the end of its output.
+ * env, when given, is the CLI's whole environment: a value named by
+ * `--env NAME` alone is read from it, so it never appears in the arguments.
+ */
+export function docker(
 	args: readonly string[],
-	options: { timeoutMs: number; outputBytes: number },
+	options: { timeoutMs: number; outputBytes: number; env?: NodeJS.ProcessEnv },
 ): Promise<Exec> {
 	return new Promise((resolve, reject) => {
-		const child = spawn("docker", args, { windowsHide: true });
+		const child = spawn("docker", args, {
+			windowsHide: true,
+			...(options.env ? { env: options.env } : {}),
+		});
 		const output = tailOf(options.outputBytes);
 		child.stdout.on("data", output.push);
 		child.stderr.on("data", output.push);

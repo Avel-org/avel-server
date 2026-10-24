@@ -1091,6 +1091,17 @@ J asked for the gate to run in the background before the Docker runner goes live
 - **Stopping the server does not wait for a running job.** The next start fails it `interrupted` and the runner removes its container. This assumes one server process: a second process starting would fail the first one's job. A job something else ended cannot be marked done afterwards, and its run is rolled back.
 - **Two code review findings stand as designed** (BE Main, 2026-10-23, for J to confirm). A POST that finds a job already running records nothing, neither its key nor its overrides; the client shows "Already running", and a retry after that job ends queues a new one. Idempotency keys used on gate runs before gate jobs no longer replay; only dev data predates them.
 
+## Decided 2026-10-24: the agent's process runs in an agent room
+
+J approved this on 2026-10-24, from BE Main's proposal and spike. It reverses part of *Tier 0 rooms are worktrees only* (2026-10-13), for one thing: the process that runs the agent. Rooms stay git worktrees.
+
+- **Each real dispatch's Claude Code process runs in a container of its own** `[built]`, through the SDK's `spawnClaudeCodeProcess`. The SDK talks to it over stdin and stdout only, and AVEL's tools run in the server, so nothing else changes. Rejected: moving the room into the container, which would put the mount checks on the wrong side of the boundary.
+- **The proxy holds the API key** `[built]`. The agent's container has a placeholder and the proxy as its API address. Rejected: the key in the container's environment, simpler, but then an escaped process holds the one credential its room has.
+- **The proxy forwards the messages API only** `[built]` (`POST /v1/messages`, `/v1/messages/count_tokens`), from the spike: forwarding any path would let an agent spend AVEL's key on any endpoint.
+- **No image of AVEL's own** `[built]`. The binary is the SDK's Linux build at the SDK's version, installed by pnpm from the lockfile and mounted read-only into a pinned public image (the check runner's works). Rejected: an image built locally, which has no registry digest to pin.
+- **Optional now, required before the first real client mission** `[specced]`. `AVEL_AGENT_IMAGE` unset runs the agent on the host with a warning. Nothing refuses yet.
+- **Canon moves later**, in its own step `[specced]`.
+
 ---
 
 ## Open questions

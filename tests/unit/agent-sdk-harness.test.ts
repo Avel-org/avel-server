@@ -4,6 +4,10 @@ import path from "node:path";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { afterAll, describe, expect, it } from "vitest";
 import type { CheckRunner } from "../../src/gateways/check-runner";
+import type {
+	AgentRoom,
+	AgentRooms,
+} from "../../src/gateways/docker-agent-rooms";
 import { fixedClock } from "../../src/lib/clock";
 import { sequentialIds } from "../../src/lib/ids";
 import {
@@ -228,7 +232,11 @@ const HOST = {
 
 function harness(
 	query?: QueryFn,
-	checks: { checkRunner?: CheckRunner; maxCheckRuns?: number } = {},
+	checks: {
+		checkRunner?: CheckRunner;
+		maxCheckRuns?: number;
+		agentRooms?: AgentRooms;
+	} = {},
 ) {
 	const { logger, lines } = captureLogger();
 	const h = new AgentSdkHarness({
@@ -239,6 +247,7 @@ function harness(
 		logger,
 		clock: fixedClock("2026-10-23T09:00:00.000Z"),
 		checkRunner: checks.checkRunner ?? null,
+		...(checks.agentRooms ? { agentRooms: checks.agentRooms } : {}),
 		...(checks.maxCheckRuns ? { maxCheckRuns: checks.maxCheckRuns } : {}),
 		maxBudgetUsd: 2,
 		maxTurns: 40,
@@ -649,5 +658,174 @@ describe("AgentSdkHarness sessions", () => {
 			{ kind: "usage", split: split(0, 3) },
 			{ kind: "fail" },
 		]);
+	});
+});
+
+/** Agent rooms that record what the harness does with them. */
+function recordingRooms(fail?: Error, closeFails?: Error) {
+	const opened: Array<{ name: string; apiKey: string }> = [];
+	let closes = 0;
+	const room: AgentRoom = {
+		spawn: () => {
+			throw new Error("the scripted query never spawns");
+		},
+		close: async () => {
+			closes += 1;
+			if (closeFails) throw closeFails;
+		},
+		stderr: () => "docker: no such image",
+	};
+	const rooms: AgentRooms = {
+		id: "recording",
+		open: async (name, apiKey) => {
+			opened.push({ name, apiKey });
+			if (fail) throw fail;
+			return room;
+		},
+		sweep: async () => {},
+	};
+	return { rooms, room, opened, closes: () => closes };
+}
+
+describe("AgentSdkHarness agent rooms", () => {
+	it("runs the SDK's process through the session's room, opened with the key, and closes it when the session ends", async () => {
+		const r = recordingRooms();
+		let spawn: unknown;
+		const { h, lines } = harness(
+			async function* (params) {
+				spawn = params.options?.spawnClaudeCodeProcess;
+				yield* message("m1", 1, 1);
+			},
+			{ agentRooms: r.rooms },
+		);
+		h.bindAgentApi(recordingApi().api);
+		const s = session();
+		await h.start(s);
+		await h.settled(s.dispatchId);
+		// A fresh name per session, so a restarted dispatch never meets the
+		// old room's teardown.
+		expect(r.opened.map((o) => o.apiKey)).toEqual(["sk-test"]);
+		// The session's end closed its room.
+		expect(r.closes()).toBe(1);
+		// The room's name is logged with its dispatch, so a leftover can be traced.
+		expect(lines.find((l) => l.msg === "agent room opened")).toMatchObject({
+			dispatchId: s.dispatchId,
+			room: r.opened[0]?.name,
+		});
+		// Stopped and started again, as the runner would.
+		await h.stop(s.dispatchId);
+		await h.start(s);
+		await h.settled(s.dispatchId);
+		expect(r.opened).toHaveLength(2);
+		expect(r.opened[1]?.name).not.toBe(r.opened[0]?.name);
+		expect(spawn).toBe(r.room.spawn);
+	});
+
+	it("survives a room whose close fails, on a stop and at the end, and logs it", async () => {
+		const r = recordingRooms(undefined, new Error("spawn docker ENOENT"));
+		const unhandled: unknown[] = [];
+		const onUnhandled = (e: unknown) => unhandled.push(e);
+		process.on("unhandledRejection", onUnhandled);
+		try {
+			let started: () => void = () => {};
+			const running = new Promise<void>((res) => {
+				started = res;
+			});
+			const { h, lines } = harness(
+				async function* (params) {
+					const signal = params.options?.abortController?.signal;
+					yield* message("m1", 1, 1);
+					await new Promise<void>((resolve) => {
+						signal?.addEventListener("abort", () => resolve());
+						started();
+					});
+				},
+				{ agentRooms: r.rooms },
+			);
+			h.bindAgentApi(recordingApi().api);
+			const s = session();
+			await h.start(s);
+			const done = h.settled(s.dispatchId);
+			await running;
+			await h.stop(s.dispatchId);
+			await expect(done).resolves.toBeUndefined();
+			await new Promise((res) => setTimeout(res, 20));
+			expect(unhandled).toEqual([]);
+			expect(r.closes()).toBe(2);
+			expect(lines.some((l) => l.msg === "agent room close failed")).toBe(true);
+		} finally {
+			process.off("unhandledRejection", onUnhandled);
+		}
+	});
+
+	it("closes the room as soon as the session is stopped, before the SDK lets go", async () => {
+		const r = recordingRooms();
+		let started: () => void = () => {};
+		const running = new Promise<void>((res) => {
+			started = res;
+		});
+		let closedAtAbort = -1;
+		const { h } = harness(
+			async function* (params) {
+				const signal = params.options?.abortController?.signal;
+				yield* message("m1", 1, 1);
+				await new Promise<void>((resolve) => {
+					signal?.addEventListener("abort", () => {
+						// Listeners run in order: the room's close was added first.
+						closedAtAbort = r.closes();
+						resolve();
+					});
+					started();
+				});
+				throw new Error("aborted");
+			},
+			{ agentRooms: r.rooms },
+		);
+		h.bindAgentApi(recordingApi().api);
+		const s = session();
+		await h.start(s);
+		const done = h.settled(s.dispatchId);
+		await running;
+		await h.stop(s.dispatchId);
+		expect(closedAtAbort).toBe(1);
+		await done;
+		expect(await h.has(s.dispatchId)).toBe(false);
+	});
+
+	it("fails a session whose room cannot open, without starting the SDK, and logs docker's error", async () => {
+		const r = recordingRooms(new Error("creating the key proxy failed"));
+		let launched = false;
+		const { h, lines } = harness(
+			async function* () {
+				launched = true;
+				yield* [];
+			},
+			{ agentRooms: r.rooms },
+		);
+		h.bindAgentApi(recordingApi().api);
+		const s = session();
+		await h.start(s);
+		await h.settled(s.dispatchId);
+		expect(launched).toBe(false);
+		const events = await drain(h, s.dispatchId);
+		expect(events.at(-1)).toEqual({ kind: "fail" });
+		expect(lines.find((l) => l.msg === "agent session failed")).toMatchObject({
+			err: "creating the key proxy failed",
+		});
+		expect(JSON.stringify(lines)).not.toContain("sk-test");
+	});
+
+	it("spawns on the host when there are no rooms", async () => {
+		let options: Record<string, unknown> | undefined;
+		const { h } = harness(async function* (params) {
+			options = params.options as Record<string, unknown>;
+			yield* [];
+		});
+		h.bindAgentApi(recordingApi().api);
+		const s = session();
+		await h.start(s);
+		await h.settled(s.dispatchId);
+		expect(options).toBeDefined();
+		expect(options?.spawnClaudeCodeProcess).toBeUndefined();
 	});
 });
