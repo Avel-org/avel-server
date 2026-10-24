@@ -14,6 +14,7 @@ import { type Tx, withTx } from "../../src/db/tx";
 import { memoryBlobs } from "../../src/gateways/blob";
 import type { CheckRunner } from "../../src/gateways/check-runner";
 import type { RepoSource } from "../../src/gateways/repo-source";
+import { noRepoWriter, type RepoWriter } from "../../src/gateways/repo-writer";
 import {
 	noTemplates,
 	type TemplateSource,
@@ -130,6 +131,7 @@ export async function withApi(
 		countStatements?: boolean;
 		/** Where read-repo gets repositories. Default: none, and a read fails loudly. */
 		repos?: RepoSource;
+		repoWriter?: RepoWriter;
 		/** Where the template route reads repositories. Default: none listed. */
 		templates?: TemplateSource;
 		/** Resolves agent bearer tokens. Default: the real lookup, on this transaction. */
@@ -216,6 +218,7 @@ async function runApi(
 			db: () => tx,
 			webOrigins: config.webOrigins,
 			repos: options.repos ?? noRepos,
+			repoWriter: options.repoWriter ?? noRepoWriter(),
 			templates: options.templates ?? noTemplates,
 			dispatchByToken: options.dispatchByToken ?? dispatchByTokenSha256,
 			runnerCredentialSha256:

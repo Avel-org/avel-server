@@ -150,6 +150,7 @@ describe("the error envelope is a discriminated union on code", () => {
 			"package_too_large",
 			"export_target_repo_missing",
 			"export_target_not_built",
+			"export_not_pr_open",
 		]);
 	});
 

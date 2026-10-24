@@ -5,6 +5,7 @@ import { createApp } from "../../src/app";
 import { createAuth } from "../../src/auth";
 import type { AuthConfig } from "../../src/auth/config";
 import { memoryBlobs } from "../../src/gateways/blob";
+import { noRepoWriter } from "../../src/gateways/repo-writer";
 import { noTemplates } from "../../src/gateways/template-source";
 import { type Clock, fixedClock } from "../../src/lib/clock";
 import { type IdGenerator, sequentialIds } from "../../src/lib/ids";
@@ -117,6 +118,7 @@ export function buildApp(
 		},
 		webOrigins: config.webOrigins,
 		repos: noRepos,
+		repoWriter: noRepoWriter(),
 		templates: noTemplates,
 		dispatchByToken: noDispatches,
 		runnerCredentialSha256: null,

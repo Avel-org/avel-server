@@ -1,5 +1,5 @@
 import { tsr } from "@ts-rest/serverless/fetch";
-import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import type { Operator } from "../auth";
 import {
@@ -11,6 +11,7 @@ import {
 import type { exportTargetKind } from "../contract/mission";
 import { ok } from "../contract/shared/envelope";
 import type { PreconditionReason } from "../contract/shared/errors";
+import type { ExportStatus } from "../contract/shared/status";
 import { logActivity } from "../db/activity";
 import {
 	activityLog,
@@ -28,6 +29,12 @@ import { live } from "../db/schema/columns";
 import { type Executor, type Tx, withTx } from "../db/tx";
 import { sha256Of } from "../gateways/blob";
 import type { RepoSource } from "../gateways/repo-source";
+import type {
+	FoundPullRequest,
+	OpenedPullRequest,
+	PullRequestRequest,
+	RepoWriter,
+} from "../gateways/repo-writer";
 import { requestSha256 } from "../lib/canonical";
 import {
 	type ClosedDispatch,
@@ -44,6 +51,7 @@ import {
 } from "../lib/export";
 import {
 	type BlastRadius,
+	canTransition,
 	checkDeliverable,
 	computeBlastRadius,
 	type DeliveryPackage,
@@ -71,8 +79,51 @@ import {
 
 type ExportDeps = RouteDeps & {
 	repos: RepoSource;
+	repoWriter: RepoWriter;
 	roomSources: RoomSourceResolver;
 };
+
+/**
+ * How long a delivering export with no PR on GitHub is left for its
+ * delivery to finish before refresh fails it. Ten minutes `[hypothesis]`:
+ * a package is tens of files, written in seconds.
+ */
+export const DELIVERY_WINDOW_MS = 10 * 60_000;
+
+/**
+ * A github_pr export's branch, from what the export already records, so a
+ * refresh after a crash can find the PR it opened. The export's own id ends
+ * it: createRef never repoints a branch, so a second export of the same
+ * package needs a branch of its own.
+ */
+export function prBranch(row: {
+	id: string;
+	missionId: string;
+	sprintN: number;
+	packageSha256: string | null;
+}): string {
+	return `avel/${row.missionId.slice(0, 8)}-s${row.sprintN}-${(row.packageSha256 ?? "").slice(0, 12)}-${row.id.slice(-12)}`;
+}
+
+/** The PR's description: what shipped and the evidence behind it. */
+function prBody(
+	m: { id: string; type: string; sprintN: number },
+	gateRun: ExportWire["gateRun"],
+	packageSha256: string,
+	exportId: string,
+): string {
+	return [
+		`Delivered by AVEL: ${m.type}, sprint ${m.sprintN}.`,
+		"",
+		`- Gate run \`${gateRun.id}\`: **${gateRun.result}**`,
+		`- Receipt sha256 \`${gateRun.receiptSha256}\``,
+		`- Integration commit \`${gateRun.commitSha}\` on base \`${gateRun.baseSha}\``,
+		`- Package sha256 \`${packageSha256}\``,
+		`- Mission \`${m.id}\`, export \`${exportId}\``,
+		"",
+		"Each dispatch's brief is under `.avel/dispatches/`. Whether this merges is your decision.",
+	].join("\n");
+}
 
 type Target = (typeof exportTargetKind)["_output"];
 
@@ -139,6 +190,11 @@ function refusalError(
 	});
 }
 
+/** pr_status as the wire's state; a PR with none recorded yet is open. */
+function prState(s: string | null): "open" | "merged" | "closed" {
+	return s === "merged" || s === "closed" ? s : "open";
+}
+
 function toWire(row: ExportRow): ExportWire {
 	const m = row.versionManifest as ExportManifest;
 	return {
@@ -163,6 +219,23 @@ function toWire(row: ExportRow): ExportWire {
 		violations: m.violations,
 		blastRadius: (row.blastRadius as BlastRadius | null) ?? null,
 		blocked: m.blocked,
+		pullRequest:
+			row.prNumber !== null &&
+			row.prUrl !== null &&
+			row.prHeadRef !== null &&
+			row.prCommitSha !== null
+				? {
+						number: row.prNumber,
+						url: row.prUrl,
+						branch: row.prHeadRef,
+						commitSha: row.prCommitSha,
+						state: prState(row.prStatus),
+					}
+				: null,
+		failure:
+			row.failureCode !== null && row.failureMessage !== null
+				? { code: row.failureCode, message: row.failureMessage }
+				: null,
 		zip:
 			row.snapshotSha256 && row.snapshotBytes
 				? { sha256: row.snapshotSha256, bytes: row.snapshotBytes }
@@ -181,6 +254,7 @@ async function liveMission(db: Executor | Tx, id: string) {
 	const [m] = await db
 		.select({
 			id: mission.id,
+			type: mission.type,
 			status: mission.status,
 			sprintN: mission.sprintN,
 			engagementId: mission.engagementId,
@@ -454,6 +528,7 @@ export function exportRoutes(deps: ExportDeps) {
 
 		let github: {
 			connectionId: string;
+			credentialRef: string;
 			owner: string;
 			repo: string;
 			tree: RemoteTree & { branch: string };
@@ -495,6 +570,7 @@ export function exportRoutes(deps: ExportDeps) {
 			});
 			github = {
 				connectionId: conn.id,
+				credentialRef: conn.credentialRef,
 				owner: repo.owner,
 				repo: repo.repo,
 				tree,
@@ -631,6 +707,222 @@ export function exportRoutes(deps: ExportDeps) {
 		return row;
 	}
 
+	/**
+	 * Moves an export from `from` to `to` with `set`, logging
+	 * export.status_changed as the operator who asked. The update matches
+	 * `from` too, so a request that read a status another has since changed
+	 * moves nothing: null, and the caller reads what is there now. Refuses a
+	 * move the lifecycle does not allow.
+	 */
+	async function moveStatus(
+		tx: Tx,
+		ctx: RequestContext,
+		row: ExportRow,
+		to: ExportStatus,
+		engagementId: string | null,
+		set: Partial<typeof exportTable.$inferInsert>,
+	): Promise<ExportRow | null> {
+		const from = row.status;
+		if (
+			from !== to &&
+			!canTransition(from, to, { dryRun: row.dryRun, target: row.targetKind })
+		) {
+			throw new Error(`export ${row.id} cannot move ${from} -> ${to}`);
+		}
+		const now = deps.clock.now();
+		const [updated] = await tx
+			.update(exportTable)
+			.set({
+				...set,
+				status: to,
+				// The trigger wants status_changed_at strictly later: a failure in
+				// the same millisecond as its insert would otherwise refuse.
+				...(from === to
+					? {}
+					: {
+							statusChangedAt: sql`greatest(${now.toISOString()}::timestamptz, ${exportTable.statusChangedAt} + interval '1 millisecond')`,
+						}),
+				updatedAt: now,
+			})
+			.where(and(eq(exportTable.id, row.id), eq(exportTable.status, from)))
+			.returning();
+		if (!updated) return null;
+		if (from !== to) {
+			await logActivity(tx, deps, {
+				actorKind: "operator",
+				actorUserId: operatorOf(ctx).id,
+				action: "export.status_changed",
+				entityType: "export",
+				entityId: row.id,
+				missionId: row.missionId,
+				engagementId,
+				requestId: ctx.requestId,
+				payload: {
+					exportId: row.id,
+					from,
+					to,
+					...(set.prNumber ? { prNumber: set.prNumber } : {}),
+					...(set.failureCode ? { failureCode: set.failureCode } : {}),
+				},
+			});
+		}
+		return updated;
+	}
+
+	/** The export as it is now, for a caller whose move found it changed. */
+	async function current(tx: Tx, id: string): Promise<ExportRow> {
+		const [now] = await tx
+			.select()
+			.from(exportTable)
+			.where(eq(exportTable.id, id));
+		if (!now) throw new Error(`export ${id} vanished`);
+		return now;
+	}
+
+	/**
+	 * Records the PR GitHub has for this export: a delivering export becomes
+	 * pr-open with it, and a merged or closed PR then moves it on to done or
+	 * closed (1, from code review: the lifecycle has no step from delivering
+	 * straight to either). Each move matches the status before it.
+	 */
+	async function recordPullRequest(
+		tx: Tx,
+		ctx: RequestContext,
+		row: ExportRow,
+		pr: FoundPullRequest,
+		engagementId: string | null,
+	): Promise<ExportRow> {
+		let now = row;
+		const fields = {
+			prStatus: pr.state,
+			prNumber: pr.number,
+			prUrl: pr.url,
+			prHeadRef: pr.branch,
+			prCommitSha: row.prCommitSha ?? pr.commitSha,
+		};
+		if (now.status === "delivering") {
+			const moved = await moveStatus(
+				tx,
+				ctx,
+				now,
+				"pr-open",
+				engagementId,
+				fields,
+			);
+			if (!moved) return current(tx, row.id);
+			now = moved;
+		}
+		if (now.status !== "pr-open") return now;
+		const to =
+			pr.state === "merged"
+				? ("done" as const)
+				: pr.state === "closed"
+					? ("closed" as const)
+					: ("pr-open" as const);
+		if (to === "pr-open" && now.prStatus === pr.state) return now;
+		const moved = await moveStatus(tx, ctx, now, to, engagementId, {
+			prStatus: pr.state,
+		});
+		return moved ?? current(tx, row.id);
+	}
+
+	/** Where a GitHub export goes, through its connection, checked again now. */
+	async function prTarget(row: ExportRow) {
+		if (!row.connectionId)
+			throw new Error(`export ${row.id} has no connection`);
+		const [conn] = await deps
+			.db()
+			.select()
+			.from(connection)
+			.where(eq(connection.id, row.connectionId));
+		if (!conn) throw new Error(`export ${row.id}'s connection is gone`);
+		const target = (row.blastRadius as BlastRadius | null)?.target;
+		if (!target) throw new Error(`export ${row.id} has no target`);
+		if (!deps.repos.hasCredential(conn.credentialRef)) {
+			throw connectionRefused(
+				"connection_credential_missing",
+				`The credential ${conn.credentialRef} is not set on this server`,
+				conn.id,
+			);
+		}
+		return {
+			owner: target.owner,
+			repo: target.repo,
+			credentialRef: conn.credentialRef,
+		};
+	}
+
+	/**
+	 * Writes the PR outside any transaction, then records what happened:
+	 * pr-open with its PR, or failed with the reason, which is also thrown.
+	 * When GitHub stops answering (EXTERNAL_GITHUB), the PR may exist all the
+	 * same, so its branch is looked up first: found, it is recorded; the
+	 * lookup unanswered too, the export stays delivering for refresh to
+	 * settle, and only an answer that it is not there fails it. A status
+	 * another request recorded meanwhile is never overwritten.
+	 */
+	async function deliverPullRequest(
+		ctx: RequestContext,
+		row: ExportRow,
+		request: PullRequestRequest,
+		engagementId: string | null,
+	): Promise<ExportRow> {
+		let opened: OpenedPullRequest;
+		try {
+			opened = await deps.repoWriter.openPullRequest(request);
+		} catch (e) {
+			const err =
+				e instanceof ApiError
+					? e
+					: new ApiError(
+							"EXTERNAL_GITHUB",
+							`Delivering to ${request.owner}/${request.repo} failed`,
+						);
+			const refused = () =>
+				new ApiError(err.code, err.message, {
+					details: { exportId: row.id } as never,
+				});
+			if (err.code === "EXTERNAL_GITHUB") {
+				let pr: FoundPullRequest | null;
+				try {
+					pr = await deps.repoWriter.findPullRequest({
+						owner: request.owner,
+						repo: request.repo,
+						credentialRef: request.credentialRef,
+						head: request.head,
+					});
+				} catch {
+					throw refused();
+				}
+				if (pr) {
+					const found = pr;
+					return withTx(deps.db(), (tx) =>
+						recordPullRequest(tx, ctx, row, found, engagementId),
+					);
+				}
+			}
+			const failed = await withTx(deps.db(), (tx) =>
+				moveStatus(tx, ctx, row, "failed", engagementId, {
+					failureCode: err.code,
+					failureMessage: err.message,
+				}),
+			);
+			// Another request settled it meanwhile, from GitHub: that stands.
+			if (!failed) return withTx(deps.db(), (tx) => current(tx, row.id));
+			throw refused();
+		}
+		return withTx(deps.db(), async (tx) => {
+			const moved = await moveStatus(tx, ctx, row, "pr-open", engagementId, {
+				prStatus: "open",
+				prNumber: opened.number,
+				prUrl: opened.url,
+				prHeadRef: opened.branch,
+				prCommitSha: opened.commitSha,
+			});
+			return moved ?? current(tx, row.id);
+		});
+	}
+
 	return tsr.platformContext<RequestContext>().router(exportContract, {
 		preview: async ({ headers, body }, ctx) => {
 			const key = headers["idempotency-key"];
@@ -747,10 +1039,10 @@ export function exportRoutes(deps: ExportDeps) {
 						{ missionId: m.id },
 					);
 				}
-				if (body.target !== "zip") {
+				if (body.target === "github_push") {
 					throw precondition(
 						"export_target_not_built",
-						"Delivery to GitHub is not built yet. Export a zip.",
+						"Pushing to a branch is not built yet. Open a pull request or export a zip.",
 						{ missionId: m.id },
 					);
 				}
@@ -786,7 +1078,8 @@ export function exportRoutes(deps: ExportDeps) {
 								packageHashVersion: preview.packageHashVersion as number,
 							}
 						: null,
-					currentBaseSha: null,
+					// A GitHub target's branch tip, read just now by prepare.
+					currentBaseSha: p.github?.tree.commitSha ?? null,
 					packageSha: p.rendered.sha256,
 					packageHashVersion: PACKAGE_HASH_VERSION,
 				});
@@ -810,7 +1103,6 @@ export function exportRoutes(deps: ExportDeps) {
 				}
 				if (!verdict.ok) throw refusalError(verdict, m.id);
 
-				const zip = zipOf(p.rendered.pkg);
 				const manifest: ExportManifest = {
 					gateRun,
 					dispatches: p.dispatches,
@@ -819,6 +1111,63 @@ export function exportRoutes(deps: ExportDeps) {
 					blocked: null,
 					requestSha256: hash,
 				};
+				if (p.github) {
+					const base = p.github.tree.commitSha;
+					if (base === null) {
+						throw new ApiError(
+							"EMPTY_REPOSITORY",
+							`${p.github.owner}/${p.github.repo} has no commit on ${p.github.tree.branch} to open a pull request against`,
+						);
+					}
+					// Recorded as delivering before GitHub is written, so a
+					// resend with this key finds it, whatever happens next.
+					const row = await insert(
+						tx,
+						ctx,
+						{
+							missionId: m.id,
+							sprintN: m.sprintN,
+							idempotencyKey: key,
+							targetKind: body.target,
+							connectionId: p.github.connectionId,
+							status: "delivering",
+							dryRun: false,
+							previewExportId: preview?.id ?? null,
+							baseRef: p.github.tree.branch,
+							baseCommitSha: base,
+							blastRadius: p.blastRadius,
+							versionManifest: manifest,
+							packageSha256: p.rendered.sha256,
+							packageHashVersion: PACKAGE_HASH_VERSION,
+						},
+						m.engagementId,
+					);
+					const title = `AVEL: ${m.type} sprint ${m.sprintN}`;
+					const deliver: PullRequestRequest = {
+						owner: p.github.owner,
+						repo: p.github.repo,
+						credentialRef: p.github.credentialRef,
+						base: { branch: p.github.tree.branch, commitSha: base },
+						head: prBranch(row),
+						files: p.rendered.pkg.files.map((f) => ({
+							path: f.path,
+							mode: f.mode,
+							bytes: f.bytes,
+							blobSha: f.blobSha,
+						})),
+						deletes: [...p.rendered.pkg.deletes],
+						message: `${title}\n\nGate run ${gateRun.id}, ${gateRun.result}. Package ${p.rendered.sha256}.`,
+						title,
+						body: prBody(m, gateRun, p.rendered.sha256, row.id),
+					};
+					return {
+						replayed: false,
+						row,
+						deliver,
+						engagementId: m.engagementId,
+					};
+				}
+				const zip = zipOf(p.rendered.pkg);
 				const row = await insert(
 					tx,
 					ctx,
@@ -848,7 +1197,78 @@ export function exportRoutes(deps: ExportDeps) {
 				ctx.responseHeaders.set(REPLAYED, "true");
 				return { status: 200, body: ok(toWire(result.row)) };
 			}
+			if ("deliver" in result && result.deliver) {
+				const row = await deliverPullRequest(
+					ctx,
+					result.row,
+					result.deliver,
+					result.engagementId,
+				);
+				return { status: 201, body: ok(toWire(row)) };
+			}
 			return { status: 201, body: ok(toWire(result.row)) };
+		},
+
+		refresh: async ({ params }, ctx) => {
+			const { found, m } = await withTx(deps.db(), async (tx) => {
+				const [row] = await tx
+					.select()
+					.from(exportTable)
+					.where(eq(exportTable.id, params.id));
+				if (!row) throw notFound("export", params.id);
+				const mission = await liveMission(tx, row.missionId).catch(
+					hiddenAs("export", params.id),
+				);
+				if (
+					row.targetKind !== "github_pr" ||
+					row.dryRun ||
+					(row.status !== "pr-open" && row.status !== "delivering")
+				) {
+					throw precondition(
+						"export_not_pr_open",
+						row.dryRun
+							? "A preview has no pull request to read"
+							: `A ${row.status} ${row.targetKind} export has no pull request to read`,
+						{ missionId: row.missionId },
+					);
+				}
+				return { found: row, m: mission };
+			});
+			// GitHub is read outside any transaction.
+			const target = await prTarget(found);
+			const pr = await deps.repoWriter.findPullRequest({
+				...target,
+				head: found.prHeadRef ?? prBranch(found),
+			});
+			if (!pr) {
+				// A delivery that never opened its PR (GitHub refused or did not
+				// answer, and the lookup could not tell) fails once no delivery
+				// could still be writing it. Younger, it is left to finish.
+				const since =
+					deps.clock.now().getTime() - found.statusChangedAt.getTime();
+				if (found.status !== "delivering" || since < DELIVERY_WINDOW_MS) {
+					return { status: 200, body: ok(toWire(found)) };
+				}
+				const settled = await withTx(deps.db(), async (tx) => {
+					const failed = await moveStatus(
+						tx,
+						ctx,
+						found,
+						"failed",
+						m.engagementId,
+						{
+							failureCode: "EXTERNAL_GITHUB",
+							failureMessage: `GitHub has no pull request for this export ${Math.round(since / 60_000)} minutes after delivery began. Deliver it again.`,
+						},
+					);
+					return failed ?? current(tx, found.id);
+				});
+				return { status: 200, body: ok(toWire(settled)) };
+			}
+			const updated = await withTx(deps.db(), (tx) =>
+				recordPullRequest(tx, ctx, found, pr, m.engagementId),
+			);
+			return { status: 200, body: ok(toWire(updated)) };
 		},
 
 		get: async ({ params }) => {

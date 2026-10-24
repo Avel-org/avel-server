@@ -177,6 +177,8 @@ export const PRECONDITION_REASONS = [
 	// Where it goes: an internal mission has no client repository, and GitHub delivery is slice 2.
 	"export_target_repo_missing",
 	"export_target_not_built",
+	// GitHub PR delivery (2026-10-24): refresh reads only a delivering or pr-open github_pr export.
+	"export_not_pr_open",
 ] as const;
 
 export const preconditionReason = z.enum(PRECONDITION_REASONS);

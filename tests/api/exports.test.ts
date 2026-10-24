@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import {
 	errorEnvelope,
@@ -28,6 +28,7 @@ import { ApiError } from "../../src/middleware/errors";
 import { worktreeRooms } from "../../src/rooms/provider";
 import { snapshotDispatch } from "../../src/rooms/snapshot";
 import type { RoomSourceResolver } from "../../src/rooms/sources";
+import { prBranch } from "../../src/routes/exports";
 import {
 	DISPATCH_PLAN,
 	dispatchValues,
@@ -35,7 +36,7 @@ import {
 	reportValues,
 } from "../db/dispatch-fixtures";
 import { makeRepo, removeDir, tempDir, writeFiles } from "../unit/git-fixtures";
-import { fixtureRepos } from "../unit/repo-fixtures";
+import { fixtureRepos, recordingWriter } from "../unit/repo-fixtures";
 import { gateRunOf, jobDeps } from "./gate-job-fixtures";
 import {
 	activeClientMission,
@@ -490,7 +491,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 		);
 	});
 
-	it("refuses an export with no gate run, of an older run, of a moved commit, or to GitHub", async () => {
+	it("refuses an export with no gate run, of an older run, of a moved commit, or by push", async () => {
 		const r = repo();
 		await withApi(
 			async (h) => {
@@ -517,15 +518,15 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 				);
 				expect(reasonOf(old)).toBe("gate_run_not_latest");
 
-				const github = await refused(
+				const push = await refused(
 					await post(h, "/api/exports", {
 						missionId: m.missionId,
-						target: "github_pr",
+						target: "github_push",
 						gateRunId: second.id,
 						connectionId: randomUUID(),
 					}),
 				);
-				expect(reasonOf(github)).toBe("export_target_not_built");
+				expect(reasonOf(push)).toBe("export_target_not_built");
 
 				// Another dispatch closed since the gate: its commit no longer rebuilds.
 				await closedDispatch(h, m, r, { "src/c.ts": "export const c = 3;\n" });
@@ -553,6 +554,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 			},
 			"meridian-co/missing": new ApiError("REPO_NOT_FOUND", "no such repo"),
 		});
+		const writer = recordingWriter();
 		await withApi(
 			async (h) => {
 				await h.signIn();
@@ -609,17 +611,73 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 				expect(preview.violations).toEqual([]);
 				expect(preview.blocked).toBeNull();
 
-				// A GitHub delivery is not built yet.
-				const e = await refused(
-					await post(h, "/api/exports", {
-						missionId: m.missionId,
-						target: "github_pr",
-						gateRunId: run.id,
-						connectionId,
-						previewExportId: preview.id,
-					}),
+				// Delivered from the preview: a pull request against the tip it read.
+				const key = randomUUID();
+				const body = {
+					missionId: m.missionId,
+					target: "github_pr",
+					gateRunId: run.id,
+					connectionId,
+					previewExportId: preview.id,
+				};
+				const pr = await created(await post(h, "/api/exports", body, key));
+				expect(pr).toMatchObject({
+					status: "pr-open",
+					targetKind: "github_pr",
+					connectionId,
+					previewExportId: preview.id,
+					baseRef: "main",
+					baseCommitSha: "d".repeat(40),
+					failure: null,
+					pullRequest: {
+						number: 42,
+						url: "https://github.com/meridian-co/app/pull/42",
+						branch: prBranch({
+							id: pr.id,
+							missionId: m.missionId,
+							sprintN: pr.sprintN,
+							packageSha256: preview.package.sha256,
+						}),
+						commitSha: "9".repeat(40),
+						state: "open",
+					},
+				});
+				expect(pr.package.sha256).toBe(preview.package.sha256);
+				expect(writer.opened).toHaveLength(1);
+				const sent = writer.opened[0];
+				expect(sent).toMatchObject({
+					owner: "meridian-co",
+					repo: "app",
+					credentialRef: "MERIDIAN_GITHUB_TOKEN",
+					base: { branch: "main", commitSha: "d".repeat(40) },
+					head: pr.pullRequest?.branch,
+					deletes: [],
+				});
+				expect(sent?.files.map((f) => f.path)).toEqual(
+					pr.package.files.map((f) => f.path),
 				);
-				expect(reasonOf(e)).toBe("export_target_not_built");
+				for (const f of sent?.files ?? []) {
+					expect(gitBlobSha(f.bytes), f.path).toBe(f.blobSha);
+				}
+				expect(sent?.body).toContain(run.id);
+				expect(sent?.body).toContain(preview.package.sha256);
+				const log = await h.logRows(pr.id);
+				expect(
+					log.map((l) => [
+						l.action,
+						(l.payload as { status?: string; to?: string }).status ??
+							(l.payload as { to?: string }).to,
+					]),
+				).toEqual([
+					["export.created", "delivering"],
+					["export.status_changed", "pr-open"],
+				]);
+				// A resend with the same key never writes to GitHub again.
+				const again = await post(h, "/api/exports", body, key);
+				expect(again.status).toBe(200);
+				expect(again.headers.get("idempotency-replayed")).toBe("true");
+				expect((await created(again, 200)).id).toBe(pr.id);
+				expect(writer.opened).toHaveLength(1);
 
 				const internal = await activeMission(h.tx, m.ids);
 				await h.tx
@@ -654,7 +712,468 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 					expect(hidden.code, url).toBe("NOT_FOUND");
 				}
 			},
-			{ roomSources: r.roomSources, repos },
+			{ roomSources: r.roomSources, repos, repoWriter: writer },
+		);
+	});
+
+	it("refuses a PR from a preview whose branch has moved, and writes nothing", async () => {
+		const r = repo();
+		const g = githubTree();
+		const writer = recordingWriter();
+		await withApi(
+			async (h) => {
+				const s = await githubReady(h, r);
+				const preview = await created(
+					await post(h, "/api/exports/preview", {
+						missionId: s.missionId,
+						target: "github_pr",
+						connectionId: s.connectionId,
+					}),
+				);
+				g.tree.commitSha = "e".repeat(40);
+				const stale = await refused(
+					await post(h, "/api/exports", {
+						missionId: s.missionId,
+						target: "github_pr",
+						gateRunId: s.runId,
+						connectionId: s.connectionId,
+						previewExportId: preview.id,
+					}),
+					409,
+				);
+				expect(stale.code).toBe("PREVIEW_STALE");
+				expect(writer.opened).toEqual([]);
+				const list = await h.call(`/api/missions/${s.missionId}/exports`);
+				const rows = (await list.json()) as {
+					data: Array<{ dryRun: boolean; targetKind: string }>;
+				};
+				// The preview, and githubReady's zip: no pull request export.
+				expect(
+					rows.data.filter((x) => x.targetKind === "github_pr" && !x.dryRun),
+				).toEqual([]);
+			},
+			{ roomSources: r.roomSources, repos: g.repos, repoWriter: writer },
+		);
+	});
+
+	it("records a GitHub failure on the export, answers 502 naming it, and a resend does not write again", async () => {
+		const r = repo();
+		const g = githubTree();
+		const writer = recordingWriter({
+			fail: new ApiError(
+				"GITHUB_REJECTED",
+				"GitHub refused creating the branch on meridian-co/app: a branch of that name may already exist",
+			),
+		});
+		await withApi(
+			async (h) => {
+				const s = await githubReady(h, r);
+				const key = randomUUID();
+				const body = {
+					missionId: s.missionId,
+					target: "github_pr",
+					gateRunId: s.runId,
+					connectionId: s.connectionId,
+				};
+				const e = await refused(await post(h, "/api/exports", body, key), 502);
+				expect(e.code).toBe("GITHUB_REJECTED");
+				const exportId = (e.details as { exportId: string }).exportId;
+				const got = await created(
+					await h.call(`/api/exports/${exportId}`),
+					200,
+				);
+				expect(got).toMatchObject({
+					status: "failed",
+					pullRequest: null,
+					failure: { code: "GITHUB_REJECTED", message: e.message },
+				});
+				const again = await post(h, "/api/exports", body, key);
+				expect(again.status).toBe(200);
+				expect((await created(again, 200)).status).toBe("failed");
+				expect(writer.opened).toHaveLength(1);
+			},
+			{ roomSources: r.roomSources, repos: g.repos, repoWriter: writer },
+		);
+	});
+
+	it("refreshes a PR from GitHub: merged is done, closed is closed, open stays, and a delivering export whose PR exists is pr-open", async () => {
+		const r = repo();
+		const g = githubTree();
+		const writer = recordingWriter();
+		await withApi(
+			async (h) => {
+				const s = await githubReady(h, r);
+				const pr = await created(
+					await post(h, "/api/exports", {
+						missionId: s.missionId,
+						target: "github_pr",
+						gateRunId: s.runId,
+						connectionId: s.connectionId,
+					}),
+				);
+				const refresh = (id: string) =>
+					h.call(`/api/exports/${id}/refresh`, { method: "POST" });
+				const found = (state: "open" | "merged" | "closed") => ({
+					number: 42,
+					url: "https://github.com/meridian-co/app/pull/42",
+					branch: pr.pullRequest?.branch as string,
+					commitSha: "a".repeat(40),
+					state,
+				});
+
+				writer.script.found = found("open");
+				expect((await created(await refresh(pr.id), 200)).status).toBe(
+					"pr-open",
+				);
+				expect(writer.finds).toEqual([
+					{ owner: "meridian-co", repo: "app", head: pr.pullRequest?.branch },
+				]);
+				writer.script.found = found("merged");
+				const done = await created(await refresh(pr.id), 200);
+				expect(done).toMatchObject({
+					status: "done",
+					pullRequest: { state: "merged", commitSha: "9".repeat(40) },
+				});
+				const notOpen = await refused(await refresh(pr.id));
+				expect(reasonOf(notOpen)).toBe("export_not_pr_open");
+
+				// The server died between opening the PR and recording it.
+				await h.tx
+					.update(exportTable)
+					.set({
+						status: "delivering",
+						statusChangedAt: sql`${exportTable.statusChangedAt} + interval '1 millisecond'`,
+						prNumber: null,
+						prUrl: null,
+						prHeadRef: null,
+						prCommitSha: null,
+						prStatus: null,
+					})
+					.where(eq(exportTable.id, pr.id));
+				writer.script.found = null;
+				expect((await created(await refresh(pr.id), 200)).status).toBe(
+					"delivering",
+				);
+				writer.script.found = found("open");
+				const adopted = await created(await refresh(pr.id), 200);
+				expect(adopted).toMatchObject({
+					status: "pr-open",
+					pullRequest: { number: 42, commitSha: "a".repeat(40), state: "open" },
+				});
+				writer.script.found = found("closed");
+				expect((await created(await refresh(pr.id), 200)).status).toBe(
+					"closed",
+				);
+
+				const zip = await refused(await refresh(s.previewOrZipId));
+				expect(reasonOf(zip)).toBe("export_not_pr_open");
+			},
+			{ roomSources: r.roomSources, repos: g.repos, repoWriter: writer },
+		);
+	});
+
+	it("recovers a delivering export whose PR was merged or closed meanwhile, through pr-open", async () => {
+		const r = repo();
+		const g = githubTree();
+		const writer = recordingWriter();
+		await withApi(
+			async (h) => {
+				const s = await githubReady(h, r);
+				const pr = await created(
+					await post(h, "/api/exports", {
+						missionId: s.missionId,
+						target: "github_pr",
+						gateRunId: s.runId,
+						connectionId: s.connectionId,
+					}),
+				);
+				const branch = pr.pullRequest?.branch as string;
+				// The server died after GitHub opened the PR and before pr-open.
+				const crash = () =>
+					h.tx
+						.update(exportTable)
+						.set({
+							status: "delivering",
+							statusChangedAt: sql`${exportTable.statusChangedAt} + interval '1 millisecond'`,
+							prNumber: null,
+							prUrl: null,
+							prHeadRef: null,
+							prCommitSha: null,
+							prStatus: null,
+						})
+						.where(eq(exportTable.id, pr.id));
+				const refresh = () =>
+					h.call(`/api/exports/${pr.id}/refresh`, { method: "POST" });
+				const found = (state: "merged" | "closed") => ({
+					number: 42,
+					url: "https://github.com/meridian-co/app/pull/42",
+					branch,
+					commitSha: "a".repeat(40),
+					state,
+				});
+
+				await crash();
+				writer.script.found = found("merged");
+				const done = await created(await refresh(), 200);
+				expect(done).toMatchObject({
+					status: "done",
+					pullRequest: { number: 42, state: "merged" },
+				});
+				const moves = (await h.logRows(pr.id))
+					.filter((l) => l.action === "export.status_changed")
+					.map((l) => (l.payload as { from: string; to: string }).to);
+				expect(moves.slice(-2)).toEqual(["pr-open", "done"]);
+			},
+			{ roomSources: r.roomSources, repos: g.repos, repoWriter: writer },
+		);
+	});
+
+	it("never overwrites a status another request recorded while GitHub was being written", async () => {
+		const r = repo();
+		const g = githubTree();
+		const writer = recordingWriter();
+		await withApi(
+			async (h) => {
+				const s = await githubReady(h, r);
+				// While the first request is still writing, a refresh finds the
+				// PR already merged and records done.
+				writer.script.during = async (req) => {
+					writer.script.during = undefined;
+					writer.script.found = {
+						number: 42,
+						url: "https://github.com/meridian-co/app/pull/42",
+						branch: req.head,
+						commitSha: "a".repeat(40),
+						state: "merged",
+					};
+					const [row] = await h.tx
+						.select({ id: exportTable.id })
+						.from(exportTable)
+						.where(eq(exportTable.status, "delivering"));
+					const res = await h.call(`/api/exports/${row?.id}/refresh`, {
+						method: "POST",
+					});
+					expect((await created(res, 200)).status).toBe("done");
+				};
+				const pr = await created(
+					await post(h, "/api/exports", {
+						missionId: s.missionId,
+						target: "github_pr",
+						gateRunId: s.runId,
+						connectionId: s.connectionId,
+					}),
+				);
+				expect(pr.status).toBe("done");
+				const moves = (await h.logRows(pr.id))
+					.filter((l) => l.action === "export.status_changed")
+					.map((l) => (l.payload as { to: string }).to);
+				expect(moves).toEqual(["pr-open", "done"]);
+			},
+			{ roomSources: r.roomSources, repos: g.repos, repoWriter: writer },
+		);
+	});
+
+	it("links the PR when GitHub stopped answering after opening it, and leaves the export delivering when it cannot tell", async () => {
+		const r = repo();
+		const g = githubTree();
+		const timeout = new ApiError(
+			"EXTERNAL_GITHUB",
+			"GitHub did not answer while opening the pull request on meridian-co/app",
+		);
+		const writer = recordingWriter();
+		await withApi(
+			async (h) => {
+				const s = await githubReady(h, r);
+				const body = {
+					missionId: s.missionId,
+					target: "github_pr",
+					gateRunId: s.runId,
+					connectionId: s.connectionId,
+				};
+				// GitHub opened it, then the answer was lost.
+				writer.script.during = async (req) => {
+					writer.script.found = {
+						number: 7,
+						url: "https://github.com/meridian-co/app/pull/7",
+						branch: req.head,
+						commitSha: "b".repeat(40),
+						state: "open",
+					};
+				};
+				writer.script.fail = timeout;
+				const linked = await created(await post(h, "/api/exports", body));
+				expect(linked).toMatchObject({
+					status: "pr-open",
+					failure: null,
+					pullRequest: { number: 7, commitSha: "b".repeat(40) },
+				});
+
+				// No answer from the lookup either: it stays delivering, for refresh.
+				writer.script.during = undefined;
+				writer.script.found = null;
+				writer.script.findFails = timeout;
+				const e = await refused(await post(h, "/api/exports", body), 502);
+				expect(e.code).toBe("EXTERNAL_GITHUB");
+				const id = (e.details as { exportId: string }).exportId;
+				const got = await created(await h.call(`/api/exports/${id}`), 200);
+				expect(got).toMatchObject({ status: "delivering", failure: null });
+			},
+			{ roomSources: r.roomSources, repos: g.repos, repoWriter: writer },
+		);
+	});
+
+	it("fails a delivering export refresh finds no PR for once it is past the delivery window, and leaves a younger one", async () => {
+		const r = repo();
+		const g = githubTree();
+		const timeout = new ApiError(
+			"EXTERNAL_GITHUB",
+			"GitHub's rate limit refused writing a file on meridian-co/app; try again later",
+		);
+		const writer = recordingWriter({ fail: timeout, findFails: timeout });
+		await withApi(
+			async (h) => {
+				const s = await githubReady(h, r);
+				const e = await refused(
+					await post(h, "/api/exports", {
+						missionId: s.missionId,
+						target: "github_pr",
+						gateRunId: s.runId,
+						connectionId: s.connectionId,
+					}),
+					502,
+				);
+				const id = (e.details as { exportId: string }).exportId;
+				writer.script.findFails = undefined;
+				const refresh = () =>
+					h.call(`/api/exports/${id}/refresh`, { method: "POST" });
+				// Inside the window a delivery may still be writing: left alone.
+				expect((await created(await refresh(), 200)).status).toBe("delivering");
+				await h.tx
+					.update(exportTable)
+					.set({
+						statusChangedAt: sql`${exportTable.statusChangedAt} - interval '11 minutes'`,
+						createdAt: sql`${exportTable.createdAt} - interval '11 minutes'`,
+					})
+					.where(eq(exportTable.id, id));
+				const failed = await created(await refresh(), 200);
+				expect(failed).toMatchObject({
+					status: "failed",
+					pullRequest: null,
+					failure: { code: "EXTERNAL_GITHUB" },
+				});
+				expect(failed.failure?.message).toMatch(/no pull request/i);
+			},
+			{ roomSources: r.roomSources, repos: g.repos, repoWriter: writer },
+		);
+	});
+
+	it("gives each export its own branch, so the same package can be delivered again", async () => {
+		const r = repo();
+		const g = githubTree();
+		const writer = recordingWriter();
+		await withApi(
+			async (h) => {
+				const s = await githubReady(h, r);
+				const body = {
+					missionId: s.missionId,
+					target: "github_pr",
+					gateRunId: s.runId,
+					connectionId: s.connectionId,
+				};
+				const first = await created(await post(h, "/api/exports", body));
+				const second = await created(await post(h, "/api/exports", body));
+				expect(first.package.sha256).toBe(second.package.sha256);
+				expect(first.pullRequest?.branch).not.toBe(second.pullRequest?.branch);
+				expect(second.status).toBe("pr-open");
+			},
+			{ roomSources: r.roomSources, repos: g.repos, repoWriter: writer },
+		);
+	});
+
+	it("refuses a PR into a repository with no commit on its branch", async () => {
+		const r = repo();
+		const g = githubTree();
+		const writer = recordingWriter();
+		await withApi(
+			async (h) => {
+				const s = await githubReady(h, r);
+				g.tree.commitSha = null;
+				g.tree.entries = new Map();
+				const e = await refused(
+					await post(h, "/api/exports", {
+						missionId: s.missionId,
+						target: "github_pr",
+						gateRunId: s.runId,
+						connectionId: s.connectionId,
+					}),
+				);
+				expect(e.code).toBe("EMPTY_REPOSITORY");
+				expect(writer.opened).toEqual([]);
+			},
+			{ roomSources: r.roomSources, repos: g.repos, repoWriter: writer },
 		);
 	});
 });
+
+/** meridian-co/app's main branch, which a test may move. */
+function githubTree() {
+	const aBlob = gitBlobSha(new TextEncoder().encode("export const a = 1;\n"));
+	const tree = {
+		branch: "main",
+		commitSha: "d".repeat(40) as string | null,
+		entries: new Map([
+			["src", { sha: "e".repeat(40), mode: "040000" }],
+			["src/a.ts", { sha: aBlob, mode: "100644" }],
+		]),
+	};
+	const base = fixtureRepos({}, ["MERIDIAN_GITHUB_TOKEN"], {});
+	return {
+		tree,
+		repos: {
+			...base,
+			tree: async () => ({ ...tree, entries: new Map(tree.entries) }),
+		},
+	};
+}
+
+/** A client mission on meridian-co/app with a gate run, a connection, and a zip export to refuse refreshes on. */
+async function githubReady(h: ApiHarness, r: Repo) {
+	await h.signIn();
+	jobDeps(h, r.roomSources);
+	const m = await activeClientMission(h, runnerIds(h.ns), {
+		repoUrl: CLIENT_REPO,
+		commit: r.pinned,
+	});
+	await h.tx
+		.update(mission)
+		.set({ brief: RUNNABLE_PLAN as never })
+		.where(eq(mission.id, m.missionId));
+	await acceptancePlaybook(h, m, h.tx);
+	await closedDispatch(h, m, r, { "src/b.ts": "export const b = 2;\n" });
+	const run = await gate(h, m.missionId);
+	const connectionId = m.ids.next();
+	await h.tx.insert(connection).values({
+		id: connectionId,
+		service: "github",
+		label: "Meridian",
+		scopeType: "owner",
+		scopeValue: "meridian-co",
+		credentialRef: "MERIDIAN_GITHUB_TOKEN",
+		status: "active",
+		engagementId: m.engagementId,
+		...stamp(clock),
+	});
+	const zip = await created(
+		await post(h, "/api/exports", {
+			missionId: m.missionId,
+			target: "zip",
+			gateRunId: run.id,
+		}),
+	);
+	return {
+		missionId: m.missionId,
+		runId: run.id,
+		connectionId,
+		previewOrZipId: zip.id,
+	};
+}

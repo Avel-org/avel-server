@@ -17,6 +17,7 @@ import { localDiskBlobs } from "./gateways/blob";
 import { dockerAgentRooms } from "./gateways/docker-agent-rooms";
 import { dockerCheckRunner } from "./gateways/docker-check-runner";
 import { githubRepoSource } from "./gateways/repo-source";
+import { githubRepoWriter } from "./gateways/repo-writer";
 import {
 	fixtureTemplateSource,
 	githubTemplateSource,
@@ -214,6 +215,7 @@ const app = createApp({
 	webOrigins: config.webOrigins,
 	// A Connection names an env var; the gateway reads it at read time.
 	repos: githubRepoSource({ env: (name) => process.env[name] }),
+	repoWriter: githubRepoWriter({ env: (name) => process.env[name] }),
 	templates,
 	dispatchByToken: dispatchByTokenSha256,
 	runnerCredentialSha256: runnerCredential,

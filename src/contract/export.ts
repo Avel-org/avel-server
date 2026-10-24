@@ -171,6 +171,24 @@ export const exportSchema = z.object({
 	blastRadius: blastRadius.nullable(),
 	/** Why delivering this would be refused now, or null when nothing would. A done export carries null. */
 	blocked: deliveryBlock.nullable(),
+	/**
+	 * A github_pr export's pull request, once GitHub opened it; null before,
+	 * for every other target, and for a PR opened before 2026-10-24. state
+	 * is read from GitHub by POST /api/exports/:id/refresh.
+	 */
+	pullRequest: z
+		.object({
+			number: z.number().int().positive(),
+			url: z.string().url(),
+			/** The branch AVEL made: avel/<mission id first 8>-s<sprint>-<package sha first 12>. */
+			branch: z.string(),
+			/** The commit AVEL made on it. */
+			commitSha: sha40,
+			state: z.enum(["open", "merged", "closed"]),
+		})
+		.nullable(),
+	/** Why a real export failed, written for the operator; null unless status is failed. */
+	failure: z.object({ code: z.string(), message: z.string() }).nullable(),
 	/** The zip's sha256 and length. Set on a done zip; its bytes are at GET /api/exports/:id/zip. */
 	zip: z
 		.object({ sha256: sha256, bytes: z.number().int().positive() })
@@ -271,7 +289,16 @@ export const exportContract = c.router({
 			200: successEnvelope(exportSchema),
 		},
 		summary:
-			"Render the gate run again and deliver it. Zip only until GitHub delivery is built",
+			"Render the gate run again and deliver it: a zip, or a GitHub pull request (github_push is not built)",
+	},
+	refresh: {
+		method: "POST",
+		path: "/api/exports/:id/refresh",
+		pathParams: z.object({ id: uuid }),
+		body: c.noBody(),
+		responses: { 200: successEnvelope(exportSchema) },
+		summary:
+			"Read a github_pr export's pull request on GitHub: pr-open moves to done when it merged and closed when it closed; a delivering export whose PR exists moves to pr-open",
 	},
 	get: {
 		method: "GET",
