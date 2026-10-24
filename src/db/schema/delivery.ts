@@ -146,6 +146,16 @@ export const exportTable = pgTable(
 		// status sets this in the same statement, from the clock.
 		statusChangedAt: at("status_changed_at").notNull(),
 		prStatus: text("pr_status"),
+		// A github_pr export's pull request (2026-10-24): set once GitHub
+		// opened it. The commit is the one AVEL made on the PR's branch.
+		prNumber: integer("pr_number"),
+		prUrl: text("pr_url"),
+		prHeadRef: text("pr_head_ref"),
+		prCommitSha: text("pr_commit_sha"),
+		// Why a real export failed, for the operator: an error code and the
+		// server's own message, never GitHub's response body.
+		failureCode: text("failure_code"),
+		failureMessage: text("failure_message"),
 		verification: jsonb("verification"),
 		// The gate override, flattened so its author is a real foreign key.
 		// All four are null, or all four are set (export_gate_override_complete).
@@ -177,6 +187,22 @@ export const exportTable = pgTable(
 		check(
 			"export_status_changed_after_created",
 			sql`${t.statusChangedAt} >= ${t.createdAt}`,
+		),
+		check(
+			"export_pr_commit_sha_hex",
+			sql`${t.prCommitSha} is null or ${t.prCommitSha} ~ '^[0-9a-f]{40}$'`,
+		),
+		check(
+			"export_pr_complete",
+			sql`(${t.prNumber} is null) = (${t.prUrl} is null) and (${t.prNumber} is null) = (${t.prHeadRef} is null) and (${t.prNumber} is null) = (${t.prCommitSha} is null)`,
+		),
+		check(
+			"export_pr_only_github_pr",
+			sql`${t.prNumber} is null or ${t.targetKind} = 'github_pr'`,
+		),
+		check(
+			"export_failure_only_failed",
+			sql`${t.failureCode} is null or (${t.status} = 'failed' and ${t.failureMessage} is not null)`,
 		),
 		check(
 			"export_connection_unless_zip",

@@ -7,6 +7,11 @@ import type {
 	SnapshotRequest,
 	TreeRequest,
 } from "../../src/gateways/repo-source";
+import type {
+	FoundPullRequest,
+	PullRequestRequest,
+	RepoWriter,
+} from "../../src/gateways/repo-writer";
 import type { Snapshot } from "../../src/lib/repo-read/snapshot";
 import { snapshotFromTarball } from "../../src/lib/repo-read/tar";
 import { ApiError } from "../../src/middleware/errors";
@@ -100,6 +105,42 @@ export function fixtureRepos(
 					`No tree fixture for ${req.owner}/${req.repo}`,
 				);
 			return { ...found, branch: req.branch ?? found.branch };
+		},
+	};
+}
+
+/**
+ * A RepoWriter that records what it is asked and answers from `script`:
+ * openPullRequest with PR number 42 (or throws `fail`), findPullRequest
+ * with `found` when its branch is the one asked for, else null.
+ */
+export function recordingWriter(
+	script: { fail?: ApiError; found?: FoundPullRequest | null } = {},
+): RepoWriter & {
+	opened: PullRequestRequest[];
+	finds: Array<{ owner: string; repo: string; head: string }>;
+	script: typeof script;
+} {
+	const opened: PullRequestRequest[] = [];
+	const finds: Array<{ owner: string; repo: string; head: string }> = [];
+	return {
+		opened,
+		finds,
+		script,
+		async openPullRequest(req) {
+			opened.push(req);
+			if (script.fail) throw script.fail;
+			return {
+				number: 42,
+				url: `https://github.com/${req.owner}/${req.repo}/pull/42`,
+				branch: req.head,
+				commitSha: "9".repeat(40),
+			};
+		},
+		async findPullRequest(req) {
+			finds.push({ owner: req.owner, repo: req.repo, head: req.head });
+			// As GitHub does: a PR is found only by its own branch.
+			return script.found?.branch === req.head ? script.found : null;
 		},
 	};
 }

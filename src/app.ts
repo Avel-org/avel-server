@@ -10,6 +10,7 @@ import { contract } from "./contract";
 import type { Executor } from "./db/tx";
 import type { CheckRunner } from "./gateways/check-runner";
 import type { RepoSource } from "./gateways/repo-source";
+import type { RepoWriter } from "./gateways/repo-writer";
 import type { TemplateSource } from "./gateways/template-source";
 import type { Clock } from "./lib/clock";
 import type { IdGenerator } from "./lib/ids";
@@ -73,6 +74,8 @@ export type AppDeps = {
 	webOrigins: readonly string[];
 	/** Where the repo read gets repositories (src/gateways/repo-source.ts). GitHub in production, fixtures in tests. */
 	repos: RepoSource;
+	/** Where exports write to GitHub (src/gateways/repo-writer.ts): a pull request per github_pr export. GitHub in production, a recording fake in tests. */
+	repoWriter: RepoWriter;
 	/** Where the template route reads template repositories (src/gateways/template-source.ts). GitHub in production, a fixture in dev and tests. */
 	templates: TemplateSource;
 	/** Resolves an agent's bearer token to its dispatch (src/middleware/caller.ts). */
@@ -131,6 +134,7 @@ export function createApp(deps: AppDeps) {
 		exports: exportRoutes({
 			...routeDeps,
 			repos: deps.repos,
+			repoWriter: deps.repoWriter,
 			roomSources: deps.roomSources,
 		}),
 		connections: connectionRoutes(routeDeps),
@@ -196,6 +200,7 @@ export function createApp(deps: AppDeps) {
 		exportZipRoute({
 			...routeDeps,
 			repos: deps.repos,
+			repoWriter: deps.repoWriter,
 			roomSources: deps.roomSources,
 		}),
 	);

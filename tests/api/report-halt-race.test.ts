@@ -23,6 +23,7 @@ import * as authSchema from "../../src/db/schema/auth";
 import { stamp } from "../../src/db/schema/columns";
 import type { Db } from "../../src/db/tx";
 import { memoryBlobs } from "../../src/gateways/blob";
+import { noRepoWriter } from "../../src/gateways/repo-writer";
 import { noTemplates } from "../../src/gateways/template-source";
 import { fixedClock } from "../../src/lib/clock";
 import { type IdGenerator, sequentialIds } from "../../src/lib/ids";
@@ -239,6 +240,7 @@ describe.skipIf(!url)(
 					db: () => gate.db,
 					webOrigins: [],
 					repos: noRepos,
+					repoWriter: noRepoWriter(),
 					templates: noTemplates,
 					dispatchByToken: dispatchByTokenSha256,
 					runnerCredentialSha256: null,
