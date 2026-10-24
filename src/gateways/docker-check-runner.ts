@@ -22,6 +22,46 @@ const PREFIX = "avel-check-";
 /** The pnpm a pnpm-lock.yaml installs with: pinned here, never read from the commit. */
 export const PINNED_PNPM = "10.34.6";
 
+/** The only hosts the install may reach, on 443, through the proxy. */
+export const REGISTRY_HOSTS: readonly string[] = ["registry.npmjs.org"];
+
+const PROXY_PORT = 3128;
+
+/**
+ * The install's proxy, run by the image's own node: CONNECT to an
+ * allowed host on 443 is tunnelled, and anything else is refused with
+ * 403 and logged as `refused <target>`. It resolves and connects to the
+ * name it was asked for, so an allowed name is the only way out.
+ */
+export const PROXY_SCRIPT = String.raw`
+const http = require("http"), net = require("net");
+const allow = new Set(JSON.parse(process.env.AVEL_ALLOW));
+const refuse = (what) => console.log("refused " + String(what).slice(0, 200));
+const server = http.createServer((req, res) => {
+	refuse(req.method + " " + req.url);
+	res.writeHead(403);
+	res.end();
+});
+server.on("connect", (req, client, head) => {
+	const m = /^([^:\s\/]+):(\d+)$/.exec(req.url || "");
+	const host = m ? m[1].toLowerCase().replace(/\.$/, "") : "";
+	if (!m || m[2] !== "443" || !allow.has(host)) {
+		refuse(req.url);
+		client.end("HTTP/1.1 403 Forbidden\r\n\r\n");
+		return;
+	}
+	const up = net.connect(443, host, () => {
+		client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+		if (head.length) up.write(head);
+		up.pipe(client);
+		client.pipe(up);
+	});
+	up.on("error", () => client.destroy());
+	client.on("error", () => up.destroy());
+});
+server.listen(${PROXY_PORT}, "0.0.0.0", () => console.log("listening"));
+`;
+
 export type DockerCheckRunnerOptions = {
 	/** The image the checks run in, pinned by digest (AVEL_CHECK_IMAGE). */
 	image: string;
@@ -49,8 +89,15 @@ type Exec = { code: number | null; output: string };
  *
  * 1. The commit's files, from `git archive`, never a working tree, are
  *    unpacked into /tmp/work. Nothing from the host is mounted.
- * 2. The install runs with the network, and with `--ignore-scripts`, so the
- *    package manager is the only code that runs while the network is up.
+ * 2. The install runs with `--ignore-scripts`, so the package manager is
+ *    the only code that runs while the container has a network, and that
+ *    network reaches the registry only. The container is on a network of
+ *    its own, made `--internal`, so it has no route out and no outside
+ *    DNS; the one way out is a proxy container (PROXY_SCRIPT) that
+ *    tunnels to REGISTRY_HOSTS on 443 and refuses anything else. A
+ *    commit's .npmrc, its lockfile's URLs and its git dependencies can
+ *    name any host, and only the registry answers. A failed install shows
+ *    what the proxy refused.
  *    That package manager is never one the commit names: npm comes with the
  *    image, and pnpm is installed at PINNED_PNPM from the public registry,
  *    outside the commit's directory, with `packageManager` switching off.
@@ -67,8 +114,9 @@ type Exec = { code: number | null; output: string };
  * Every docker step has a time limit, and only the end of each command's
  * output is held, so neither a hung daemon nor a noisy check can hold the
  * server. The container gets no host environment, so no credential reaches
- * it. Registry-only egress during the install is not built: the install's
- * network is the default bridge.
+ * it. The proxy runs the same pinned image, as `node`, with no
+ * capabilities, and is removed with the run's network once the install
+ * is over.
  */
 export function dockerCheckRunner(opts: DockerCheckRunnerOptions): CheckRunner {
 	if (!PINNED_IMAGE.test(opts.image)) {
@@ -102,14 +150,42 @@ export function dockerCheckRunner(opts: DockerCheckRunnerOptions): CheckRunner {
 			]);
 			const ids = listed.output.split(/\s+/).filter(Boolean);
 			if (ids.length > 0) await step(["rm", "--force", ...ids]);
+			// Their networks, once no container holds them.
+			const nets = await step([
+				"network",
+				"ls",
+				"--quiet",
+				"--filter",
+				`name=^${PREFIX}`,
+			]);
+			const netIds = nets.output.split(/\s+/).filter(Boolean);
+			if (netIds.length > 0) await step(["network", "rm", ...netIds]);
 		},
 		async run(request: CheckRunRequest): Promise<CheckRunResult[]> {
 			if (request.checks.length === 0) return [];
 			const name = `${PREFIX}${opts.ids.next()}`;
-			const created = await step([
+			const net = `${name}-net`;
+			const proxy = `${name}-proxy`;
+			await must(
+				step(["network", "create", "--internal", net]),
+				"creating the install network",
+			);
+			try {
+				return await runOn(net, proxy, name, request);
+			} finally {
+				await step(["rm", "--force", proxy]);
+				await step(["network", "rm", net]);
+			}
+		},
+	};
+
+	/** The proxy on `bridge` and `net`, started and listening. */
+	async function startProxy(net: string, proxy: string) {
+		await must(
+			step([
 				"create",
 				"--name",
-				name,
+				proxy,
 				"--network",
 				"bridge",
 				"--user",
@@ -119,34 +195,98 @@ export function dockerCheckRunner(opts: DockerCheckRunnerOptions): CheckRunner {
 				"--security-opt",
 				"no-new-privileges",
 				"--memory",
-				opts.memory ?? "2g",
-				"--cpus",
-				opts.cpus ?? "2",
+				"256m",
 				"--pids-limit",
-				String(opts.pids ?? 512),
+				"64",
 				"--env",
-				"CI=1",
-				"--env",
-				`HOME=${HOME}`,
+				`AVEL_ALLOW=${JSON.stringify(REGISTRY_HOSTS)}`,
 				opts.image,
-				"sleep",
-				"infinity",
-			]);
-			if (created.code !== 0) {
-				throw new Error(`docker create failed: ${created.output.trim()}`);
-			}
-			try {
-				await must(step(["start", name]), "docker start");
-				await must(
-					step(["exec", name, "mkdir", "-p", WORK, HOME]),
-					"preparing the work directory",
-				);
-				await unpack(request.source, request.commitSha, name, stepMs);
+				"node",
+				"-e",
+				PROXY_SCRIPT,
+			]),
+			"creating the install proxy",
+		);
+		await must(
+			step(["network", "connect", net, proxy]),
+			"connecting the install proxy",
+		);
+		await must(step(["start", proxy]), "starting the install proxy");
+		for (let i = 0; i < 50; i++) {
+			const logs = await step(["logs", proxy]);
+			if (logs.output.includes("listening")) return;
+			await new Promise((r) => setTimeout(r, 100));
+		}
+		throw new Error("The install proxy did not start listening");
+	}
 
-				const install = await installCommand(request.source, request.commitSha);
-				if (install.kind === "refused") {
-					return request.checks.map(() => errored(install.why));
-				}
+	/** What the proxy refused, for a failed install's error. */
+	async function refusals(proxy: string): Promise<string> {
+		const logs = await step(["logs", proxy]);
+		const lines = logs.output
+			.split("\n")
+			.filter((l) => l.startsWith("refused "));
+		return lines.length === 0
+			? ""
+			: `\nThe install may reach only ${REGISTRY_HOSTS.join(", ")}. Refused:\n${lines.join("\n")}`;
+	}
+
+	async function runOn(
+		net: string,
+		proxy: string,
+		name: string,
+		request: CheckRunRequest,
+	): Promise<CheckRunResult[]> {
+		const created = await step([
+			"create",
+			"--name",
+			name,
+			"--network",
+			net,
+			"--user",
+			"node",
+			"--cap-drop",
+			"ALL",
+			"--security-opt",
+			"no-new-privileges",
+			"--memory",
+			opts.memory ?? "2g",
+			"--cpus",
+			opts.cpus ?? "2",
+			"--pids-limit",
+			String(opts.pids ?? 512),
+			"--env",
+			"CI=1",
+			"--env",
+			`HOME=${HOME}`,
+			opts.image,
+			"sleep",
+			"infinity",
+		]);
+		if (created.code !== 0) {
+			throw new Error(`docker create failed: ${created.output.trim()}`);
+		}
+		try {
+			await must(step(["start", name]), "docker start");
+			await must(
+				step(["exec", name, "mkdir", "-p", WORK, HOME]),
+				"preparing the work directory",
+			);
+			await unpack(request.source, request.commitSha, name, stepMs);
+
+			const install = await installCommand(request.source, request.commitSha);
+			if (install.kind === "refused") {
+				return request.checks.map(() => errored(install.why));
+			}
+			if (install.kind !== "none") {
+				await startProxy(net, proxy);
+				const via = `http://${proxy}:${PROXY_PORT}`;
+				const proxied = [
+					`HTTPS_PROXY=${via}`,
+					`HTTP_PROXY=${via}`,
+					`npm_config_https_proxy=${via}`,
+					`npm_config_proxy=${via}`,
+				];
 				if (install.kind === "pnpm") {
 					// From HOME, so the commit's .npmrc cannot pick the registry
 					// this package manager comes from.
@@ -155,76 +295,77 @@ export function dockerCheckRunner(opts: DockerCheckRunnerOptions): CheckRunner {
 						`npm install --prefix ${PM} --no-save --no-audit --no-fund --ignore-scripts pnpm@${PINNED_PNPM}`,
 						installTimeoutMs,
 						HOME,
-						["npm_config_registry=https://registry.npmjs.org/"],
+						["npm_config_registry=https://registry.npmjs.org/", ...proxied],
 					);
 					if (pm.code !== 0) {
+						const refused = await refusals(proxy);
 						return request.checks.map(() =>
-							errored(`Installing pnpm ${PINNED_PNPM} failed:\n${pm.output}`),
+							errored(
+								`Installing pnpm ${PINNED_PNPM} failed:\n${pm.output}${refused}`,
+							),
 						);
 					}
 				}
-				if (install.kind !== "none") {
-					const done = await exec(
-						name,
-						install.command,
-						installTimeoutMs,
-						WORK,
-						install.env,
-					);
-					if (done.code !== 0) {
-						return request.checks.map(() =>
-							errored(`The install failed:\n${done.output}`),
-						);
-					}
-				}
-
-				await must(
-					step(["network", "disconnect", "--force", "bridge", name]),
-					"leaving the network",
-				);
-				const networks = await must(
-					step([
-						"inspect",
-						"--format",
-						"{{len .NetworkSettings.Networks}}",
-						name,
-					]),
-					"reading the networks",
-				);
-				if (networks.trim() !== "0") {
-					throw new Error(
-						`The check container is still on ${networks.trim()} network(s)`,
+				const done = await exec(name, install.command, installTimeoutMs, WORK, [
+					...install.env,
+					...proxied,
+				]);
+				if (done.code !== 0) {
+					const refused = await refusals(proxy);
+					return request.checks.map(() =>
+						errored(`The install failed:\n${done.output}${refused}`),
 					);
 				}
-
-				const results: CheckRunResult[] = [];
-				for (const [i, check] of request.checks.entries()) {
-					if (request.shouldStop?.()) {
-						results.push(
-							errored("Not run: the run was stopped before this check started"),
-						);
-						continue;
-					}
-					await request.onProgress?.(i, i);
-					const r = await exec(name, check.command, checkTimeoutMs);
-					// 124 is timeout's own exit, 137 a kill: either way it did not finish.
-					results.push(
-						r.code === null || r.code === 124 || r.code === 137
-							? errored(r.output)
-							: {
-									outcome: r.code === 0 ? "pass" : "fail",
-									exitCode: r.code,
-									output: r.output,
-								},
-					);
-				}
-				await request.onProgress?.(results.length, null);
-				return results;
-			} finally {
-				await step(["rm", "--force", name]);
+				// The install is over: nothing needs the way out now.
+				await step(["rm", "--force", proxy]);
 			}
-		},
-	};
+
+			await must(
+				step(["network", "disconnect", "--force", net, name]),
+				"leaving the network",
+			);
+			const networks = await must(
+				step([
+					"inspect",
+					"--format",
+					"{{len .NetworkSettings.Networks}}",
+					name,
+				]),
+				"reading the networks",
+			);
+			if (networks.trim() !== "0") {
+				throw new Error(
+					`The check container is still on ${networks.trim()} network(s)`,
+				);
+			}
+
+			const results: CheckRunResult[] = [];
+			for (const [i, check] of request.checks.entries()) {
+				if (request.shouldStop?.()) {
+					results.push(
+						errored("Not run: the run was stopped before this check started"),
+					);
+					continue;
+				}
+				await request.onProgress?.(i, i);
+				const r = await exec(name, check.command, checkTimeoutMs);
+				// 124 is timeout's own exit, 137 a kill: either way it did not finish.
+				results.push(
+					r.code === null || r.code === 124 || r.code === 137
+						? errored(r.output)
+						: {
+								outcome: r.code === 0 ? "pass" : "fail",
+								exitCode: r.code,
+								output: r.output,
+							},
+				);
+			}
+			await request.onProgress?.(results.length, null);
+			return results;
+		} finally {
+			await step(["rm", "--force", name]);
+		}
+	}
 }
 
 const errored = (output: string): CheckRunResult => ({
