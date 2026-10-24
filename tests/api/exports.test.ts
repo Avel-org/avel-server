@@ -1022,6 +1022,51 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 		);
 	});
 
+	it("fails a delivering export refresh finds no PR for once it is past the delivery window, and leaves a younger one", async () => {
+		const r = repo();
+		const g = githubTree();
+		const timeout = new ApiError(
+			"EXTERNAL_GITHUB",
+			"GitHub's rate limit refused writing a file on meridian-co/app; try again later",
+		);
+		const writer = recordingWriter({ fail: timeout, findFails: timeout });
+		await withApi(
+			async (h) => {
+				const s = await githubReady(h, r);
+				const e = await refused(
+					await post(h, "/api/exports", {
+						missionId: s.missionId,
+						target: "github_pr",
+						gateRunId: s.runId,
+						connectionId: s.connectionId,
+					}),
+					502,
+				);
+				const id = (e.details as { exportId: string }).exportId;
+				writer.script.findFails = undefined;
+				const refresh = () =>
+					h.call(`/api/exports/${id}/refresh`, { method: "POST" });
+				// Inside the window a delivery may still be writing: left alone.
+				expect((await created(await refresh(), 200)).status).toBe("delivering");
+				await h.tx
+					.update(exportTable)
+					.set({
+						statusChangedAt: sql`${exportTable.statusChangedAt} - interval '11 minutes'`,
+						createdAt: sql`${exportTable.createdAt} - interval '11 minutes'`,
+					})
+					.where(eq(exportTable.id, id));
+				const failed = await created(await refresh(), 200);
+				expect(failed).toMatchObject({
+					status: "failed",
+					pullRequest: null,
+					failure: { code: "EXTERNAL_GITHUB" },
+				});
+				expect(failed.failure?.message).toMatch(/no pull request/i);
+			},
+			{ roomSources: r.roomSources, repos: g.repos, repoWriter: writer },
+		);
+	});
+
 	it("gives each export its own branch, so the same package can be delivered again", async () => {
 		const r = repo();
 		const g = githubTree();

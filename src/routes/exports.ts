@@ -84,6 +84,13 @@ type ExportDeps = RouteDeps & {
 };
 
 /**
+ * How long a delivering export with no PR on GitHub is left for its
+ * delivery to finish before refresh fails it. Ten minutes `[hypothesis]`:
+ * a package is tens of files, written in seconds.
+ */
+export const DELIVERY_WINDOW_MS = 10 * 60_000;
+
+/**
  * A github_pr export's branch, from what the export already records, so a
  * refresh after a crash can find the PR it opened. The export's own id ends
  * it: createRef never repoints a branch, so a second export of the same
@@ -812,6 +819,7 @@ export function exportRoutes(deps: ExportDeps) {
 				: pr.state === "closed"
 					? ("closed" as const)
 					: ("pr-open" as const);
+		if (to === "pr-open" && now.prStatus === pr.state) return now;
 		const moved = await moveStatus(tx, ctx, now, to, engagementId, {
 			prStatus: pr.state,
 		});
@@ -1232,7 +1240,31 @@ export function exportRoutes(deps: ExportDeps) {
 				...target,
 				head: found.prHeadRef ?? prBranch(found),
 			});
-			if (!pr) return { status: 200, body: ok(toWire(found)) };
+			if (!pr) {
+				// A delivery that never opened its PR (GitHub refused or did not
+				// answer, and the lookup could not tell) fails once no delivery
+				// could still be writing it. Younger, it is left to finish.
+				const since =
+					deps.clock.now().getTime() - found.statusChangedAt.getTime();
+				if (found.status !== "delivering" || since < DELIVERY_WINDOW_MS) {
+					return { status: 200, body: ok(toWire(found)) };
+				}
+				const settled = await withTx(deps.db(), async (tx) => {
+					const failed = await moveStatus(
+						tx,
+						ctx,
+						found,
+						"failed",
+						m.engagementId,
+						{
+							failureCode: "EXTERNAL_GITHUB",
+							failureMessage: `GitHub has no pull request for this export ${Math.round(since / 60_000)} minutes after delivery began. Deliver it again.`,
+						},
+					);
+					return failed ?? current(tx, found.id);
+				});
+				return { status: 200, body: ok(toWire(settled)) };
+			}
 			const updated = await withTx(deps.db(), (tx) =>
 				recordPullRequest(tx, ctx, found, pr, m.engagementId),
 			);

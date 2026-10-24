@@ -30,6 +30,8 @@ function fakeGitHub(
 		pulls?: unknown[];
 		/** Headers on an `over` answer, such as GitHub's rate-limit ones. */
 		headers?: Record<string, string>;
+		/** The message on an `over` answer. */
+		message?: string;
 	} = {},
 ) {
 	const calls: Call[] = [];
@@ -59,7 +61,11 @@ function fakeGitHub(
 			});
 		const key = `${method} ${path}`;
 		if (over[key]) {
-			return json(over[key], { message: "refused" }, opts.headers);
+			return json(
+				over[key],
+				{ message: opts.message ?? "refused" },
+				opts.headers,
+			);
 		}
 		if (key === "POST /git/blobs") {
 			const bytes = Buffer.from(String(body?.content), "base64");
@@ -193,6 +199,33 @@ describe("githubRepoWriter.openPullRequest", () => {
 			message: expect.stringMatching(/src\/a\.ts/),
 		});
 		expect(gh.calls).toEqual([]);
+	});
+
+	it("checks every file before it uploads any", async () => {
+		const gh = fakeGitHub();
+		const bad = { ...file("src/z.ts", "z\n"), blobSha: "1".repeat(40) };
+		await expect(
+			writer(gh.fetch).openPullRequest(
+				request({ files: [file("src/a.ts", "a\n"), bad] }),
+			),
+		).rejects.toMatchObject({ code: "DETERMINISM_VIOLATION" });
+		expect(gh.calls).toEqual([]);
+	});
+
+	it("names GitHub's secondary rate limit from its message when no header says so", async () => {
+		const limited = fakeGitHub(
+			{ "POST /git/blobs": 403 },
+			{
+				message:
+					"You have exceeded a secondary rate limit. Please wait a few minutes before you try again.",
+			},
+		);
+		await expect(
+			writer(limited.fetch).openPullRequest(request()),
+		).rejects.toMatchObject({
+			code: "EXTERNAL_GITHUB",
+			message: expect.stringMatching(/rate limit/),
+		});
 	});
 
 	it("names GitHub's rate limit as one, not as a credential that cannot write", async () => {

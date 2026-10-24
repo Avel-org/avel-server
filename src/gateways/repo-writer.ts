@@ -72,14 +72,16 @@ function statusOf(e: unknown): number | undefined {
 export function writeFailure(e: unknown, step: string, repo: string): ApiError {
 	if (e instanceof ApiError) return e;
 	const status = statusOf(e);
-	// GitHub's rate limits answer 403 or 429 with these headers: a wait, not
-	// a credential that cannot write.
+	// GitHub's rate limits answer 403 or 429, with these headers or, for the
+	// secondary limit, only its message: a wait, not a credential that
+	// cannot write.
 	const headers = headersOf(e);
 	if (
 		(status === 403 || status === 429) &&
 		(headers["x-ratelimit-remaining"] === "0" ||
 			"retry-after" in headers ||
-			status === 429)
+			status === 429 ||
+			/rate limit/i.test(e instanceof Error ? e.message : ""))
 	) {
 		const after = headers["retry-after"];
 		return new ApiError(
@@ -171,16 +173,19 @@ export function githubRepoWriter(options: {
 			const named = `${owner}/${repo}`;
 			let step = "writing a file";
 			try {
-				// One at a time: GitHub's secondary rate limit counts
-				// concurrency, and a half-written package is the cost.
+				// AVEL's render disagreeing with itself: every file is checked
+				// before the first is sent, so nothing reaches the repository.
 				for (const f of req.files) {
 					if (gitBlobSha(f.bytes) !== f.blobSha) {
-						// AVEL's render disagreeing with itself: nothing is sent.
 						throw new ApiError(
 							"DETERMINISM_VIOLATION",
 							`${f.path} was rendered as ${f.blobSha}, but its bytes hash to ${gitBlobSha(f.bytes)}`,
 						);
 					}
+				}
+				// One at a time: GitHub's secondary rate limit counts
+				// concurrency, and a half-written package is the cost.
+				for (const f of req.files) {
 					const blob = await gh.rest.git.createBlob({
 						owner,
 						repo,
