@@ -1,0 +1,1 @@
+ALTER TYPE "public"."activity_action" ADD VALUE 'skill.roles_set' BEFORE 'roster.entry_added';

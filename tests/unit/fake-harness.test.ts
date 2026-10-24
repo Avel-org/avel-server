@@ -22,6 +22,7 @@ const session = (dispatchId: string): HarnessSession => ({
 	roomCommit: "a".repeat(40),
 	checks: [],
 	identityMd: "# Kel",
+	depthMd: "",
 	briefMd: null,
 	skills: [],
 });

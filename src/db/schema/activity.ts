@@ -60,6 +60,7 @@ export const activityAction = pgEnum("activity_action", [
 	"skill.updated",
 	"skill.approved",
 	"skill.retired",
+	"skill.roles_set",
 	"roster.entry_added",
 	"roster.entry_updated",
 	"roster.entry_removed",

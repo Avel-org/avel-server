@@ -92,6 +92,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					const id = await queued(h.tx, m);
 					const res = await start(h, id);
 					expect(res.status).toBe(200);
+					// The frozen version's depth file goes to the agent with its identity.
+					expect(harness.sessionFor(id)?.depthMd).toBe(
+						`# ${m.agent.slug} v2: depth\n\nA role skill in full.\n`,
+					);
 					const text = await res.text();
 					const wire = read.parse(JSON.parse(text)).data;
 					expect(wire).toMatchObject({

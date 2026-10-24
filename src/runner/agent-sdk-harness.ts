@@ -89,6 +89,21 @@ async function closeRoom(room: AgentRoom, log: Logger): Promise<void> {
 	}
 }
 
+/**
+ * What the agent's system prompt adds to the preset: its identity, its
+ * depth file when it has one (the role skills the identity names), and
+ * the brief, in that order. The brief goes in byte for byte, as frozen.
+ */
+export function systemAppend(
+	session: Pick<HarnessSession, "identityMd" | "depthMd" | "briefMd">,
+): string {
+	const head = [session.identityMd, session.depthMd]
+		.map((part) => part.trimEnd())
+		.filter((part) => part !== "")
+		.join("\n\n");
+	return session.briefMd ? `${head}\n\n${session.briefMd}` : head;
+}
+
 export type QueryFn = (params: {
 	prompt: string;
 	options?: Options;
@@ -383,7 +398,7 @@ export class AgentSdkHarness implements Harness {
 			systemPrompt: {
 				type: "preset",
 				preset: "claude_code",
-				append: `${session.identityMd.trimEnd()}\n\n${session.briefMd ?? ""}`,
+				append: systemAppend(session),
 			},
 			maxTurns: o.maxTurns,
 			maxBudgetUsd: o.maxBudgetUsd,

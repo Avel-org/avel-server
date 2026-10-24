@@ -389,6 +389,7 @@ export async function startDispatch(
 		roomCommit: room.commit,
 		checks: d.briefRef && plan ? dispatchChecks(plan, d.briefRef) : [],
 		identityMd: version.identityMd,
+		depthMd: version.depthMd,
 		briefMd,
 		skills: skillSet.map((s) => ({ slug: s.slug, contentMd: s.contentMd })),
 	};

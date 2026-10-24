@@ -285,7 +285,7 @@ describe("skillSourceSchema", () => {
 describe("skillSchema", () => {
 	it("parses a knowledge skill and a capability", () => {
 		for (const row of [knowledgeRow, capabilityRow]) {
-			const wire = skillWire(row);
+			const wire = { ...skillWire(row), attachedRoles: ["domain" as const] };
 			expect(skillSchema.parse(wire)).toEqual(wire);
 		}
 	});
