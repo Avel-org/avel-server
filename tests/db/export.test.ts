@@ -103,6 +103,61 @@ describe.skipIf(!process.env.DATABASE_URL)("export", () => {
 		});
 	});
 
+	const rendered = {
+		versionManifest: {},
+		packageSha256: "a".repeat(64),
+		packageHashVersion: 1,
+	};
+
+	it("refuses a manifest and package that are not set together", async () => {
+		await inRollback(async (tx, ids) => {
+			const { missionId } = await seedMission(tx, ids);
+			for (const half of [
+				{ ...rendered, versionManifest: null },
+				{ ...rendered, packageSha256: null },
+				{ ...rendered, packageHashVersion: null },
+				{ versionManifest: {} },
+			]) {
+				const err = await refusal(tx, (t) =>
+					t
+						.insert(exportTable)
+						.values({ ...exportRow(ids, missionId), ...half }),
+				);
+				expect(err.constraint_name).toBe("export_rendered_complete");
+			}
+		});
+	});
+
+	it("refuses an export past rendering with no manifest, unless it failed", async () => {
+		await inRollback(async (tx, ids) => {
+			const { missionId } = await seedMission(tx, ids);
+			for (const status of [
+				"verifying",
+				"previewing",
+				"previewed",
+				"delivering",
+				"pr-open",
+				"done",
+				"closed",
+			] as const) {
+				const err = await refusal(tx, (t) =>
+					t
+						.insert(exportTable)
+						.values({ ...exportRow(ids, missionId), status }),
+				);
+				expect(err.constraint_name).toBe("export_rendered_past_rendering");
+				await tx
+					.insert(exportTable)
+					.values({ ...exportRow(ids, missionId), status, ...rendered });
+			}
+			for (const status of ["pending", "rendering", "failed"] as const) {
+				await tx
+					.insert(exportTable)
+					.values({ ...exportRow(ids, missionId), status });
+			}
+		});
+	});
+
 	it("refuses a non-zip export without a connection", async () => {
 		await inRollback(async (tx, ids) => {
 			const { missionId } = await seedMission(tx, ids);

@@ -200,6 +200,18 @@ export const exportTable = pgTable(
 			"export_pr_only_github_pr",
 			sql`${t.prNumber} is null or ${t.targetKind} = 'github_pr'`,
 		),
+		// Filled at render, together (DATA-CONTRACTS-V2.md, Export). Past
+		// rendering they are set, except on an export that failed, which may
+		// have failed before it rendered. Every route that reads an export
+		// reads all three.
+		check(
+			"export_rendered_complete",
+			sql`(${t.versionManifest} is null) = (${t.packageSha256} is null) and (${t.versionManifest} is null) = (${t.packageHashVersion} is null)`,
+		),
+		check(
+			"export_rendered_past_rendering",
+			sql`${t.status} in ('pending', 'rendering', 'failed') or ${t.versionManifest} is not null`,
+		),
 		check(
 			"export_failure_only_failed",
 			sql`${t.failureCode} is null or (${t.status} = 'failed' and ${t.failureMessage} is not null)`,

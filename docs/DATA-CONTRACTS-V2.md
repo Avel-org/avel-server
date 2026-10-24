@@ -801,7 +801,7 @@ contract_sha256        AVEL's frozen contract artifact hash
 timestamps             no deleted_at (2026-10-05)
 ```
 
-*As built 2026-10-05:* `connection_id` is nullable only for `zip`, by CHECK. `idempotency_key` is plainly unique, across all rows. `verification`, the `snapshot_*` fields, `version_manifest`, `contract_sha256` and the `package_*` fields are nullable, because they are filled as the export advances.
+*As built 2026-10-05:* `connection_id` is nullable only for `zip`, by CHECK. `idempotency_key` is plainly unique, across all rows. `verification`, the `snapshot_*` fields, `version_manifest`, `contract_sha256` and the `package_*` fields are nullable, because they are filled as the export advances. *Added 2026-10-24 (drizzle/0056):* `version_manifest`, `package_sha256` and `package_hash_version` are filled together at render, by CHECK, and are set on every export whose status is past `rendering`, except `failed`, which may have failed before it rendered.
 
 **Lifecycle:**
 

@@ -135,6 +135,10 @@ function seeder(tx: Tx, ids: IdGenerator) {
 				targetKind: "zip",
 				status,
 				dryRun: status === "previewed",
+				// Rendered, as every export past rendering must be. Nothing here reads them.
+				versionManifest: {},
+				packageSha256: "a".repeat(64),
+				packageHashVersion: 1,
 				createdAt,
 				updatedAt: createdAt,
 				statusChangedAt,
