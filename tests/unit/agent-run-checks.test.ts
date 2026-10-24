@@ -119,7 +119,7 @@ async function tools(over: Partial<AgentCheckContext> = {}) {
 				places += 1;
 			};
 		},
-		stopped: () => false,
+		signal: new AbortController().signal,
 		...over,
 	};
 	const t = agentTools({
@@ -272,12 +272,13 @@ describe("run_checks", () => {
 		expect(places()).toBe(1);
 	});
 
-	it("asks the session whether it was stopped before each check", async () => {
-		let stopped = false;
-		const { t, runs } = await tools({ stopped: () => stopped });
+	it("hands the runner the session's stop, as a signal and before each check", async () => {
+		const stop = new AbortController();
+		const { t, runs } = await tools({ signal: stop.signal });
 		await t.runChecks({});
+		expect(runs[0]?.signal).toBe(stop.signal);
 		expect(runs[0]?.shouldStop?.()).toBe(false);
-		stopped = true;
+		stop.abort();
 		expect(runs[0]?.shouldStop?.()).toBe(true);
 	});
 
@@ -411,7 +412,9 @@ describe("AgentSdkHarness run_checks", () => {
 		const t = h.toolsFor(r.id);
 		await t?.runChecks({});
 		expect(runs[0]?.shouldStop?.()).toBe(false);
+		expect(runs[0]?.signal?.aborted).toBe(false);
 		await h.stop(r.id);
 		expect(runs[0]?.shouldStop?.()).toBe(true);
+		expect(runs[0]?.signal?.aborted).toBe(true);
 	});
 });

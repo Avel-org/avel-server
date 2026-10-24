@@ -29,10 +29,10 @@ import {
 } from "../db/schema";
 import { live } from "../db/schema/columns";
 import { type Executor, type Tx, withTx } from "../db/tx";
-import type {
-	CheckRunner,
-	CheckRunResult,
-	RunnableCheck,
+import {
+	type CheckRunner,
+	type CheckRunResult,
+	runnableChecks,
 } from "../gateways/check-runner";
 import { requestSha256 } from "../lib/canonical";
 import {
@@ -107,7 +107,7 @@ function configFor(runner: CheckRunner | null): GateConfig {
 
 /** The checks a runner runs: every brief check but file_exists. */
 export const runnableCount = (checks: readonly BriefCheck[]) =>
-	checks.filter((c) => c.kind !== "file_exists").length;
+	runnableChecks(checks).length;
 
 /**
  * Each check that needs a runner, run against the integration commit, keyed
@@ -129,7 +129,7 @@ export async function runChecks(
 	const ran = new Map<number, CheckRunResult>();
 	if (runner === null) return ran;
 	const runnable = checks.flatMap((c, i) =>
-		c.kind === "file_exists" ? [] : [{ i, check: c as RunnableCheck }],
+		runnableChecks([c]).map((check) => ({ i, check })),
 	);
 	if (runnable.length === 0) return ran;
 	let results: CheckRunResult[];

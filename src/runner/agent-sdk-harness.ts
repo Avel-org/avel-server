@@ -318,9 +318,14 @@ export class AgentSdkHarness implements Harness {
 		}
 	}
 
+	/** How many run_checks runs may go at once, across every session. */
+	get checkRunLimit(): number {
+		return this.options.maxCheckRuns ?? 2;
+	}
+
 	/** One of the server's run_checks places, or null when all are taken. */
 	private acquireCheckRun(): (() => void) | null {
-		if (this.checkRuns >= (this.options.maxCheckRuns ?? 2)) return null;
+		if (this.checkRuns >= this.checkRunLimit) return null;
 		this.checkRuns += 1;
 		let released = false;
 		return () => {
@@ -400,7 +405,7 @@ export class AgentSdkHarness implements Harness {
 					checks: session.checks,
 					clock: this.options.clock,
 					acquire: () => this.acquireCheckRun(),
-					stopped: () => abort.signal.aborted,
+					signal: abort.signal,
 				},
 			}),
 			done: Promise.resolve(),

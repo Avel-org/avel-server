@@ -4,7 +4,7 @@ import {
 	type MissionStatus,
 	resolveWritablePaths,
 } from "../contract";
-import { briefSchema } from "../contract/intake";
+import { type Brief, briefSchema } from "../contract/intake";
 import { type ActivityEntry, logActivity } from "../db/activity";
 import { type DispatchRow, missionSpentUsd } from "../db/dispatch";
 import { currentIdentity } from "../db/identity";
@@ -18,7 +18,7 @@ import {
 } from "../db/schema";
 import { live, stamp, touch } from "../db/schema/columns";
 import { type Executor, type Tx, withTx } from "../db/tx";
-import type { RunnableCheck } from "../gateways/check-runner";
+import { type RunnableCheck, runnableChecks } from "../gateways/check-runner";
 import type { Clock } from "../lib/clock";
 import type { IdGenerator } from "../lib/ids";
 import { uncheckedIssues } from "../lib/plan-check";
@@ -278,9 +278,12 @@ export async function startDispatch(
 
 	const skillSet = await dispatchSkills(tx, m.id, entry.roles);
 	const skills = skillsSha256(skillSet);
-	const briefMd = d.briefRef
-		? await dispatchBrief(tx, m, d.briefRef, room, skillSet)
-		: null;
+	// Parsed once, for the brief and for the checks run_checks may run.
+	const plan = d.briefRef ? briefSchema.parse(m.brief) : null;
+	const briefMd =
+		d.briefRef && plan
+			? await dispatchBrief(tx, m, plan, d.briefRef, room, skillSet)
+			: null;
 	const briefHash = briefMd === null ? null : briefSha256(briefMd);
 	const token = mintToken(DISPATCH_TOKEN_PREFIX, deps.ids);
 	const now = deps.clock.now();
@@ -325,7 +328,7 @@ export async function startDispatch(
 		writableGlobs: room.writableGlobs,
 		roomRepoPath: room.repoPath,
 		roomCommit: room.commit,
-		checks: d.briefRef ? dispatchChecks(m.brief, d.briefRef) : [],
+		checks: d.briefRef && plan ? dispatchChecks(plan, d.briefRef) : [],
 		identityMd: version.identityMd,
 		briefMd,
 		skills: skillSet.map((s) => ({ slug: s.slug, contentMd: s.contentMd })),
@@ -345,16 +348,11 @@ export async function startDispatch(
  * 2026-10-22). file_exists is left to the gate.
  */
 function dispatchChecks(
-	brief: unknown,
+	plan: Brief,
 	ref: NonNullable<DispatchRow["briefRef"]>,
 ): RunnableCheck[] {
 	const ids = new Set(ref.requirementIds);
-	return briefSchema
-		.parse(brief)
-		.checks.filter(
-			(c): c is RunnableCheck =>
-				c.kind !== "file_exists" && ids.has(c.requirementId),
-		);
+	return runnableChecks(plan.checks).filter((c) => ids.has(c.requirementId));
 }
 
 /**
@@ -367,11 +365,11 @@ function dispatchChecks(
 async function dispatchBrief(
 	tx: Tx,
 	m: LockedMission,
+	plan: Brief,
 	ref: NonNullable<DispatchRow["briefRef"]>,
 	room: Room,
 	skills: ReadonlyArray<{ slug: string; name: string; description: string }>,
 ): Promise<string> {
-	const plan = briefSchema.parse(m.brief);
 	const module = plan.modules.find((x) => x.id === ref.moduleId);
 	const reads = await readSet(room.repoPath, room.commit, module?.reads ?? []);
 	return renderBrief({
