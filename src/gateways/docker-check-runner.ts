@@ -201,7 +201,7 @@ export function dockerCheckRunner(opts: DockerCheckRunnerOptions): CheckRunner {
 				for (const [i, check] of request.checks.entries()) {
 					if (request.shouldStop?.()) {
 						results.push(
-							errored("Not run: the gate job reached its time limit"),
+							errored("Not run: the run was stopped before this check started"),
 						);
 						continue;
 					}

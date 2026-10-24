@@ -300,6 +300,13 @@ export function agentTools(ctx: AgentToolContext) {
 			blockers: Blocker[];
 		}): Promise<ToolResult> {
 			if (reported) return refused("Your report is already filed. Stop now.");
+			// Filing closes the dispatch: a run still going would hold its
+			// place with no one to read its result.
+			if (checking) {
+				return refused(
+					"checks_running: Your checks are still running. Wait for their result, then report.",
+				);
+			}
 			await ctx.beforeReport();
 			const res = await call("/api/agent/report", {
 				method: "POST",

@@ -18,7 +18,8 @@ export type CheckRunRequest = {
 	onProgress?: (checksDone: number, current: number | null) => Promise<void>;
 	/**
 	 * Asked before each check. True stops the run: the checks not yet run
-	 * are errors. The gate job's time limit, read from its clock.
+	 * are errors. A gate job past its time limit, or a stopped agent
+	 * session.
 	 */
 	shouldStop?: () => boolean;
 };

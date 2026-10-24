@@ -105,6 +105,7 @@ async function tools(over: Partial<AgentCheckContext> = {}) {
 		req.checks.map(() => pass()),
 	);
 	let places = 1;
+	let reports = 0;
 	const run: AgentCheckContext = {
 		runner,
 		source: r.dir,
@@ -126,14 +127,16 @@ async function tools(over: Partial<AgentCheckContext> = {}) {
 		token: "avl_dsp_secret",
 		room: { root: r.root, writableGlobs: ["src/**"] },
 		skills: [],
-		api: async () =>
-			new Response(JSON.stringify({ success: true }), { status: 201 }),
+		api: async () => {
+			reports += 1;
+			return new Response(JSON.stringify({ success: true }), { status: 201 });
+		},
 		ids: sequentialIds(),
 		beforeReport: async () => {},
 		onReported: () => {},
 		run,
 	});
-	return { t, r, runs, places: () => places };
+	return { t, r, runs, places: () => places, reports: () => reports };
 }
 
 describe("run_checks", () => {
@@ -276,6 +279,31 @@ describe("run_checks", () => {
 		expect(runs[0]?.shouldStop?.()).toBe(false);
 		stopped = true;
 		expect(runs[0]?.shouldStop?.()).toBe(true);
+	});
+
+	it("refuses the report while a run is going, and files it once the run is back", async () => {
+		let finish: (r: CheckRunResult[]) => void = () => {};
+		const { runner, runs } = recordingRunner(
+			() =>
+				new Promise<CheckRunResult[]>((resolve) => {
+					finish = resolve;
+				}),
+		);
+		const { t, reports } = await tools({ runner });
+		const checking = t.runChecks({});
+		await vi.waitFor(() => expect(runs).toHaveLength(1));
+
+		const early = await t.report({ status: "complete", blockers: [] });
+		expect(early.isError).toBe(true);
+		expect(early.text).toMatch(/^checks_running:/);
+		expect(reports()).toBe(0);
+
+		finish(CHECKS.map(() => pass()));
+		expect((await checking).isError).toBeUndefined();
+		expect(
+			(await t.report({ status: "complete", blockers: [] })).isError,
+		).toBeUndefined();
+		expect(reports()).toBe(1);
 	});
 
 	it("refuses once the report is filed", async () => {
