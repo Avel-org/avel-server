@@ -163,18 +163,37 @@ export function dockerCheckRunner(opts: DockerCheckRunnerOptions): CheckRunner {
 		},
 		async run(request: CheckRunRequest): Promise<CheckRunResult[]> {
 			if (request.checks.length === 0) return [];
+			const stoppedAll = () => request.checks.map(() => errored(STOPPED));
+			if (request.signal?.aborted) return stoppedAll();
 			const name = `${PREFIX}${opts.ids.next()}`;
 			const net = `${name}-net`;
 			const proxy = `${name}-proxy`;
-			await must(
-				step(["network", "create", "--internal", net]),
-				"creating the install network",
-			);
+			// Removing the containers kills whatever runs in them now: the
+			// docker exec waiting on it returns, and the run ends.
+			const kill = () => {
+				void step(["rm", "--force", name]);
+				void step(["rm", "--force", proxy]);
+			};
+			request.signal?.addEventListener("abort", kill, { once: true });
 			try {
-				return await runOn(net, proxy, name, request);
+				await must(
+					step(["network", "create", "--internal", net]),
+					"creating the install network",
+				);
+				try {
+					const results = await runOn(net, proxy, name, request);
+					return request.signal?.aborted
+						? results.map((r) => (r.outcome === "error" ? errored(STOPPED) : r))
+						: results;
+				} catch (err) {
+					if (request.signal?.aborted) return stoppedAll();
+					throw err;
+				} finally {
+					await step(["rm", "--force", proxy]);
+					await step(["network", "rm", net]);
+				}
 			} finally {
-				await step(["rm", "--force", proxy]);
-				await step(["network", "rm", net]);
+				request.signal?.removeEventListener("abort", kill);
 			}
 		},
 	};
@@ -341,10 +360,8 @@ export function dockerCheckRunner(opts: DockerCheckRunnerOptions): CheckRunner {
 
 			const results: CheckRunResult[] = [];
 			for (const [i, check] of request.checks.entries()) {
-				if (request.shouldStop?.()) {
-					results.push(
-						errored("Not run: the run was stopped before this check started"),
-					);
+				if (request.shouldStop?.() || request.signal?.aborted) {
+					results.push(errored(STOPPED));
 					continue;
 				}
 				await request.onProgress?.(i, i);
@@ -367,6 +384,9 @@ export function dockerCheckRunner(opts: DockerCheckRunnerOptions): CheckRunner {
 		}
 	}
 }
+
+/** A check the run was stopped before it could finish. */
+const STOPPED = "Not run: the run was stopped before this check finished";
 
 const errored = (output: string): CheckRunResult => ({
 	outcome: "error",

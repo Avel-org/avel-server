@@ -329,6 +329,26 @@ describe("harnessFromEnv", () => {
 		);
 		expect(chosen.harness.model).toBe("claude-opus-5-5");
 	});
+
+	it("caps run_checks at AVEL_MAX_CHECK_RUNS, 2 unset, and refuses to start on anything but a positive whole number", () => {
+		const limit = (value: string | undefined) =>
+			harnessFromEnv(
+				{
+					AVEL_HARNESS: "agent-sdk",
+					ANTHROPIC_API_KEY: "sk-test",
+					AVEL_MAX_CHECK_RUNS: value,
+				},
+				options(),
+			).sdk?.checkRunLimit;
+		expect(limit(undefined)).toBe(2);
+		expect(limit("")).toBe(2);
+		expect(limit("5")).toBe(5);
+		for (const bad of ["0", "-1", "1.5", "two"]) {
+			expect(() => limit(bad), bad).toThrow(
+				"AVEL_MAX_CHECK_RUNS must be a positive whole number",
+			);
+		}
+	});
 });
 
 describe("shutdown", () => {

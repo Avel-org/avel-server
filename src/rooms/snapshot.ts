@@ -89,11 +89,7 @@ export async function snapshotDispatch(
 	dispatchId: string,
 	closedAtIso: string,
 ): Promise<string> {
-	if (!UUID.test(dispatchId)) throw new Error(`No dispatch ${dispatchId}`);
-	if (!COMMIT_SHA.test(pinnedSha)) {
-		throw new Error(`The pinned commit ${pinnedSha} is not a full sha`);
-	}
-	if (!ISO.test(closedAtIso)) throw new Error(`closedAt ${closedAtIso}`);
+	assertInputs(dispatchId, pinnedSha, "closedAt", closedAtIso);
 	const sha = await commitRoom(
 		room.root,
 		pinnedSha,
@@ -119,12 +115,22 @@ export async function snapshotRoomForChecks(
 	dispatchId: string,
 	atIso: string,
 ): Promise<string> {
+	assertInputs(dispatchId, pinnedSha, "at", atIso);
+	return commitRoom(room.root, pinnedSha, `checks ${dispatchId}`, atIso);
+}
+
+/** What both snapshots refuse before touching git. */
+function assertInputs(
+	dispatchId: string,
+	pinnedSha: string,
+	timeName: string,
+	iso: string,
+): void {
 	if (!UUID.test(dispatchId)) throw new Error(`No dispatch ${dispatchId}`);
 	if (!COMMIT_SHA.test(pinnedSha)) {
 		throw new Error(`The pinned commit ${pinnedSha} is not a full sha`);
 	}
-	if (!ISO.test(atIso)) throw new Error(`at ${atIso}`);
-	return commitRoom(room.root, pinnedSha, `checks ${dispatchId}`, atIso);
+	if (!ISO.test(iso)) throw new Error(`${timeName} ${iso}`);
 }
 
 /** Everything in the room, untracked and ignored files included, committed on `pinnedSha`. */

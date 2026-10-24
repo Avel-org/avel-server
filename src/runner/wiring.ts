@@ -26,6 +26,21 @@ export type ServerHarness = {
 	canonModel: CanonModel;
 };
 
+/**
+ * AVEL_MAX_CHECK_RUNS: how many agents' run_checks runs may go at once,
+ * each a container with the runner's caps. The gate's job, one at a time,
+ * is one more. Unset is 2 (`[hypothesis]`); anything but a positive whole
+ * number refuses to start the server.
+ */
+export function checkRunsFromEnv(value: string | undefined): number {
+	if (value === undefined || value === "") return 2;
+	const n = Number(value);
+	if (!Number.isSafeInteger(n) || n <= 0) {
+		throw new Error("AVEL_MAX_CHECK_RUNS must be a positive whole number");
+	}
+	return n;
+}
+
 export function harnessFromEnv(
 	env: NodeJS.ProcessEnv,
 	options: {
@@ -63,6 +78,7 @@ export function harnessFromEnv(
 		checkRunner: options.checkRunner,
 		maxBudgetUsd: Number(env.AVEL_HARNESS_MAX_BUDGET_USD ?? 2),
 		maxTurns: Number(env.AVEL_HARNESS_MAX_TURNS ?? 60),
+		maxCheckRuns: checkRunsFromEnv(env.AVEL_MAX_CHECK_RUNS),
 		...(options.query ? { query: options.query } : {}),
 	});
 	const canonModel = new AgentSdkCanonModel({

@@ -46,7 +46,7 @@ const noChecks = (): AgentCheckContext => ({
 	checks: [],
 	clock: fixedClock("2026-10-23T09:00:00.000Z"),
 	acquire: () => () => {},
-	stopped: () => false,
+	signal: new AbortController().signal,
 });
 
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");

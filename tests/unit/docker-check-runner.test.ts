@@ -337,8 +337,33 @@ describe.skipIf(!IMAGE)("dockerCheckRunner on Docker", () => {
 		});
 		expect(results.map((x) => x.outcome)).toEqual(["pass", "error", "error"]);
 		expect(results[1]?.output).toBe(
-			"Not run: the run was stopped before this check started",
+			"Not run: the run was stopped before this check finished",
 		);
+	});
+
+	it("ends at once when its signal aborts, killing the check in flight", async () => {
+		const r = repo({ "a.txt": "a\n" });
+		const stop = new AbortController();
+		let t0 = 0;
+		const results = await runner().run({
+			...request(r.dir, r.commits[0] as string, [
+				check("sleep 60"),
+				check("true"),
+			]),
+			onProgress: async (_done, current) => {
+				if (current === 0) {
+					t0 = performance.now();
+					setTimeout(() => stop.abort(), 1000);
+				}
+			},
+			signal: stop.signal,
+		});
+		expect(performance.now() - t0).toBeLessThan(20_000);
+		expect(results.map((x) => [x.outcome, x.output])).toEqual([
+			["error", "Not run: the run was stopped before this check finished"],
+			["error", "Not run: the run was stopped before this check finished"],
+		]);
+		expect(leftover()).toBe("");
 	});
 
 	it("rejects, never crashes, when tar exits while git archive is still writing", async () => {

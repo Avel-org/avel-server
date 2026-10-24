@@ -4,6 +4,7 @@ import path from "node:path";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import {
+	agentTemplateSchema,
 	clientSchema,
 	connectionSchema,
 	dispatch as dispatchWire,
@@ -293,7 +294,8 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 					// 1. One Canon turn, live, on its own draft intake with the notes
 					// in the Drive. Canon's template and identity come from the seed's
 					// definition, through the regenerate route.
-					// One generator for both inserts: a second would start at the same id.
+					// Canon has no writable paths, which the create route refuses, so its
+					// template is inserted as the seed inserts it.
 					const rowIds = seedIds(h.ns);
 					const canonTemplateId = rowIds.next();
 					await h.tx.insert(agentTemplate).values({
@@ -514,20 +516,21 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 					);
 					expect(plan.check).toEqual({ passed: true, issues: [] });
 
-					// GAP: no route creates an agent template.
-					const templateId = rowIds.next();
-					await h.tx.insert(agentTemplate).values({
-						id: templateId,
-						slug: `atlas-${h.ns}`,
-						name: "Atlas",
-						title: "Scheduling builder",
-						kind: "feature",
-						roles: ["domain", "api-surface"],
-						waveDefaults: ["A"],
-						writablePaths: ["src/features/scheduling/**"],
-						version: 1,
-						...stamp(clock),
-					});
+					const templateId = (
+						await ok(
+							await post("/api/agent-templates", {
+								slug: `atlas-${h.ns}`,
+								name: "Atlas",
+								title: "Scheduling builder",
+								kind: "feature",
+								roles: ["domain", "api-surface"],
+								waveDefaults: ["A"],
+								writablePaths: ["src/features/scheduling/**"],
+							}),
+							201,
+							successEnvelope(agentTemplateSchema),
+						)
+					).id;
 					const regen = await post(
 						`/api/agent-templates/${templateId}/identity/regenerate`,
 					);

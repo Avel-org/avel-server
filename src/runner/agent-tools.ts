@@ -58,8 +58,11 @@ export type AgentCheckContext = {
 	 * taken. The returned function gives it back.
 	 */
 	acquire: () => (() => void) | null;
-	/** True once the session is stopped: the run starts no more checks. */
-	stopped: () => boolean;
+	/**
+	 * Aborts when the session stops: the runner ends the run at once, the
+	 * install or check in flight included.
+	 */
+	signal: AbortSignal;
 };
 
 /** How much of each check's output the agent sees, from its end. */
@@ -274,7 +277,8 @@ export function agentTools(ctx: AgentToolContext) {
 						source: run.source,
 						commitSha,
 						checks,
-						shouldStop: run.stopped,
+						shouldStop: () => run.signal.aborted,
+						signal: run.signal,
 					});
 				} catch (err) {
 					const message = err instanceof Error ? err.message : String(err);

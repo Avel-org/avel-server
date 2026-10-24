@@ -8,7 +8,7 @@ import { worktreeRooms } from "../../src/rooms/provider";
 import { localSources } from "../../src/rooms/sources";
 import { AgentSdkHarness } from "../../src/runner/agent-sdk-harness";
 import { DEFAULT_PRICE_BOOK } from "../../src/runner/budget";
-import { applyUsage, tick } from "../../src/runner/runner";
+import { applyUsage, tick, writeDispatchStep } from "../../src/runner/runner";
 import { seedIds } from "../api/agent-fixtures";
 import {
 	activeMission,
@@ -120,6 +120,7 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 					});
 					h.bindAgentApi(async (req) => api.app.fetch(req));
 					h.bindUsageSink((id, split) => applyUsage(deps, id, split));
+					h.bindStepSink((id, step) => writeDispatchStep(deps, id, step));
 					const m = await activeMission(api.tx, seedIds(api.ns));
 					await api.tx
 						.update(mission)

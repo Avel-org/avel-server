@@ -22,6 +22,12 @@ export type CheckRunRequest = {
 	 * session.
 	 */
 	shouldStop?: () => boolean;
+	/**
+	 * Aborted, the run ends at once: the install or check in flight is
+	 * killed, and every check not finished is an error. A stopped agent
+	 * session's run_checks.
+	 */
+	signal?: AbortSignal;
 };
 
 /**
@@ -52,4 +58,12 @@ export interface CheckRunner {
 	 * middle of it (containers, for Docker). Assumes one server process.
 	 */
 	sweep?(): Promise<void>;
+}
+
+/**
+ * The brief checks a runner runs: every one but file_exists, which the gate
+ * judges from the work's changes. One rule for the gate and run_checks.
+ */
+export function runnableChecks(checks: readonly BriefCheck[]): RunnableCheck[] {
+	return checks.filter((c): c is RunnableCheck => c.kind !== "file_exists");
 }
