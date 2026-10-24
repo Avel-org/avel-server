@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
@@ -19,8 +20,10 @@ import { stamp } from "../../src/db/schema/columns";
 import { buildSeed, seedIds as seedRowIds } from "../../src/db/seed/data";
 import { buildDevTemplateBooking } from "../../src/db/seed/dev-template";
 import { memoryBlobs } from "../../src/gateways/blob";
+import { dockerCheckRunner } from "../../src/gateways/docker-check-runner";
 import { randomIds } from "../../src/lib/ids";
 import { DEV_BOOKING_SHA } from "../../src/lib/templates";
+import { git } from "../../src/rooms/git";
 import { worktreeRooms } from "../../src/rooms/provider";
 import { localSources } from "../../src/rooms/sources";
 import { DEFAULT_UPLOAD_MAX_BYTES } from "../../src/routes/files";
@@ -49,6 +52,14 @@ import { BASE_URL, captureLogger } from "../unit/support";
 // intake reads that commit, and the room opens on it from the client's
 // clone (decided 2026-10-21, J). The mission's ceiling is $20; the SDK
 // backstops are $1 for Canon and $2 for the dispatch.
+//
+// With AVEL_CHECK_IMAGE (an image pinned by digest), the gate and the
+// agent's run_checks both run on local Docker, and the brief carries a test
+// check. The client's clone then has one commit on top of the template: an
+// empty package-lock.json, so the runner can install, and a fixed test of
+// AC1 on Node's own runner. The agent may write only under
+// src/features/scheduling, so it cannot edit that test. Before the
+// dispatch, the check is run on the base, where it must fail.
 
 const live =
 	process.env.AVEL_LIVE_SMOKE === "1" && !!process.env.ANTHROPIC_API_KEY;
@@ -56,6 +67,41 @@ const live =
 const MODEL = "claude-sonnet-5-5";
 const REPO = "https://github.com/meridian-co/app";
 const SLOTS = "src/features/scheduling/slots.ts";
+const SLOTS_TEST = "tests/unit/slots.test.ts";
+const CHECK_IMAGE = process.env.AVEL_CHECK_IMAGE || undefined;
+
+/** The client's own commit on the template: what makes CK2 runnable. */
+const CLIENT_FILES: Record<string, string> = {
+	"package-lock.json": `${JSON.stringify(
+		{
+			name: "template-booking",
+			lockfileVersion: 3,
+			requires: true,
+			packages: { "": { name: "template-booking" } },
+		},
+		null,
+		"\t",
+	)}\n`,
+	[SLOTS_TEST]: [
+		'import assert from "node:assert/strict";',
+		'import { test } from "node:test";',
+		'import { openSlots } from "../../src/features/scheduling/slots.ts";',
+		"",
+		'test("AC1: openSlots(8, 3) is 5 and openSlots(8, 9) is 0", () => {',
+		"\tassert.equal(openSlots(8, 3), 5);",
+		"\tassert.equal(openSlots(8, 9), 0);",
+		"});",
+		"",
+	].join("\n"),
+};
+
+const TEST_CHECK = {
+	id: "CK2",
+	requirementId: "R1",
+	kind: "test" as const,
+	command: `node --test ${SLOTS_TEST}`,
+	note: `The client's test of AC1, ${SLOTS_TEST}, passes. Import with the .ts extension: Node runs the TypeScript directly.`,
+};
 
 const NOTES = `# Meridian booking: call notes
 
@@ -104,6 +150,7 @@ const PLAN = {
 			path: SLOTS,
 			note: "The slot module exists",
 		},
+		...(CHECK_IMAGE ? [TEST_CHECK] : []),
 	],
 };
 
@@ -151,6 +198,49 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 			).toBe(DEV_BOOKING_SHA);
 			const clientClone = path.join(sources, "repos", "meridian-co", "app");
 			expect(await buildDevTemplateBooking(clientClone)).toBe(DEV_BOOKING_SHA);
+			for (const [p, text] of Object.entries(CLIENT_FILES)) {
+				const file = path.join(clientClone, ...p.split("/"));
+				await mkdir(path.dirname(file), { recursive: true });
+				await writeFile(file, text);
+			}
+			await git(["add", "-A"], { cwd: clientClone });
+			await git(
+				["-c", "commit.gpgsign=false", "commit", "-q", "-m", "Meridian's test"],
+				{
+					cwd: clientClone,
+					env: {
+						...process.env,
+						GIT_AUTHOR_NAME: "Meridian",
+						GIT_AUTHOR_EMAIL: "dev@meridian.invalid",
+						GIT_AUTHOR_DATE: "2026-10-22T00:00:00Z",
+						GIT_COMMITTER_NAME: "Meridian",
+						GIT_COMMITTER_EMAIL: "dev@meridian.invalid",
+						GIT_COMMITTER_DATE: "2026-10-22T00:00:00Z",
+					},
+				},
+			);
+			const clientSha = (
+				await git(["rev-parse", "HEAD"], { cwd: clientClone })
+			).trim();
+			const checkRunner = CHECK_IMAGE
+				? dockerCheckRunner({ image: CHECK_IMAGE, ids: randomIds })
+				: null;
+			if (checkRunner) {
+				// The check fails on the base, before any work: it checks something.
+				const [before] = await checkRunner.run({
+					source: clientClone,
+					commitSha: clientSha,
+					checks: [TEST_CHECK],
+					shouldStop: () => false,
+				});
+				console.log(
+					"PREFLIGHT",
+					before?.outcome,
+					before?.exitCode,
+					before?.output.slice(-600),
+				);
+				expect(before?.outcome).toBe("fail");
+			}
 			const rooms = worktreeRooms(path.join(base, "rooms"));
 			const roomSources = localSources(sources);
 			const blobs = memoryBlobs();
@@ -162,7 +252,7 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 				ids: randomIds,
 				logger,
 				clock,
-				checkRunner: null,
+				checkRunner,
 				maxBudgetUsd: 2,
 				maxTurns: 30,
 				hostEnv: process.env,
@@ -179,7 +269,7 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 			await withApi(
 				async (h) => {
 					const cookie = await h.signIn();
-					jobDeps(h, roomSources);
+					jobDeps(h, roomSources, checkRunner);
 					const post = (p: string, body: unknown = {}, headers = {}) =>
 						h.call(p, { method: "POST", body, headers });
 					const summary: string[] = [];
@@ -398,7 +488,7 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 						200,
 						intake,
 					);
-					expect(read.repoCommitSha).toBe(DEV_BOOKING_SHA);
+					expect(read.repoCommitSha).toBe(clientSha);
 					await ok(await post(`/api/intakes/${intakeId}/propose`), 200, intake);
 					const approved = await ok(
 						await post(`/api/intakes/${intakeId}/approve`, {
@@ -546,6 +636,34 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 							2,
 						),
 					);
+					// Whether the agent used run_checks, and what came back.
+					const steps = (
+						(await (
+							await h.call(`/api/dispatches/${queued.id}/steps`)
+						).json()) as {
+							data: Array<{
+								kind: string;
+								detail: { tool?: string; isError?: boolean; text?: string };
+							}>;
+						}
+					).data;
+					const checkSteps = steps.filter(
+						(s) =>
+							(s.kind === "tool_call" || s.kind === "tool_result") &&
+							s.detail.tool === "run_checks",
+					);
+					console.log(
+						"RUN_CHECKS",
+						JSON.stringify(
+							checkSteps.map((s) => ({
+								kind: s.kind,
+								isError: s.detail.isError,
+								text: s.detail.text?.slice(0, 800),
+							})),
+							null,
+							2,
+						),
+					);
 					summary.push(
 						`${day()} · first-mission-live · item-6 · atlas · ${d.model} · ${d.tokensIn} · ${d.tokensOut} · ${d.spendUsd} · ${d.status}; report by ${report?.filedBy ?? "none"}, cache read ${d.cacheReadTokens}, cache write ${d.cacheWriteTokens}`,
 					);
@@ -583,14 +701,23 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 					expect(
 						run.reasons.find((r) => r.source === "file_exists"),
 					).toMatchObject({ effect: "pass" });
+					if (checkRunner) {
+						const receipt = JSON.parse(run.receipt);
+						const ck2 = receipt.findings.find(
+							(f: { id: string }) => f.id === "check:CK2:1",
+						);
+						console.log("CK2", ck2?.outcome, ck2?.subject, receipt.runner);
+						expect(ck2?.outcome).toBe("pass");
+					}
 				},
 				{
 					harness,
 					rooms,
 					roomSources,
 					repos: fixtureRepos({
-						"meridian-co/app": snapshotOfCommit(clientClone, DEV_BOOKING_SHA),
+						"meridian-co/app": snapshotOfCommit(clientClone, clientSha),
 					}),
+					checkRunner: checkRunner ?? undefined,
 					drive: { blobs, maxBytes: DEFAULT_UPLOAD_MAX_BYTES },
 				},
 			);
