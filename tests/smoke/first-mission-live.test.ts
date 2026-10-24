@@ -31,7 +31,7 @@ import { AgentSdkHarness } from "../../src/runner/agent-sdk-harness";
 import { DEFAULT_PRICE_BOOK } from "../../src/runner/budget";
 import { runCanonTurn } from "../../src/runner/canon";
 import { AgentSdkCanonModel } from "../../src/runner/canon/sdk-model";
-import { applyUsage, tick } from "../../src/runner/runner";
+import { applyUsage, tick, writeDispatchStep } from "../../src/runner/runner";
 import { seedIds } from "../api/agent-fixtures";
 import { jobDeps, runGate } from "../api/gate-job-fixtures";
 import { reportsOf, row, runnerDeps } from "../api/runner-fixtures";
@@ -581,6 +581,7 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 					});
 					harness.bindAgentApi(async (req) => h.app.fetch(req));
 					harness.bindUsageSink((id, split) => applyUsage(deps, id, split));
+					harness.bindStepSink((id, step) => writeDispatchStep(deps, id, step));
 					const one = successEnvelope(dispatchWire);
 					const queued = await ok(
 						await post(
@@ -652,6 +653,17 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 							(s.kind === "tool_call" || s.kind === "tool_result") &&
 							s.detail.tool === "run_checks",
 					);
+					// The whole tool sequence, so no run_checks call reads apart
+					// from no steps at all.
+					console.log(
+						"TOOLS",
+						steps.length,
+						JSON.stringify(
+							steps
+								.filter((s) => s.kind === "tool_call")
+								.map((s) => s.detail.tool),
+						),
+					);
 					console.log(
 						"RUN_CHECKS",
 						JSON.stringify(
@@ -688,6 +700,9 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 						),
 					);
 					expect(d.status).toBe("complete");
+					// The server binds the step sink (src/runner/wiring.ts); an empty
+					// trace here means this test did not.
+					expect(steps.length, "no steps were written").toBeGreaterThan(0);
 					const run = await ok(gateRes, 200, successEnvelope(gateRunSchema));
 					console.log(
 						"RESULT",
