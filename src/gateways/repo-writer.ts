@@ -72,6 +72,21 @@ function statusOf(e: unknown): number | undefined {
 export function writeFailure(e: unknown, step: string, repo: string): ApiError {
 	if (e instanceof ApiError) return e;
 	const status = statusOf(e);
+	// GitHub's rate limits answer 403 or 429 with these headers: a wait, not
+	// a credential that cannot write.
+	const headers = headersOf(e);
+	if (
+		(status === 403 || status === 429) &&
+		(headers["x-ratelimit-remaining"] === "0" ||
+			"retry-after" in headers ||
+			status === 429)
+	) {
+		const after = headers["retry-after"];
+		return new ApiError(
+			"EXTERNAL_GITHUB",
+			`GitHub's rate limit refused ${step} on ${repo}${after ? `; try again in ${after} s` : "; try again later"}`,
+		);
+	}
 	if (status === undefined || status >= 500) {
 		return new ApiError(
 			"EXTERNAL_GITHUB",
@@ -112,6 +127,21 @@ async function baseTreeOf(
 	return commit.data.tree.sha;
 }
 
+function headersOf(e: unknown): Record<string, string> {
+	if (typeof e === "object" && e !== null && "response" in e) {
+		const r = (e as { response?: { headers?: Record<string, unknown> } })
+			.response;
+		const out: Record<string, string> = {};
+		for (const [k, v] of Object.entries(r?.headers ?? {})) {
+			if (typeof v === "string" || typeof v === "number") {
+				out[k.toLowerCase()] = String(v);
+			}
+		}
+		return out;
+	}
+	return {};
+}
+
 function stateOf(pr: { state: string; merged_at: string | null }) {
 	if (pr.merged_at) return "merged" as const;
 	return pr.state === "open" ? ("open" as const) : ("closed" as const);
@@ -145,7 +175,11 @@ export function githubRepoWriter(options: {
 				// concurrency, and a half-written package is the cost.
 				for (const f of req.files) {
 					if (gitBlobSha(f.bytes) !== f.blobSha) {
-						throw new Error(`${f.path}: its bytes are not its blobSha`);
+						// AVEL's render disagreeing with itself: nothing is sent.
+						throw new ApiError(
+							"DETERMINISM_VIOLATION",
+							`${f.path} was rendered as ${f.blobSha}, but its bytes hash to ${gitBlobSha(f.bytes)}`,
+						);
 					}
 					const blob = await gh.rest.git.createBlob({
 						owner,

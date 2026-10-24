@@ -4,7 +4,6 @@ import {
 	type PullRequestRequest,
 } from "../../src/gateways/repo-writer";
 import { gitBlobSha } from "../../src/lib/export/blob";
-import { ApiError } from "../../src/middleware/errors";
 
 // The GitHub write path (EXPORT-ENGINE.md §8, §13) against a fake GitHub:
 // Octokit's own requests, answered in the shapes GitHub's REST docs give for
@@ -26,7 +25,12 @@ type Call = {
 /** A fake GitHub. `over` answers a "METHOD path" with a status, or a blob sha to send back. */
 function fakeGitHub(
 	over: Record<string, number> = {},
-	opts: { wrongBlobSha?: boolean; pulls?: unknown[] } = {},
+	opts: {
+		wrongBlobSha?: boolean;
+		pulls?: unknown[];
+		/** Headers on an `over` answer, such as GitHub's rate-limit ones. */
+		headers?: Record<string, string>;
+	} = {},
 ) {
 	const calls: Call[] = [];
 	let inFlight = 0;
@@ -44,13 +48,19 @@ function fakeGitHub(
 		maxInFlight = Math.max(maxInFlight, inFlight);
 		await new Promise((r) => setTimeout(r, 1));
 		inFlight -= 1;
-		const json = (status: number, data: unknown) =>
+		const json = (
+			status: number,
+			data: unknown,
+			extra: Record<string, string> = {},
+		) =>
 			new Response(JSON.stringify(data), {
 				status,
-				headers: { "content-type": "application/json" },
+				headers: { "content-type": "application/json", ...extra },
 			});
 		const key = `${method} ${path}`;
-		if (over[key]) return json(over[key], { message: "refused" });
+		if (over[key]) {
+			return json(over[key], { message: "refused" }, opts.headers);
+		}
 		if (key === "POST /git/blobs") {
 			const bytes = Buffer.from(String(body?.content), "base64");
 			const sha = opts.wrongBlobSha ? "0".repeat(40) : gitBlobSha(bytes);
@@ -175,10 +185,27 @@ describe("githubRepoWriter.openPullRequest", () => {
 	it("refuses bytes that are not their own blobSha, before writing anything", async () => {
 		const gh = fakeGitHub();
 		const bad = { ...file("src/a.ts", "a\n"), blobSha: "1".repeat(40) };
+		// AVEL's own render disagreeing with itself, never GitHub's silence.
 		await expect(
 			writer(gh.fetch).openPullRequest(request({ files: [bad] })),
-		).rejects.toBeInstanceOf(ApiError);
+		).rejects.toMatchObject({
+			code: "DETERMINISM_VIOLATION",
+			message: expect.stringMatching(/src\/a\.ts/),
+		});
 		expect(gh.calls).toEqual([]);
+	});
+
+	it("names GitHub's rate limit as one, not as a credential that cannot write", async () => {
+		const limited = fakeGitHub(
+			{ "POST /git/blobs": 403 },
+			{ headers: { "x-ratelimit-remaining": "0", "retry-after": "60" } },
+		);
+		await expect(
+			writer(limited.fetch).openPullRequest(request()),
+		).rejects.toMatchObject({
+			code: "EXTERNAL_GITHUB",
+			message: expect.stringMatching(/rate limit/),
+		});
 	});
 
 	it("answers GITHUB_REJECTED for a status GitHub refused with, naming the step, and EXTERNAL_GITHUB for no answer", async () => {

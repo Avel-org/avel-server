@@ -30,6 +30,7 @@ import { type Executor, type Tx, withTx } from "../db/tx";
 import { sha256Of } from "../gateways/blob";
 import type { RepoSource } from "../gateways/repo-source";
 import type {
+	FoundPullRequest,
 	OpenedPullRequest,
 	PullRequestRequest,
 	RepoWriter,
@@ -84,14 +85,17 @@ type ExportDeps = RouteDeps & {
 
 /**
  * A github_pr export's branch, from what the export already records, so a
- * refresh after a crash can find the PR it opened.
+ * refresh after a crash can find the PR it opened. The export's own id ends
+ * it: createRef never repoints a branch, so a second export of the same
+ * package needs a branch of its own.
  */
 export function prBranch(row: {
+	id: string;
 	missionId: string;
 	sprintN: number;
 	packageSha256: string | null;
 }): string {
-	return `avel/${row.missionId.slice(0, 8)}-s${row.sprintN}-${(row.packageSha256 ?? "").slice(0, 12)}`;
+	return `avel/${row.missionId.slice(0, 8)}-s${row.sprintN}-${(row.packageSha256 ?? "").slice(0, 12)}-${row.id.slice(-12)}`;
 }
 
 /** The PR's description: what shipped and the evidence behind it. */
@@ -697,25 +701,26 @@ export function exportRoutes(deps: ExportDeps) {
 	}
 
 	/**
-	 * Moves an export to `to` with `set`, logging export.status_changed as
-	 * the operator who asked. Refuses a move the lifecycle does not allow.
+	 * Moves an export from `from` to `to` with `set`, logging
+	 * export.status_changed as the operator who asked. The update matches
+	 * `from` too, so a request that read a status another has since changed
+	 * moves nothing: null, and the caller reads what is there now. Refuses a
+	 * move the lifecycle does not allow.
 	 */
-	async function setStatus(
+	async function moveStatus(
 		tx: Tx,
 		ctx: RequestContext,
 		row: ExportRow,
 		to: ExportStatus,
 		engagementId: string | null,
 		set: Partial<typeof exportTable.$inferInsert>,
-	): Promise<ExportRow> {
+	): Promise<ExportRow | null> {
+		const from = row.status;
 		if (
-			row.status !== to &&
-			!canTransition(row.status, to, {
-				dryRun: row.dryRun,
-				target: row.targetKind,
-			})
+			from !== to &&
+			!canTransition(from, to, { dryRun: row.dryRun, target: row.targetKind })
 		) {
-			throw new Error(`export ${row.id} cannot move ${row.status} -> ${to}`);
+			throw new Error(`export ${row.id} cannot move ${from} -> ${to}`);
 		}
 		const now = deps.clock.now();
 		const [updated] = await tx
@@ -725,17 +730,17 @@ export function exportRoutes(deps: ExportDeps) {
 				status: to,
 				// The trigger wants status_changed_at strictly later: a failure in
 				// the same millisecond as its insert would otherwise refuse.
-				...(row.status === to
+				...(from === to
 					? {}
 					: {
 							statusChangedAt: sql`greatest(${now.toISOString()}::timestamptz, ${exportTable.statusChangedAt} + interval '1 millisecond')`,
 						}),
 				updatedAt: now,
 			})
-			.where(eq(exportTable.id, row.id))
+			.where(and(eq(exportTable.id, row.id), eq(exportTable.status, from)))
 			.returning();
-		if (!updated) throw new Error(`export ${row.id} vanished`);
-		if (row.status !== to) {
+		if (!updated) return null;
+		if (from !== to) {
 			await logActivity(tx, deps, {
 				actorKind: "operator",
 				actorUserId: operatorOf(ctx).id,
@@ -747,7 +752,7 @@ export function exportRoutes(deps: ExportDeps) {
 				requestId: ctx.requestId,
 				payload: {
 					exportId: row.id,
-					from: row.status,
+					from,
 					to,
 					...(set.prNumber ? { prNumber: set.prNumber } : {}),
 					...(set.failureCode ? { failureCode: set.failureCode } : {}),
@@ -755,6 +760,62 @@ export function exportRoutes(deps: ExportDeps) {
 			});
 		}
 		return updated;
+	}
+
+	/** The export as it is now, for a caller whose move found it changed. */
+	async function current(tx: Tx, id: string): Promise<ExportRow> {
+		const [now] = await tx
+			.select()
+			.from(exportTable)
+			.where(eq(exportTable.id, id));
+		if (!now) throw new Error(`export ${id} vanished`);
+		return now;
+	}
+
+	/**
+	 * Records the PR GitHub has for this export: a delivering export becomes
+	 * pr-open with it, and a merged or closed PR then moves it on to done or
+	 * closed (1, from code review: the lifecycle has no step from delivering
+	 * straight to either). Each move matches the status before it.
+	 */
+	async function recordPullRequest(
+		tx: Tx,
+		ctx: RequestContext,
+		row: ExportRow,
+		pr: FoundPullRequest,
+		engagementId: string | null,
+	): Promise<ExportRow> {
+		let now = row;
+		const fields = {
+			prStatus: pr.state,
+			prNumber: pr.number,
+			prUrl: pr.url,
+			prHeadRef: pr.branch,
+			prCommitSha: row.prCommitSha ?? pr.commitSha,
+		};
+		if (now.status === "delivering") {
+			const moved = await moveStatus(
+				tx,
+				ctx,
+				now,
+				"pr-open",
+				engagementId,
+				fields,
+			);
+			if (!moved) return current(tx, row.id);
+			now = moved;
+		}
+		if (now.status !== "pr-open") return now;
+		const to =
+			pr.state === "merged"
+				? ("done" as const)
+				: pr.state === "closed"
+					? ("closed" as const)
+					: ("pr-open" as const);
+		const moved = await moveStatus(tx, ctx, now, to, engagementId, {
+			prStatus: pr.state,
+		});
+		return moved ?? current(tx, row.id);
 	}
 
 	/** Where a GitHub export goes, through its connection, checked again now. */
@@ -786,6 +847,11 @@ export function exportRoutes(deps: ExportDeps) {
 	/**
 	 * Writes the PR outside any transaction, then records what happened:
 	 * pr-open with its PR, or failed with the reason, which is also thrown.
+	 * When GitHub stops answering (EXTERNAL_GITHUB), the PR may exist all the
+	 * same, so its branch is looked up first: found, it is recorded; the
+	 * lookup unanswered too, the export stays delivering for refresh to
+	 * settle, and only an answer that it is not there fails it. A status
+	 * another request recorded meanwhile is never overwritten.
 	 */
 	async function deliverPullRequest(
 		ctx: RequestContext,
@@ -804,25 +870,49 @@ export function exportRoutes(deps: ExportDeps) {
 							"EXTERNAL_GITHUB",
 							`Delivering to ${request.owner}/${request.repo} failed`,
 						);
-			await withTx(deps.db(), (tx) =>
-				setStatus(tx, ctx, row, "failed", engagementId, {
+			const refused = () =>
+				new ApiError(err.code, err.message, {
+					details: { exportId: row.id } as never,
+				});
+			if (err.code === "EXTERNAL_GITHUB") {
+				let pr: FoundPullRequest | null;
+				try {
+					pr = await deps.repoWriter.findPullRequest({
+						owner: request.owner,
+						repo: request.repo,
+						credentialRef: request.credentialRef,
+						head: request.head,
+					});
+				} catch {
+					throw refused();
+				}
+				if (pr) {
+					const found = pr;
+					return withTx(deps.db(), (tx) =>
+						recordPullRequest(tx, ctx, row, found, engagementId),
+					);
+				}
+			}
+			const failed = await withTx(deps.db(), (tx) =>
+				moveStatus(tx, ctx, row, "failed", engagementId, {
 					failureCode: err.code,
 					failureMessage: err.message,
 				}),
 			);
-			throw new ApiError(err.code, err.message, {
-				details: { exportId: row.id } as never,
-			});
+			// Another request settled it meanwhile, from GitHub: that stands.
+			if (!failed) return withTx(deps.db(), (tx) => current(tx, row.id));
+			throw refused();
 		}
-		return withTx(deps.db(), (tx) =>
-			setStatus(tx, ctx, row, "pr-open", engagementId, {
+		return withTx(deps.db(), async (tx) => {
+			const moved = await moveStatus(tx, ctx, row, "pr-open", engagementId, {
 				prStatus: "open",
 				prNumber: opened.number,
 				prUrl: opened.url,
 				prHeadRef: opened.branch,
 				prCommitSha: opened.commitSha,
-			}),
-		);
+			});
+			return moved ?? current(tx, row.id);
+		});
 	}
 
 	return tsr.platformContext<RequestContext>().router(exportContract, {
@@ -1143,29 +1233,9 @@ export function exportRoutes(deps: ExportDeps) {
 				head: found.prHeadRef ?? prBranch(found),
 			});
 			if (!pr) return { status: 200, body: ok(toWire(found)) };
-			const to =
-				pr.state === "merged"
-					? ("done" as const)
-					: pr.state === "closed"
-						? ("closed" as const)
-						: ("pr-open" as const);
-			const updated = await withTx(deps.db(), async (tx) => {
-				const [now] = await tx
-					.select()
-					.from(exportTable)
-					.where(eq(exportTable.id, found.id))
-					.for("update");
-				if (!now) throw notFound("export", found.id);
-				// Another request moved it meanwhile: its answer stands.
-				if (now.status !== found.status) return now;
-				return setStatus(tx, ctx, now, to, m.engagementId, {
-					prStatus: pr.state,
-					prNumber: pr.number,
-					prUrl: pr.url,
-					prHeadRef: pr.branch,
-					prCommitSha: now.prCommitSha ?? pr.commitSha,
-				});
-			});
+			const updated = await withTx(deps.db(), (tx) =>
+				recordPullRequest(tx, ctx, found, pr, m.engagementId),
+			);
 			return { status: 200, body: ok(toWire(updated)) };
 		},
 

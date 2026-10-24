@@ -633,6 +633,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 						number: 42,
 						url: "https://github.com/meridian-co/app/pull/42",
 						branch: prBranch({
+							id: pr.id,
 							missionId: m.missionId,
 							sprintN: pr.sprintN,
 							packageSha256: preview.package.sha256,
@@ -866,6 +867,179 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 
 				const zip = await refused(await refresh(s.previewOrZipId));
 				expect(reasonOf(zip)).toBe("export_not_pr_open");
+			},
+			{ roomSources: r.roomSources, repos: g.repos, repoWriter: writer },
+		);
+	});
+
+	it("recovers a delivering export whose PR was merged or closed meanwhile, through pr-open", async () => {
+		const r = repo();
+		const g = githubTree();
+		const writer = recordingWriter();
+		await withApi(
+			async (h) => {
+				const s = await githubReady(h, r);
+				const pr = await created(
+					await post(h, "/api/exports", {
+						missionId: s.missionId,
+						target: "github_pr",
+						gateRunId: s.runId,
+						connectionId: s.connectionId,
+					}),
+				);
+				const branch = pr.pullRequest?.branch as string;
+				// The server died after GitHub opened the PR and before pr-open.
+				const crash = () =>
+					h.tx
+						.update(exportTable)
+						.set({
+							status: "delivering",
+							statusChangedAt: sql`${exportTable.statusChangedAt} + interval '1 millisecond'`,
+							prNumber: null,
+							prUrl: null,
+							prHeadRef: null,
+							prCommitSha: null,
+							prStatus: null,
+						})
+						.where(eq(exportTable.id, pr.id));
+				const refresh = () =>
+					h.call(`/api/exports/${pr.id}/refresh`, { method: "POST" });
+				const found = (state: "merged" | "closed") => ({
+					number: 42,
+					url: "https://github.com/meridian-co/app/pull/42",
+					branch,
+					commitSha: "a".repeat(40),
+					state,
+				});
+
+				await crash();
+				writer.script.found = found("merged");
+				const done = await created(await refresh(), 200);
+				expect(done).toMatchObject({
+					status: "done",
+					pullRequest: { number: 42, state: "merged" },
+				});
+				const moves = (await h.logRows(pr.id))
+					.filter((l) => l.action === "export.status_changed")
+					.map((l) => (l.payload as { from: string; to: string }).to);
+				expect(moves.slice(-2)).toEqual(["pr-open", "done"]);
+			},
+			{ roomSources: r.roomSources, repos: g.repos, repoWriter: writer },
+		);
+	});
+
+	it("never overwrites a status another request recorded while GitHub was being written", async () => {
+		const r = repo();
+		const g = githubTree();
+		const writer = recordingWriter();
+		await withApi(
+			async (h) => {
+				const s = await githubReady(h, r);
+				// While the first request is still writing, a refresh finds the
+				// PR already merged and records done.
+				writer.script.during = async (req) => {
+					writer.script.during = undefined;
+					writer.script.found = {
+						number: 42,
+						url: "https://github.com/meridian-co/app/pull/42",
+						branch: req.head,
+						commitSha: "a".repeat(40),
+						state: "merged",
+					};
+					const [row] = await h.tx
+						.select({ id: exportTable.id })
+						.from(exportTable)
+						.where(eq(exportTable.status, "delivering"));
+					const res = await h.call(`/api/exports/${row?.id}/refresh`, {
+						method: "POST",
+					});
+					expect((await created(res, 200)).status).toBe("done");
+				};
+				const pr = await created(
+					await post(h, "/api/exports", {
+						missionId: s.missionId,
+						target: "github_pr",
+						gateRunId: s.runId,
+						connectionId: s.connectionId,
+					}),
+				);
+				expect(pr.status).toBe("done");
+				const moves = (await h.logRows(pr.id))
+					.filter((l) => l.action === "export.status_changed")
+					.map((l) => (l.payload as { to: string }).to);
+				expect(moves).toEqual(["pr-open", "done"]);
+			},
+			{ roomSources: r.roomSources, repos: g.repos, repoWriter: writer },
+		);
+	});
+
+	it("links the PR when GitHub stopped answering after opening it, and leaves the export delivering when it cannot tell", async () => {
+		const r = repo();
+		const g = githubTree();
+		const timeout = new ApiError(
+			"EXTERNAL_GITHUB",
+			"GitHub did not answer while opening the pull request on meridian-co/app",
+		);
+		const writer = recordingWriter();
+		await withApi(
+			async (h) => {
+				const s = await githubReady(h, r);
+				const body = {
+					missionId: s.missionId,
+					target: "github_pr",
+					gateRunId: s.runId,
+					connectionId: s.connectionId,
+				};
+				// GitHub opened it, then the answer was lost.
+				writer.script.during = async (req) => {
+					writer.script.found = {
+						number: 7,
+						url: "https://github.com/meridian-co/app/pull/7",
+						branch: req.head,
+						commitSha: "b".repeat(40),
+						state: "open",
+					};
+				};
+				writer.script.fail = timeout;
+				const linked = await created(await post(h, "/api/exports", body));
+				expect(linked).toMatchObject({
+					status: "pr-open",
+					failure: null,
+					pullRequest: { number: 7, commitSha: "b".repeat(40) },
+				});
+
+				// No answer from the lookup either: it stays delivering, for refresh.
+				writer.script.during = undefined;
+				writer.script.found = null;
+				writer.script.findFails = timeout;
+				const e = await refused(await post(h, "/api/exports", body), 502);
+				expect(e.code).toBe("EXTERNAL_GITHUB");
+				const id = (e.details as { exportId: string }).exportId;
+				const got = await created(await h.call(`/api/exports/${id}`), 200);
+				expect(got).toMatchObject({ status: "delivering", failure: null });
+			},
+			{ roomSources: r.roomSources, repos: g.repos, repoWriter: writer },
+		);
+	});
+
+	it("gives each export its own branch, so the same package can be delivered again", async () => {
+		const r = repo();
+		const g = githubTree();
+		const writer = recordingWriter();
+		await withApi(
+			async (h) => {
+				const s = await githubReady(h, r);
+				const body = {
+					missionId: s.missionId,
+					target: "github_pr",
+					gateRunId: s.runId,
+					connectionId: s.connectionId,
+				};
+				const first = await created(await post(h, "/api/exports", body));
+				const second = await created(await post(h, "/api/exports", body));
+				expect(first.package.sha256).toBe(second.package.sha256);
+				expect(first.pullRequest?.branch).not.toBe(second.pullRequest?.branch);
+				expect(second.status).toBe("pr-open");
 			},
 			{ roomSources: r.roomSources, repos: g.repos, repoWriter: writer },
 		);

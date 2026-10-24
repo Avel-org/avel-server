@@ -115,7 +115,14 @@ export function fixtureRepos(
  * with `found` when its branch is the one asked for, else null.
  */
 export function recordingWriter(
-	script: { fail?: ApiError; found?: FoundPullRequest | null } = {},
+	script: {
+		fail?: ApiError;
+		found?: FoundPullRequest | null;
+		/** Runs inside openPullRequest, before it answers: a slow GitHub. */
+		during?: (req: PullRequestRequest) => Promise<void>;
+		/** findPullRequest throws this, as GitHub not answering. */
+		findFails?: ApiError;
+	} = {},
 ): RepoWriter & {
 	opened: PullRequestRequest[];
 	finds: Array<{ owner: string; repo: string; head: string }>;
@@ -128,7 +135,16 @@ export function recordingWriter(
 		finds,
 		script,
 		async openPullRequest(req) {
+			// As createRef does: a branch that exists is never repointed.
+			const taken = opened.some((o) => o.head === req.head);
 			opened.push(req);
+			if (taken) {
+				throw new ApiError(
+					"GITHUB_REJECTED",
+					`GitHub refused creating the branch on ${req.owner}/${req.repo}: a branch of that name may already exist`,
+				);
+			}
+			await script.during?.(req);
 			if (script.fail) throw script.fail;
 			return {
 				number: 42,
@@ -139,6 +155,7 @@ export function recordingWriter(
 		},
 		async findPullRequest(req) {
 			finds.push({ owner: req.owner, repo: req.repo, head: req.head });
+			if (script.findFails) throw script.findFails;
 			// As GitHub does: a PR is found only by its own branch.
 			return script.found?.branch === req.head ? script.found : null;
 		},
