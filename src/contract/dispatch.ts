@@ -24,6 +24,7 @@ const c = initContract();
 const iso = z.string().datetime();
 const uuid = z.string().uuid();
 const sha256 = z.string().regex(/^[0-9a-f]{64}$/);
+const commitSha = z.string().regex(/^[0-9a-f]{40}$/);
 const tokens = z.number().int().nonnegative();
 /** US dollars. Spend accrues in fractions of a cent, so it is not rounded to cents. */
 const usd = z.number().nonnegative();
@@ -79,6 +80,18 @@ export const dispatch = z.object({
 	 * step 9. The brief's text is read from its own route.
 	 */
 	briefSha256: sha256.nullable(),
+	/**
+	 * The commit the dispatch's room opened on (decided 2026-10-22: rooms
+	 * start from finished work): the mission's base with every complete
+	 * dispatch closed before the start laid onto it, in close order. Null
+	 * while queued, and on a dispatch started before 2026-10-24.
+	 */
+	startCommitSha: commitSha.nullable(),
+	/**
+	 * The complete dispatches that start commit was built from, in close
+	 * order; empty when it is the base. Null exactly when startCommitSha is.
+	 */
+	startDispatchIds: z.array(uuid).nullable(),
 	model: z.string().nullable(),
 	/** The harness and its version that ran the dispatch, such as claude-agent-sdk@1.2.3; null while queued. */
 	harnessVersion: z.string().nullable(),

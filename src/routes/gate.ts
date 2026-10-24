@@ -45,10 +45,7 @@ import {
 	resultOf,
 } from "../lib/gate";
 import { GATE_CONFIG, type GateConfig } from "../lib/gate/config";
-import {
-	type IntegrationDispatch,
-	planIntegration,
-} from "../lib/gate/integration";
+import { planIntegration } from "../lib/gate/integration";
 import {
 	briefCheckFindings,
 	type DependencyManifest,
@@ -68,13 +65,13 @@ import type { FileChange } from "../rooms/checkpoint";
 import { type BlobRead, git, readBlobs } from "../rooms/git";
 import {
 	buildIntegrationCommit,
-	dispatchChanges,
 	IntegrationRefused,
 	readPackageJsonScripts,
 	readTree,
 } from "../rooms/snapshot";
 import type { RoomSourceResolver } from "../rooms/sources";
 import { missionRoomSource } from "../runner/room-source";
+import { integrationDispatches } from "../runner/start-commit";
 import { activityActor, actorColumns } from "./activity";
 import {
 	decodeCursor,
@@ -350,6 +347,8 @@ export function gateJudge(deps: {
 				createdAt: dispatch.createdAt,
 				reportStatus: completionReport.status,
 				resultCommitSha: completionReport.resultCommitSha,
+				startCommitSha: dispatch.startCommitSha,
+				startDispatchIds: dispatch.startDispatchIds,
 				roles: agentTemplate.roles,
 			})
 			.from(dispatch)
@@ -405,24 +404,14 @@ export function gateJudge(deps: {
 		const source = resolved.repoPath;
 		const baseSha = found.source.commit;
 
-		// Every closed dispatch with a result commit, and what it changed.
-		const changesOf = new Map<string, FileChange[]>();
-		for (const d of runs) {
-			if (d.resultCommitSha) {
-				changesOf.set(
-					d.id,
-					await dispatchChanges(source, baseSha, d.resultCommitSha),
-				);
-			}
-		}
-		const closed: IntegrationDispatch[] = runs
-			.filter((d) => d.reportStatus !== null && d.closedAt !== null)
-			.map((d) => ({
-				id: d.id,
-				status: d.reportStatus as IntegrationDispatch["status"],
-				closedAt: (d.closedAt as Date).toISOString(),
-				changes: changesOf.get(d.id) ?? [],
-			}));
+		// Every closed dispatch, and what it changed since the commit it
+		// started from (decided 2026-10-22: rooms start from finished work).
+		const closed = await integrationDispatches(source, baseSha, runs);
+		const changesOf = new Map<string, FileChange[]>(
+			closed
+				.filter((d) => runs.find((r) => r.id === d.id)?.resultCommitSha)
+				.map((d) => [d.id, [...d.changes]]),
+		);
 		const plan = planIntegration({ baseSha, dispatches: closed });
 		if (!plan.ok) {
 			throw refuse("Two dispatches changed the same paths", {

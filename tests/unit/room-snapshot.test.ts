@@ -260,7 +260,14 @@ describe("buildIntegrationCommit", () => {
 			await refused(
 				buildIntegrationCommit(dir, {
 					...plan,
-					steps: [{ dispatchId: ghost, closedAt: T1, ops: [] }],
+					steps: [
+						{
+							dispatchId: ghost,
+							closedAt: T1,
+							startSha: plan.baseSha,
+							ops: [],
+						},
+					],
 				}),
 			),
 		).toMatchObject({ reason: "dispatch_commit_missing", dispatchId: ghost });
@@ -271,6 +278,7 @@ describe("buildIntegrationCommit", () => {
 				{
 					dispatchId: a.dispatchId,
 					closedAt: T1,
+					startSha: plan.baseSha,
 					ops: [{ op: "write" as const, path: "src/never.ts" }],
 				},
 			],

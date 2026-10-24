@@ -339,6 +339,11 @@ export const dispatch = pgTable(
 		// Step 9: the rendered brief and its hash, frozen at start together.
 		briefMd: text("brief_md"),
 		briefSha256: text("brief_sha256"),
+		// Set at start (decided 2026-10-22: rooms start from finished work):
+		// the commit the room opened on, and the complete dispatches it was
+		// built from, in close order. Null on a dispatch started before.
+		startCommitSha: text("start_commit_sha"),
+		startDispatchIds: uuid("start_dispatch_ids").array(),
 		harnessVersion: text("harness_version"),
 		model: text("model"),
 		priceVersion: text("price_version"),
@@ -427,6 +432,18 @@ export const dispatch = pgTable(
 		check(
 			"dispatch_brief_md_iff_sha256",
 			sql`(${t.briefMd} is null) = (${t.briefSha256} is null)`,
+		),
+		check(
+			"dispatch_start_commit_sha_hex",
+			sql`${t.startCommitSha} is null or ${t.startCommitSha} ~ '^[0-9a-f]{40}$'`,
+		),
+		check(
+			"dispatch_start_commit_iff_dispatch_ids",
+			sql`(${t.startCommitSha} is null) = (${t.startDispatchIds} is null)`,
+		),
+		check(
+			"dispatch_start_commit_only_once_started",
+			sql`${t.startCommitSha} is null or ${t.status} <> 'queued'`,
 		),
 		check(
 			"dispatch_token_sha256_hex",

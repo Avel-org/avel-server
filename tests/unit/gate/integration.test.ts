@@ -38,6 +38,7 @@ describe("planIntegration", () => {
 				{
 					dispatchId: "d1",
 					closedAt: "2026-10-19T09:00:00.000Z",
+					startSha: BASE,
 					ops: [
 						{ op: "write", path: "src/a.ts" },
 						{ op: "delete", path: "src/x.ts" },
@@ -47,6 +48,7 @@ describe("planIntegration", () => {
 				{
 					dispatchId: "d2",
 					closedAt: "2026-10-19T10:00:00.000Z",
+					startSha: BASE,
 					ops: [
 						{ op: "write", path: "src/b.ts" },
 						{ op: "delete", path: "src/old.ts" },
@@ -114,6 +116,70 @@ describe("planIntegration", () => {
 		});
 	});
 
+	// Decided 2026-10-22: rooms start from finished work.
+	const START = "c".repeat(40);
+	const startedOn = (
+		d: IntegrationDispatch,
+		saw: string[],
+	): IntegrationDispatch => ({ ...d, startSha: START, saw });
+
+	it("lets a dispatch that started from another's work change its file, laid down after it", () => {
+		const plan = planIntegration({
+			baseSha: BASE,
+			dispatches: [
+				dispatch("d1", "09:00:00", [{ kind: "added", path: "src/a.ts" }]),
+				startedOn(
+					dispatch("d2", "10:00:00", [{ kind: "modified", path: "src/a.ts" }]),
+					["d1"],
+				),
+			],
+		});
+		expect(plan.ok).toBe(true);
+		expect(
+			plan.ok &&
+				plan.steps.map((s) => [s.dispatchId, s.startSha, s.ops[0]?.path]),
+		).toEqual([
+			["d1", BASE, "src/a.ts"],
+			["d2", START, "src/a.ts"],
+		]);
+	});
+
+	it("still conflicts where neither saw the other, naming only the pairs that did not", () => {
+		const plan = planIntegration({
+			baseSha: BASE,
+			dispatches: [
+				dispatch("d1", "09:00:00", [{ kind: "added", path: "a" }]),
+				// d2 and d3 both started from d1's work, but not from each other's.
+				startedOn(
+					dispatch("d2", "10:00:00", [{ kind: "modified", path: "a" }]),
+					["d1"],
+				),
+				startedOn(
+					dispatch("d3", "11:00:00", [{ kind: "modified", path: "a" }]),
+					["d1"],
+				),
+				// d4 saw everything before it.
+				startedOn(dispatch("d4", "12:00:00", [{ kind: "added", path: "b" }]), [
+					"d1",
+					"d2",
+					"d3",
+				]),
+			],
+		});
+		expect(plan.ok === false && plan.conflicts).toEqual([
+			{ path: "a", dispatchIds: ["d2", "d3"] },
+		]);
+	});
+
+	it("refuses a start that is not a full sha", () => {
+		expect(() =>
+			planIntegration({
+				baseSha: BASE,
+				dispatches: [{ ...dispatch("d1", "09:00:00", []), startSha: "abc" }],
+			}),
+		).toThrow(/start/);
+	});
+
 	it("sorts conflicts by path and ids by id, whatever the close order", () => {
 		const plan = planIntegration({
 			baseSha: BASE,
@@ -154,6 +220,7 @@ describe("planIntegration", () => {
 				{
 					dispatchId: "d1",
 					closedAt: "2026-10-19T09:00:00.000Z",
+					startSha: BASE,
 					ops: [{ op: "write", path: "a" }],
 				},
 			],

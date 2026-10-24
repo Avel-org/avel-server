@@ -135,9 +135,13 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						agentVersionSha256: m.agent.versionSha,
 						skillsSha256: skillsSha256([]),
 						briefSha256: d.briefSha256,
+						// The first dispatch starts from the base: nothing finished yet.
+						startCommitSha: d.startCommitSha,
+						startDispatchIds: [],
 						model: "fake-harness",
 						priceVersion: PRICE_VERSION,
 					});
+					expect(d.startCommitSha).toMatch(/^[0-9a-f]{40}$/);
 					expect(JSON.stringify(logs)).not.toContain((token ?? "").slice(8));
 
 					// The token the harness holds is the agent's.

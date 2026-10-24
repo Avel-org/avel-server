@@ -45,6 +45,7 @@ import {
 import type { Harness, HarnessSession, HarnessStep } from "./harness";
 import { missionRoomSource, missionSourceMd } from "./room-source";
 import { dispatchSkills, skillsSha256 } from "./skills";
+import { startCommit } from "./start-commit";
 
 /**
  * The runner core (module 6, step 6; SANDBOX.md, The runner enforces
@@ -271,7 +272,7 @@ export async function startDispatch(
 		});
 	}
 
-	const room = await openRoom(step, deps, m, d.id, {
+	const { room, startDispatchIds } = await openRoom(step, deps, m, d.id, {
 		writablePaths: entry.writablePaths,
 		templatePaths: entry.templatePaths,
 	});
@@ -297,6 +298,8 @@ export async function startDispatch(
 			skillsSha256: skills,
 			briefMd,
 			briefSha256: briefHash,
+			startCommitSha: room.commit,
+			startDispatchIds,
 			harnessVersion: deps.harness.version,
 			model,
 			priceVersion: deps.prices.current,
@@ -316,6 +319,8 @@ export async function startDispatch(
 			agentVersionSha256: version.sha256,
 			skillsSha256: skills,
 			briefSha256: briefHash,
+			startCommitSha: room.commit,
+			startDispatchIds,
 			model,
 			priceVersion: deps.prices.current,
 		},
@@ -394,7 +399,7 @@ async function openRoom(
 	m: LockedMission,
 	dispatchId: string,
 	paths: { writablePaths: string[] | null; templatePaths: string[] },
-): Promise<Room> {
+): Promise<{ room: Room; startDispatchIds: string[] }> {
 	const at = { dispatchId, missionId: m.id };
 	const found = await missionRoomSource(step.tx, m.id);
 	const resolved =
@@ -412,12 +417,31 @@ async function openRoom(
 			},
 		});
 	}
+	// The room opens on the work finished so far, not the bare base.
+	const start = await startCommit(
+		step.tx,
+		m.id,
+		resolved.repoPath,
+		resolved.commit,
+	);
+	if (!start.ok) {
+		throw refuse("Two finished dispatches changed the same paths", {
+			details: {
+				reason: "integration_conflict",
+				...at,
+				issues: start.conflicts.map((c) => ({
+					path: ["integration", c.path],
+					message: c.dispatchIds.join(", "),
+				})),
+			},
+		});
+	}
 	let room: Room;
 	try {
 		room = await deps.rooms.open({
 			dispatchId,
 			repoPath: resolved.repoPath,
-			commit: resolved.commit,
+			commit: start.sha,
 			writableGlobs: resolveWritablePaths(
 				{ writablePaths: paths.writablePaths },
 				{ writablePaths: paths.templatePaths },
@@ -430,7 +454,7 @@ async function openRoom(
 		});
 	}
 	step.onRollback.push(() => deps.rooms.release(dispatchId));
-	return room;
+	return { room, startDispatchIds: start.dispatchIds };
 }
 
 export type DispatchEnd =
