@@ -1,4 +1,6 @@
 import path from "node:path";
+import type { CheckRunner } from "../gateways/check-runner";
+import type { Clock } from "../lib/clock";
 import type { IdGenerator } from "../lib/ids";
 import type { Logger } from "../lib/logger";
 import { AgentSdkHarness, type QueryFn } from "./agent-sdk-harness";
@@ -31,6 +33,9 @@ export function harnessFromEnv(
 		stateDir: string;
 		ids: IdGenerator;
 		logger: Logger;
+		clock: Clock;
+		/** The gate's check runner: the agents' run_checks uses it too. */
+		checkRunner: CheckRunner | null;
 		/** The SDK's query; tests pass a scripted one. */
 		query?: QueryFn;
 	},
@@ -54,6 +59,8 @@ export function harnessFromEnv(
 		configDir: path.join(options.stateDir, "runner-config"),
 		ids: options.ids,
 		logger,
+		clock: options.clock,
+		checkRunner: options.checkRunner,
 		maxBudgetUsd: Number(env.AVEL_HARNESS_MAX_BUDGET_USD ?? 2),
 		maxTurns: Number(env.AVEL_HARNESS_MAX_TURNS ?? 60),
 		...(options.query ? { query: options.query } : {}),

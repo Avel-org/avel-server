@@ -161,6 +161,8 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 				configDir: path.join(base, "runner-config"),
 				ids: randomIds,
 				logger,
+				clock,
+				checkRunner: null,
 				maxBudgetUsd: 2,
 				maxTurns: 30,
 				hostEnv: process.env,

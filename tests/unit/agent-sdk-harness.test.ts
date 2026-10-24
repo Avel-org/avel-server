@@ -3,6 +3,8 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { afterAll, describe, expect, it } from "vitest";
+import type { CheckRunner } from "../../src/gateways/check-runner";
+import { fixedClock } from "../../src/lib/clock";
 import { sequentialIds } from "../../src/lib/ids";
 import {
 	AgentSdkHarness,
@@ -12,7 +14,11 @@ import {
 	type QueryFn,
 	sdkEnv,
 } from "../../src/runner/agent-sdk-harness";
-import { type AgentApi, agentTools } from "../../src/runner/agent-tools";
+import {
+	type AgentApi,
+	type AgentCheckContext,
+	agentTools,
+} from "../../src/runner/agent-tools";
 import type { HarnessSession } from "../../src/runner/harness";
 import { removeDir, tempDir, writeFiles } from "./git-fixtures";
 import { captureLogger } from "./support";
@@ -31,6 +37,17 @@ function room() {
 	});
 	return { root, writableGlobs: ["src/**"] };
 }
+
+/** run_checks with no runner and no checks: the file and report tools' tests do not run checks. */
+const noChecks = (): AgentCheckContext => ({
+	runner: null,
+	source: "",
+	commit: "",
+	checks: [],
+	clock: fixedClock("2026-10-23T09:00:00.000Z"),
+	acquire: () => () => {},
+	stopped: () => false,
+});
 
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 
@@ -67,6 +84,7 @@ function tools(over: Partial<Parameters<typeof agentTools>[0]> = {}) {
 			order.push(`reported:${s}`);
 			reported.push(s);
 		},
+		run: noChecks(),
 		...over,
 	});
 	return { t, calls, reported, order, root: r.root };
@@ -187,6 +205,9 @@ const session = (over: Partial<HarnessSession> = {}): HarnessSession => {
 		model: "claude-sonnet-5-5",
 		roomRoot: r.root,
 		writableGlobs: r.writableGlobs,
+		roomRepoPath: r.root,
+		roomCommit: "a".repeat(40),
+		checks: [],
 		identityMd: "# Kel\n\nYou are Kel.\n",
 		briefMd: "# M6: Accounts\n",
 		skills: [],
@@ -205,7 +226,10 @@ const HOST = {
 	USERPROFILE: "C:\\Users\\j",
 };
 
-function harness(query?: QueryFn) {
+function harness(
+	query?: QueryFn,
+	checks: { checkRunner?: CheckRunner; maxCheckRuns?: number } = {},
+) {
 	const { logger, lines } = captureLogger();
 	const h = new AgentSdkHarness({
 		model: "claude-sonnet-5-5",
@@ -213,6 +237,9 @@ function harness(query?: QueryFn) {
 		configDir: path.join(base, "config"),
 		ids: sequentialIds(),
 		logger,
+		clock: fixedClock("2026-10-23T09:00:00.000Z"),
+		checkRunner: checks.checkRunner ?? null,
+		...(checks.maxCheckRuns ? { maxCheckRuns: checks.maxCheckRuns } : {}),
 		maxBudgetUsd: 2,
 		maxTurns: 40,
 		hostEnv: HOST,
@@ -234,6 +261,7 @@ describe("AgentSdkHarness options", () => {
 			ids: sequentialIds(),
 			beforeReport: async () => {},
 			onReported: () => {},
+			run: noChecks(),
 		});
 		const o = h.sessionOptions(s, t, new AbortController());
 		expect(o).toMatchObject({
@@ -263,6 +291,7 @@ describe("AgentSdkHarness options", () => {
 			"mcp__avel__room_write",
 			"mcp__avel__room_edit",
 			"mcp__avel__skill_read",
+			"mcp__avel__run_checks",
 			"mcp__avel__report",
 			"mcp__avel__finding",
 		]);

@@ -72,7 +72,7 @@ Checked against code.claude.com/docs/en/agent-sdk on 2026-10-14.
 | `settingSources` | `[]` | `["project"]` would load CLAUDE.md from the room and every parent directory, and the room's `.claude/settings.json` with its hooks. A client repo's hooks would then run shell commands on the host, which breaks D2. Omitting the option now loads everything, including `~/.claude`. |
 | `strictMcpConfig` | `true` | No connectors except AVEL's |
 | `tools` | `[]` | Removes every built-in tool: Read, Write, Bash, Agent, Skill and the rest. The built-in Read could open any file on the host. |
-| `mcpServers` | `{ avel: createSdkMcpServer(...) }` | In-process tools: `room_read`, `room_write`, `room_edit` and `room_list` (src/rooms/tools.ts, with its path, symlink and `.git` refusals), plus `skill_read`, `report` and `finding` |
+| `mcpServers` | `{ avel: createSdkMcpServer(...) }` | In-process tools: `room_read`, `room_write`, `room_edit` and `room_list` (src/rooms/tools.ts, with its path, symlink and `.git` refusals), plus `skill_read`, `report` and `finding`. `run_checks` was added on 2026-10-23 |
 | `allowedTools` | the `mcp__avel__*` names | `allowedTools` only auto-approves; `tools` is what restricts |
 | `disallowedTools` | `["Agent", "Task"]` | The subagent tool is now `Agent`; `Task` is its alias. One dispatch is one agent. |
 | `permissionMode` | `"dontAsk"` | Set explicitly, because the default may now be `auto` |

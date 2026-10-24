@@ -1,4 +1,5 @@
 import type { RunStep } from "../contract";
+import type { RunnableCheck } from "../gateways/check-runner";
 import type { TokenSplit } from "../lib/prices";
 
 /**
@@ -44,6 +45,16 @@ export type HarnessSession = {
 	roomRoot: string;
 	/** The room's resolved writable globs: where write and edit may go. */
 	writableGlobs: readonly string[];
+	/** The room's source clone, where run_checks' commit is read from. */
+	roomRepoPath: string;
+	/** The room's pinned commit, which run_checks' commit is made on. */
+	roomCommit: string;
+	/**
+	 * The brief's checks for this dispatch's requirements that need a
+	 * runner, in plan order: what run_checks may run. Empty for a dispatch
+	 * with no brief.
+	 */
+	checks: readonly RunnableCheck[];
 	/** The agent's identity, from the version frozen at start. */
 	identityMd: string;
 	/** The brief frozen at start; null for a dispatch with no briefRef. */
