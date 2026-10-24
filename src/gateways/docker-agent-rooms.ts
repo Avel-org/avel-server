@@ -34,6 +34,9 @@ export type AgentRooms = {
 /** Every agent room's containers and network start with this; sweep removes them by it. */
 const PREFIX = "avel-agent-";
 
+/** The key proxies' way out, shared by every room; sweep removes it with the rest. */
+export const EGRESS_NETWORK = `${PREFIX}egress`;
+
 /** Where the Claude Code binary is mounted, read-only. */
 const BINARY = "/opt/avel/claude";
 const PROXY_PORT = 8080;
@@ -141,9 +144,10 @@ const passes = (name: string) =>
  * Agent rooms on local Docker. Each session gets:
  *
  * - its own `--internal` network: no route out and no outside DNS;
- * - a key proxy container (KEY_PROXY_SCRIPT) on that network and on an
- *   egress network of the room's own, the only way out, holding the API
- *   key; no other container shares a network with it;
+ * - a key proxy container (KEY_PROXY_SCRIPT) on that network and on
+ *   EGRESS_NETWORK, the only way out, holding the API key. Only AVEL's key
+ *   proxies are on EGRESS_NETWORK, each holding the same key, and no
+ *   agent is; one shared network keeps a room to one new subnet;
  * - the agent's container, from `docker run -i`, running the mounted
  *   Claude Code binary as `node`, with no capabilities, no new privileges,
  *   a read-only root, tmpfs for /tmp, its home and its working directory,
@@ -202,9 +206,6 @@ export function dockerAgentRooms(opts: DockerAgentRoomsOptions): AgentRooms {
 		async open(name, apiKey) {
 			const agent = `${PREFIX}${name}`;
 			const net = `${agent}-net`;
-			// The proxy's own way out: a network of this room's alone, so no
-			// other container can reach the proxy and spend the key.
-			const egress = `${agent}-egress`;
 			const proxy = `${agent}-proxy`;
 			let closed: Promise<void> | undefined;
 			let child: ChildProcess | undefined;
@@ -213,9 +214,19 @@ export function dockerAgentRooms(opts: DockerAgentRoomsOptions): AgentRooms {
 			const close = () => {
 				closed ??= (async () => {
 					const failures: string[] = [];
+					// Docker reports a failed removal by its exit code; one that
+					// was already gone is not a failure.
 					const run = async (args: readonly string[]) => {
 						try {
-							await step(args);
+							const r = await step(args);
+							if (
+								r.code !== 0 &&
+								!/no such (container|network)|not found/i.test(r.output)
+							) {
+								failures.push(
+									`docker ${args[0]} ${args[1] ?? ""}: ${r.output.trim()}`,
+								);
+							}
 						} catch (err) {
 							failures.push(err instanceof Error ? err.message : String(err));
 						}
@@ -224,17 +235,25 @@ export function dockerAgentRooms(opts: DockerAgentRoomsOptions): AgentRooms {
 					// docker run may still have been creating the agent: wait for
 					// the CLI to end, then remove whatever it made.
 					if (child && child.exitCode === null && child.signalCode === null) {
-						const ended = new Promise<void>((r) =>
-							child?.once("exit", () => r()),
-						);
-						child.kill("SIGKILL");
+						const running = child;
+						let timer: NodeJS.Timeout | undefined;
+						// exit, close or error: whichever the CLI gives.
+						const ended = new Promise<void>((r) => {
+							for (const e of ["exit", "close", "error"] as const) {
+								running.once(e, () => r());
+							}
+						});
+						running.kill("SIGKILL");
 						await Promise.race([
 							ended,
-							new Promise<void>((r) => setTimeout(r, stepMs)),
+							new Promise<void>((r) => {
+								timer = setTimeout(r, stepMs);
+							}),
 						]);
+						clearTimeout(timer);
 						await run(["rm", "--force", agent]);
 					}
-					await run(["network", "rm", net, egress]);
+					await run(["network", "rm", net]);
 					if (failures.length > 0) closeFailed(failures.join("; "));
 				})();
 				return closed;
@@ -244,10 +263,14 @@ export function dockerAgentRooms(opts: DockerAgentRoomsOptions): AgentRooms {
 					["network", "create", "--internal", net],
 					"creating the agent network",
 				);
-				await must(
-					["network", "create", egress],
-					"creating the key proxy's network",
-				);
+				// Made once and shared; another room making it at the same time
+				// is not a failure.
+				const made = await step(["network", "create", EGRESS_NETWORK]);
+				if (made.code !== 0 && !/already exists/i.test(made.output)) {
+					throw new Error(
+						`creating the key proxies' network failed: ${made.output.trim()}`,
+					);
+				}
 				// The key is named, not given: the docker CLI reads its value
 				// from its own environment, so it is in no command line.
 				await must(
@@ -256,7 +279,7 @@ export function dockerAgentRooms(opts: DockerAgentRoomsOptions): AgentRooms {
 						"--name",
 						proxy,
 						"--network",
-						egress,
+						EGRESS_NETWORK,
 						"--user",
 						"node",
 						"--cap-drop",

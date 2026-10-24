@@ -455,11 +455,10 @@ export class AgentSdkHarness implements Harness {
 			if (rooms) {
 				// A name of this session's own: a dispatch stopped and started
 				// again never meets its old room's teardown.
-				const opened = await rooms.open(
-					this.options.ids.next(),
-					this.options.apiKey,
-				);
+				const roomName = this.options.ids.next();
+				const opened = await rooms.open(roomName, this.options.apiKey);
 				room = opened;
+				log.info({ room: roomName }, "agent room opened");
 				// A stop removes the room at once: the SDK's own kill reaches
 				// only the docker CLI, which on Windows leaves the container.
 				r.abort.signal.addEventListener(

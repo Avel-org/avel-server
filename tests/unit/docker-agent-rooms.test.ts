@@ -80,13 +80,13 @@ async function echoUpstream() {
 }
 
 /** The echo upstream on this room's egress network, where only the proxy can reach it. */
-function joinEgress(roomName: string, echo: { name: string }) {
+function joinEgress(echo: { name: string }) {
 	docker(
 		"network",
 		"connect",
 		"--alias",
 		"upstream-echo",
-		`avel-agent-${roomName}-egress`,
+		"avel-agent-egress",
 		echo.name,
 	);
 }
@@ -224,7 +224,7 @@ describe.skipIf(!IMAGE)("dockerAgentRooms on Docker", () => {
 		const up = await echoUpstream();
 		await withRoom(
 			async (_room, name) => {
-				joinEgress(name, up);
+				joinEgress(up);
 				const net = `avel-agent-${name}-net`;
 				const sent = onRoomNet(
 					net,
@@ -275,7 +275,7 @@ describe.skipIf(!IMAGE)("dockerAgentRooms on Docker", () => {
 				expect(logs).toContain("refused GET /v1/models");
 				expect(logs).toContain("refused CONNECT example.com:443");
 				// Off the egress network before the room closes, which removes it.
-				docker("network", "disconnect", `avel-agent-${name}-egress`, up.name);
+				docker("network", "disconnect", "avel-agent-egress", up.name);
 			},
 			{ upstream: "http://upstream-echo:9000" },
 		);
@@ -372,11 +372,43 @@ describe.skipIf(!IMAGE)("dockerAgentRooms on Docker", () => {
 					),
 				) as Record<string, unknown>,
 			).sort();
-			expect(networks).toEqual([
-				`avel-agent-${name}-egress`,
-				`avel-agent-${name}-net`,
-			]);
+			// One egress network all of AVEL's key proxies share, which no
+			// agent and no other container is on: each proxy holds the same key.
+			expect(networks).toEqual(
+				["avel-agent-egress", `avel-agent-${name}-net`].sort(),
+			);
 		});
+	});
+
+	it("reports a teardown docker could not finish", async () => {
+		const name = randomUUID();
+		const failures: string[] = [];
+		const room = await dockerAgentRooms({
+			image: IMAGE as string,
+			onCloseFailed: (m) => failures.push(m),
+		}).open(name, SECRET);
+		// A container the room does not know holds its network, so docker
+		// refuses to remove it.
+		const squatter = `avel-test-squatter-${name.slice(0, 8)}`;
+		docker(
+			"run",
+			"-d",
+			"--name",
+			squatter,
+			"--network",
+			`avel-agent-${name}-net`,
+			IMAGE as string,
+			"sleep",
+			"60",
+		);
+		try {
+			await room.close();
+			expect(failures).toHaveLength(1);
+			expect(failures[0]).toMatch(/network/i);
+		} finally {
+			tryDocker("rm", "--force", squatter);
+			tryDocker("network", "rm", `avel-agent-${name}-net`);
+		}
 	});
 
 	it("leaves nothing when the room cannot open, and sweep removes a crashed server's rooms", async () => {

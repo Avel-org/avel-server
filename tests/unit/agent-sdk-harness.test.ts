@@ -691,7 +691,7 @@ describe("AgentSdkHarness agent rooms", () => {
 	it("runs the SDK's process through the session's room, opened with the key, and closes it when the session ends", async () => {
 		const r = recordingRooms();
 		let spawn: unknown;
-		const { h } = harness(
+		const { h, lines } = harness(
 			async function* (params) {
 				spawn = params.options?.spawnClaudeCodeProcess;
 				yield* message("m1", 1, 1);
@@ -707,6 +707,11 @@ describe("AgentSdkHarness agent rooms", () => {
 		expect(r.opened.map((o) => o.apiKey)).toEqual(["sk-test"]);
 		// The session's end closed its room.
 		expect(r.closes()).toBe(1);
+		// The room's name is logged with its dispatch, so a leftover can be traced.
+		expect(lines.find((l) => l.msg === "agent room opened")).toMatchObject({
+			dispatchId: s.dispatchId,
+			room: r.opened[0]?.name,
+		});
 		// Stopped and started again, as the runner would.
 		await h.stop(s.dispatchId);
 		await h.start(s);
