@@ -9,6 +9,7 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import type { CheckRunner } from "../gateways/check-runner";
+import type { AgentRoom, AgentRooms } from "../gateways/docker-agent-rooms";
 import type { Clock } from "../lib/clock";
 import type { IdGenerator } from "../lib/ids";
 import type { Logger } from "../lib/logger";
@@ -96,6 +97,11 @@ export type AgentSdkHarnessOptions = {
 	/** Backstop on the SDK's own cost estimate, per dispatch. */
 	maxBudgetUsd: number;
 	maxTurns: number;
+	/**
+	 * Where the agent's Claude Code process runs: in a container per session
+	 * (AVEL_AGENT_IMAGE), holding no key, or on the host when null or absent.
+	 */
+	agentRooms?: AgentRooms | null;
 	/** The SDK's query; tests pass a scripted one. */
 	query?: QueryFn;
 	/** The host environment the minimal one is picked from. */
@@ -423,14 +429,32 @@ export class AgentSdkHarness implements Harness {
 		const steps = (list: HarnessStep[]) => {
 			for (const step of list) r.events.push({ kind: "step", step });
 		};
+		let room: AgentRoom | undefined;
 		try {
 			// HOME and CLAUDE_CONFIG_DIR; nothing else creates it.
 			await mkdir(this.options.configDir, { recursive: true });
 			// A stop while the folder was made: never launch the SDK at all.
 			if (r.abort.signal.aborted) return;
+			const rooms = this.options.agentRooms;
+			if (rooms) {
+				const opened = await rooms.open(
+					session.dispatchId,
+					this.options.apiKey,
+				);
+				room = opened;
+				// A stop removes the room at once: the SDK's own kill reaches
+				// only the docker CLI, which on Windows leaves the container.
+				r.abort.signal.addEventListener("abort", () => void opened.close(), {
+					once: true,
+				});
+				if (r.abort.signal.aborted) return;
+			}
+			const options = this.sessionOptions(session, r.tools, r.abort);
 			const messages = this.query({
 				prompt: FIRST_MESSAGE,
-				options: this.sessionOptions(session, r.tools, r.abort),
+				options: room
+					? { ...options, spawnClaudeCodeProcess: room.spawn }
+					: options,
 			});
 			for await (const m of messages) {
 				if (r.abort.signal.aborted) return;
@@ -440,7 +464,12 @@ export class AgentSdkHarness implements Harness {
 					if (split) r.events.push({ kind: "usage", split });
 				} else if (m.type === "system" && m.subtype === "init") {
 					log.info(
-						{ model: m.model, apiKeySource: m.apiKeySource, tools: m.tools },
+						{
+							model: m.model,
+							apiKeySource: m.apiKeySource,
+							tools: m.tools,
+							process: room ? "container" : "host",
+						},
 						"agent session started",
 					);
 				} else if (m.type === "result") {
@@ -465,7 +494,10 @@ export class AgentSdkHarness implements Harness {
 		} catch (err) {
 			if (r.abort.signal.aborted) return;
 			log.error(
-				{ err: err instanceof Error ? err.message : String(err) },
+				{
+					err: err instanceof Error ? err.message : String(err),
+					...(room ? { roomStderr: room.stderr() } : {}),
+				},
 				"agent session failed",
 			);
 			steps([
@@ -473,6 +505,8 @@ export class AgentSdkHarness implements Harness {
 				trace.error(err instanceof Error ? err.message : String(err)),
 			]);
 			if (!r.reported) r.events.push({ kind: "fail" });
+		} finally {
+			await room?.close();
 		}
 	}
 

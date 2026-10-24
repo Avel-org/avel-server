@@ -24,6 +24,21 @@
 		"db:seed": "tsx src/db/seed/run.ts",
 		"dev:sources": "tsx src/db/seed/sources.ts"
 	},
+	"pnpm": {
+		"supportedArchitectures": {
+			"os": [
+				"current",
+				"linux"
+			],
+			"cpu": [
+				"current",
+				"x64"
+			],
+			"libc": [
+				"glibc"
+			]
+		}
+	},
 	"dependencies": {
 		"@anthropic-ai/claude-agent-sdk": "0.3.296",
 		"@hono/node-server": "^1.19.0",

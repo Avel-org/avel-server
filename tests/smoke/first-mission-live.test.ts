@@ -21,6 +21,7 @@ import { stamp } from "../../src/db/schema/columns";
 import { buildSeed, seedIds as seedRowIds } from "../../src/db/seed/data";
 import { buildDevTemplateBooking } from "../../src/db/seed/dev-template";
 import { memoryBlobs } from "../../src/gateways/blob";
+import { dockerAgentRooms } from "../../src/gateways/docker-agent-rooms";
 import { dockerCheckRunner } from "../../src/gateways/docker-check-runner";
 import { randomIds } from "../../src/lib/ids";
 import { DEV_BOOKING_SHA } from "../../src/lib/templates";
@@ -70,6 +71,8 @@ const REPO = "https://github.com/meridian-co/app";
 const SLOTS = "src/features/scheduling/slots.ts";
 const SLOTS_TEST = "tests/unit/slots.test.ts";
 const CHECK_IMAGE = process.env.AVEL_CHECK_IMAGE || undefined;
+// Set, the dispatch's agent runs in an agent room, as the server runs it.
+const AGENT_IMAGE = process.env.AVEL_AGENT_IMAGE || undefined;
 
 /** The client's own commit on the template: what makes CK2 runnable. */
 const CLIENT_FILES: Record<string, string> = {
@@ -259,6 +262,9 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 				logger,
 				clock,
 				checkRunner,
+				agentRooms: AGENT_IMAGE
+					? dockerAgentRooms({ image: AGENT_IMAGE })
+					: null,
 				maxBudgetUsd: 2,
 				maxTurns: 30,
 				hostEnv: process.env,
@@ -708,6 +714,11 @@ describe.skipIf(!live || !process.env.DATABASE_URL)(
 						),
 					);
 					expect(d.status).toBe("complete");
+					const where = lines
+						.filter((l) => l.msg === "agent session started")
+						.map((l) => (l as { process?: string }).process);
+					console.log("PROCESS", JSON.stringify(where));
+					expect(where).toEqual([AGENT_IMAGE ? "container" : "host"]);
 					// The server binds the step sink (src/runner/wiring.ts); an empty
 					// trace here means this test did not.
 					expect(steps.length, "no steps were written").toBeGreaterThan(0);

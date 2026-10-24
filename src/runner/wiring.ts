@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { CheckRunner } from "../gateways/check-runner";
+import type { AgentRooms } from "../gateways/docker-agent-rooms";
 import type { Clock } from "../lib/clock";
 import type { IdGenerator } from "../lib/ids";
 import type { Logger } from "../lib/logger";
@@ -51,6 +52,8 @@ export function harnessFromEnv(
 		clock: Clock;
 		/** The gate's check runner: the agents' run_checks uses it too. */
 		checkRunner: CheckRunner | null;
+		/** Where agents' processes run; null runs them on the host. */
+		agentRooms?: AgentRooms | null;
 		/** The SDK's query; tests pass a scripted one. */
 		query?: QueryFn;
 	},
@@ -76,6 +79,7 @@ export function harnessFromEnv(
 		logger,
 		clock: options.clock,
 		checkRunner: options.checkRunner,
+		agentRooms: options.agentRooms ?? null,
 		maxBudgetUsd: Number(env.AVEL_HARNESS_MAX_BUDGET_USD ?? 2),
 		maxTurns: Number(env.AVEL_HARNESS_MAX_TURNS ?? 60),
 		maxCheckRuns: checkRunsFromEnv(env.AVEL_MAX_CHECK_RUNS),
