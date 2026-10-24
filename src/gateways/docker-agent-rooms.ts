@@ -17,7 +17,7 @@ import { docker, PINNED_IMAGE, tailOf } from "./docker-check-runner";
 export type AgentRoom = {
 	/** The SDK's spawnClaudeCodeProcess, for this one session. */
 	spawn: (options: SpawnOptions) => SpawnedProcess;
-	/** Removes the agent's container, its proxy and its network. Idempotent. */
+	/** Removes the agent's container, its proxy and its networks. Idempotent, and never rejects. */
 	close: () => Promise<void>;
 	/** The end of the docker CLI's stderr, for a session that failed. */
 	stderr: () => string;
@@ -46,8 +46,8 @@ export const KEY_PROXY_PATHS: readonly string[] = [
 
 /**
  * The room's one way out, run by the image's own node. It is a reverse
- * proxy, so the caller cannot name a host: a POST to one of
- * KEY_PROXY_PATHS goes to AVEL_UPSTREAM (api.anthropic.com over TLS) with
+ * proxy, so the caller cannot name a host: a POST whose path is exactly
+ * one of KEY_PROXY_PATHS goes to AVEL_UPSTREAM (api.anthropic.com over TLS) with
  * the real key put in, and anything else, CONNECT included, is refused
  * with 403 and logged as `refused <what>`. The key is read from the
  * proxy's environment; the agent's container only ever holds a placeholder.
@@ -60,7 +60,11 @@ const client = up.protocol === "https:" ? https : http;
 const key = process.env.ANTHROPIC_API_KEY;
 const refuse = (what) => console.log("refused " + String(what).slice(0, 200));
 const server = http.createServer((req, res) => {
-	const p = new URL(req.url || "/", "http://x").pathname;
+	const raw = req.url || "";
+	const q = raw.indexOf("?");
+	const p = q < 0 ? raw : raw.slice(0, q);
+	// The path exactly as sent: "//host/v1/messages" or "/v1/./messages" is
+	// refused, never normalized into an allowed one.
 	if (req.method !== "POST" || !allow.has(p)) {
 		refuse(req.method + " " + p);
 		res.writeHead(403);
@@ -125,6 +129,8 @@ export type DockerAgentRoomsOptions = {
 	memory?: string;
 	cpus?: string;
 	pids?: number;
+	/** Told when a room's teardown fails; the next sweep removes what is left. */
+	onCloseFailed?: (message: string) => void;
 };
 
 /** The SDK's variables the process reads at start; nothing else from the host goes in. */
@@ -135,8 +141,9 @@ const passes = (name: string) =>
  * Agent rooms on local Docker. Each session gets:
  *
  * - its own `--internal` network: no route out and no outside DNS;
- * - a key proxy container (KEY_PROXY_SCRIPT) on that network and the
- *   bridge, the only way out, holding the API key;
+ * - a key proxy container (KEY_PROXY_SCRIPT) on that network and on an
+ *   egress network of the room's own, the only way out, holding the API
+ *   key; no other container shares a network with it;
  * - the agent's container, from `docker run -i`, running the mounted
  *   Claude Code binary as `node`, with no capabilities, no new privileges,
  *   a read-only root, tmpfs for /tmp, its home and its working directory,
@@ -144,7 +151,8 @@ const passes = (name: string) =>
  *   mounted. Its environment is the SDK's own variables plus a placeholder
  *   key and the proxy as its API address.
  *
- * Closing removes all three. Containers and network are named
+ * Closing removes all of it, waiting for a `docker run` still creating the
+ * agent, and never rejects. Containers and networks are named
  * `avel-agent-<name>`, so sweep finds a crashed server's leftovers.
  */
 export function dockerAgentRooms(opts: DockerAgentRoomsOptions): AgentRooms {
@@ -154,6 +162,7 @@ export function dockerAgentRooms(opts: DockerAgentRoomsOptions): AgentRooms {
 		);
 	}
 	const binary = opts.binary ?? linuxClaudeBinary();
+	const closeFailed = opts.onCloseFailed ?? (() => {});
 	const upstream = opts.upstream ?? "https://api.anthropic.com";
 	const stepMs = opts.stepTimeoutMs ?? 2 * 60_000;
 	const step = (args: readonly string[], env?: NodeJS.ProcessEnv) =>
@@ -193,12 +202,40 @@ export function dockerAgentRooms(opts: DockerAgentRoomsOptions): AgentRooms {
 		async open(name, apiKey) {
 			const agent = `${PREFIX}${name}`;
 			const net = `${agent}-net`;
+			// The proxy's own way out: a network of this room's alone, so no
+			// other container can reach the proxy and spend the key.
+			const egress = `${agent}-egress`;
 			const proxy = `${agent}-proxy`;
 			let closed: Promise<void> | undefined;
+			let child: ChildProcess | undefined;
+			// Never rejects: a failed teardown is reported, and a server
+			// restart's sweep removes what is left.
 			const close = () => {
 				closed ??= (async () => {
-					await step(["rm", "--force", agent, proxy]);
-					await step(["network", "rm", net]);
+					const failures: string[] = [];
+					const run = async (args: readonly string[]) => {
+						try {
+							await step(args);
+						} catch (err) {
+							failures.push(err instanceof Error ? err.message : String(err));
+						}
+					};
+					await run(["rm", "--force", agent, proxy]);
+					// docker run may still have been creating the agent: wait for
+					// the CLI to end, then remove whatever it made.
+					if (child && child.exitCode === null && child.signalCode === null) {
+						const ended = new Promise<void>((r) =>
+							child?.once("exit", () => r()),
+						);
+						child.kill("SIGKILL");
+						await Promise.race([
+							ended,
+							new Promise<void>((r) => setTimeout(r, stepMs)),
+						]);
+						await run(["rm", "--force", agent]);
+					}
+					await run(["network", "rm", net, egress]);
+					if (failures.length > 0) closeFailed(failures.join("; "));
 				})();
 				return closed;
 			};
@@ -206,6 +243,10 @@ export function dockerAgentRooms(opts: DockerAgentRoomsOptions): AgentRooms {
 				await must(
 					["network", "create", "--internal", net],
 					"creating the agent network",
+				);
+				await must(
+					["network", "create", egress],
+					"creating the key proxy's network",
 				);
 				// The key is named, not given: the docker CLI reads its value
 				// from its own environment, so it is in no command line.
@@ -215,7 +256,7 @@ export function dockerAgentRooms(opts: DockerAgentRoomsOptions): AgentRooms {
 						"--name",
 						proxy,
 						"--network",
-						"bridge",
+						egress,
 						"--user",
 						"node",
 						"--cap-drop",
@@ -264,6 +305,7 @@ export function dockerAgentRooms(opts: DockerAgentRoomsOptions): AgentRooms {
 				close,
 				stderr: errors.text,
 				spawn(o) {
+					if (closed) throw new Error(`The agent room ${agent} is closed`);
 					const env = [
 						...Object.entries(o.env)
 							.filter(([k, v]) => v !== undefined && passes(k))
@@ -276,7 +318,7 @@ export function dockerAgentRooms(opts: DockerAgentRoomsOptions): AgentRooms {
 						"DISABLE_TELEMETRY=1",
 						"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
 					];
-					const child = spawn(
+					child = spawn(
 						"docker",
 						[
 							"run",

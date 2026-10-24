@@ -662,7 +662,7 @@ describe("AgentSdkHarness sessions", () => {
 });
 
 /** Agent rooms that record what the harness does with them. */
-function recordingRooms(fail?: Error) {
+function recordingRooms(fail?: Error, closeFails?: Error) {
 	const opened: Array<{ name: string; apiKey: string }> = [];
 	let closes = 0;
 	const room: AgentRoom = {
@@ -671,6 +671,7 @@ function recordingRooms(fail?: Error) {
 		},
 		close: async () => {
 			closes += 1;
+			if (closeFails) throw closeFails;
 		},
 		stderr: () => "docker: no such image",
 	};
@@ -701,9 +702,55 @@ describe("AgentSdkHarness agent rooms", () => {
 		const s = session();
 		await h.start(s);
 		await h.settled(s.dispatchId);
-		expect(r.opened).toEqual([{ name: s.dispatchId, apiKey: "sk-test" }]);
-		expect(spawn).toBe(r.room.spawn);
+		// A fresh name per session, so a restarted dispatch never meets the
+		// old room's teardown.
+		expect(r.opened.map((o) => o.apiKey)).toEqual(["sk-test"]);
+		// The session's end closed its room.
 		expect(r.closes()).toBe(1);
+		// Stopped and started again, as the runner would.
+		await h.stop(s.dispatchId);
+		await h.start(s);
+		await h.settled(s.dispatchId);
+		expect(r.opened).toHaveLength(2);
+		expect(r.opened[1]?.name).not.toBe(r.opened[0]?.name);
+		expect(spawn).toBe(r.room.spawn);
+	});
+
+	it("survives a room whose close fails, on a stop and at the end, and logs it", async () => {
+		const r = recordingRooms(undefined, new Error("spawn docker ENOENT"));
+		const unhandled: unknown[] = [];
+		const onUnhandled = (e: unknown) => unhandled.push(e);
+		process.on("unhandledRejection", onUnhandled);
+		try {
+			let started: () => void = () => {};
+			const running = new Promise<void>((res) => {
+				started = res;
+			});
+			const { h, lines } = harness(
+				async function* (params) {
+					const signal = params.options?.abortController?.signal;
+					yield* message("m1", 1, 1);
+					await new Promise<void>((resolve) => {
+						signal?.addEventListener("abort", () => resolve());
+						started();
+					});
+				},
+				{ agentRooms: r.rooms },
+			);
+			h.bindAgentApi(recordingApi().api);
+			const s = session();
+			await h.start(s);
+			const done = h.settled(s.dispatchId);
+			await running;
+			await h.stop(s.dispatchId);
+			await expect(done).resolves.toBeUndefined();
+			await new Promise((res) => setTimeout(res, 20));
+			expect(unhandled).toEqual([]);
+			expect(r.closes()).toBe(2);
+			expect(lines.some((l) => l.msg === "agent room close failed")).toBe(true);
+		} finally {
+			process.off("unhandledRejection", onUnhandled);
+		}
 	});
 
 	it("closes the room as soon as the session is stopped, before the SDK lets go", async () => {

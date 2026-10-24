@@ -79,6 +79,18 @@ async function echoUpstream() {
 	return upstream;
 }
 
+/** The echo upstream on this room's egress network, where only the proxy can reach it. */
+function joinEgress(roomName: string, echo: { name: string }) {
+	docker(
+		"network",
+		"connect",
+		"--alias",
+		"upstream-echo",
+		`avel-agent-${roomName}-egress`,
+		echo.name,
+	);
+}
+
 afterAll(() => {
 	if (upstream) tryDocker("rm", "--force", upstream.name);
 });
@@ -212,6 +224,7 @@ describe.skipIf(!IMAGE)("dockerAgentRooms on Docker", () => {
 		const up = await echoUpstream();
 		await withRoom(
 			async (_room, name) => {
+				joinEgress(name, up);
 				const net = `avel-agent-${name}-net`;
 				const sent = onRoomNet(
 					net,
@@ -247,6 +260,12 @@ describe.skipIf(!IMAGE)("dockerAgentRooms on Docker", () => {
 						`${method} ${path}`,
 					).toMatch(/^status 403/);
 				}
+				// The same path written another way is refused, not forwarded.
+				const doubled = onRoomNet(
+					net,
+					`require("http").request({host:"keyproxy",port:8080,method:"POST",path:"//example.com/v1/messages"},(r)=>{console.log("status",r.statusCode);process.exit(0)}).on("error",e=>console.log("failed",e.code)).end("{}")`,
+				);
+				expect(doubled).toMatch(/^status 403/);
 				const tunnel = onRoomNet(
 					net,
 					`require("http").request({host:"keyproxy",port:8080,method:"CONNECT",path:"example.com:443"}).on("connect",(r)=>{console.log("status",r.statusCode);process.exit(0)}).on("error",e=>console.log("failed",e.code)).end()`,
@@ -255,8 +274,10 @@ describe.skipIf(!IMAGE)("dockerAgentRooms on Docker", () => {
 				const logs = docker("logs", `avel-agent-${name}-proxy`);
 				expect(logs).toContain("refused GET /v1/models");
 				expect(logs).toContain("refused CONNECT example.com:443");
+				// Off the egress network before the room closes, which removes it.
+				docker("network", "disconnect", `avel-agent-${name}-egress`, up.name);
 			},
-			{ upstream: up.url },
+			{ upstream: "http://upstream-echo:9000" },
 		);
 		expect(KEY_PROXY_PATHS).toEqual([
 			"/v1/messages",
@@ -309,6 +330,53 @@ describe.skipIf(!IMAGE)("dockerAgentRooms on Docker", () => {
 		await exited;
 		expect(named(prefix)).toBe("");
 		expect(nets(prefix)).toBe("");
+	});
+
+	it("leaves nothing when closed while docker run is still creating the agent", async () => {
+		const name = randomUUID();
+		const prefix = `avel-agent-${name}`;
+		const room = await dockerAgentRooms({ image: IMAGE as string }).open(
+			name,
+			SECRET,
+		);
+		room.spawn({
+			signal: new AbortController().signal,
+			command: "claude",
+			args: WAITING_ARGS,
+			env: {},
+		});
+		// No wait: the container may not exist yet.
+		await room.close();
+		expect(named(prefix)).toBe("");
+		expect(nets(prefix)).toBe("");
+		expect(() =>
+			room.spawn({
+				signal: new AbortController().signal,
+				command: "claude",
+				args: WAITING_ARGS,
+				env: {},
+			}),
+		).toThrow(/closed/);
+	});
+
+	it("puts the key proxy on the room's own networks only, never Docker's shared bridge", async () => {
+		await withRoom(async (_room, name) => {
+			const proxy = `avel-agent-${name}-proxy`;
+			const networks = Object.keys(
+				JSON.parse(
+					docker(
+						"inspect",
+						"--format",
+						"{{json .NetworkSettings.Networks}}",
+						proxy,
+					),
+				) as Record<string, unknown>,
+			).sort();
+			expect(networks).toEqual([
+				`avel-agent-${name}-egress`,
+				`avel-agent-${name}-net`,
+			]);
+		});
 	});
 
 	it("leaves nothing when the room cannot open, and sweep removes a crashed server's rooms", async () => {

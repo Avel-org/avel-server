@@ -118,7 +118,16 @@ if (!checkRunner) {
 // Claude Code binary is not installed. A restart removes what a crashed
 // server left; this assumes one server process, as gate jobs do.
 const agentImage = process.env.AVEL_AGENT_IMAGE || undefined;
-const agentRooms = agentImage ? dockerAgentRooms({ image: agentImage }) : null;
+const agentRooms = agentImage
+	? dockerAgentRooms({
+			image: agentImage,
+			onCloseFailed: (message) =>
+				logger.warn(
+					{ message },
+					"An agent room was not fully removed; the next start sweeps it",
+				),
+		})
+	: null;
 await agentRooms?.sweep();
 
 // The harness and Canon's model (src/runner/wiring.ts): the FakeHarness and
