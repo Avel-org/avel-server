@@ -27,6 +27,12 @@ date · mission · slice · agent · model · in_tokens · out_tokens · usd · 
 2026-10-21 · citation-probes · canon · probe · claude-sonnet-5-5 · ? · ? · 0.02 · 4 probes: API direct, SDK x2, SDK with a tool; the SDK carries citations both ways
 2026-10-21 · first-mission-live · item-6 · canon · claude-sonnet-5-5 · 1234 · 3205 · 0.069867 · replied; instructions v3; 3/3 citations resolve to the notes; 6/6 brief items sourced inside the notes
 2026-10-21 · first-mission-live · item-6 · atlas · claude-sonnet-5-5 · 6 · 283 · 0.023667 · complete in 8 s; agent report, 1 file written; gate pass
+2026-10-23 · first-mission-live · item-6 · canon · claude-sonnet-5-5 · 1234 · 3317 · 0.071452 · replied; 3/3 citations resolve to the notes; Docker check runner on
+2026-10-23 · first-mission-live · item-6 · atlas · claude-sonnet-5-5 · 6 · 316 · 0.026705 · complete in 11 s; agent report, 1 file written; gate verified, CK2 passed on Docker; no trace steps written (the test bound no step sink)
+2026-10-23 · first-mission-live · item-6 · canon · claude-sonnet-5-5 · 1234 · 3119 · 0.055575 · replied; 3/3 citations resolve to the notes
+2026-10-23 · first-mission-live · item-6 · atlas · claude-sonnet-5-5 · 6 · 314 · 0.018200 · complete; gate verified; trace still empty, confirmed as the test's missing step sink
+2026-10-23 · first-mission-live · item-6 · canon · claude-sonnet-5-5 · 1234 · 3232 · 0.057169 · replied; 3/3 citations resolve to the notes
+2026-10-23 · first-mission-live · item-6 · atlas · claude-sonnet-5-5 · 6 · 316 · 0.018179 · complete in 9 s; tools room_read, room_write, run_checks, report; run_checks 1 of 1 pass; gate verified, CK2 passed on Docker
 
 ---
 
