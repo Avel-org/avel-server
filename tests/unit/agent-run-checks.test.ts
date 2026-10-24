@@ -352,6 +352,7 @@ describe("AgentSdkHarness run_checks", () => {
 				roomCommit: r.pinned,
 				checks: [CHECKS[0] as RunnableCheck],
 				identityMd: "# Kel\n",
+				depthMd: "",
 				briefMd: "# M6\n",
 				skills: [],
 			};
@@ -406,6 +407,7 @@ describe("AgentSdkHarness run_checks", () => {
 			roomCommit: r.pinned,
 			checks: CHECKS,
 			identityMd: "# Kel\n",
+			depthMd: "",
 			briefMd: "# M6\n",
 			skills: [],
 		});

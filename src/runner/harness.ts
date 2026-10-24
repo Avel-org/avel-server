@@ -57,6 +57,12 @@ export type HarnessSession = {
 	checks: readonly RunnableCheck[];
 	/** The agent's identity, from the version frozen at start. */
 	identityMd: string;
+	/**
+	 * The same version's depth file: each approved role skill in full. The
+	 * identity names the skills and says this file holds them, so the agent
+	 * gets both. Empty when the agent has no role skills.
+	 */
+	depthMd: string;
 	/** The brief frozen at start; null for a dispatch with no briefRef. */
 	briefMd: string | null;
 	/** The dispatch's stack and domain skills, the brief's Method. */

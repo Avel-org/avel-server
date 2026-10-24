@@ -13,6 +13,7 @@ import {
 	FIRST_MESSAGE,
 	type QueryFn,
 	sdkEnv,
+	systemAppend,
 } from "../../src/runner/agent-sdk-harness";
 import {
 	type AgentApi,
@@ -209,6 +210,7 @@ const session = (over: Partial<HarnessSession> = {}): HarnessSession => {
 		roomCommit: "a".repeat(40),
 		checks: [],
 		identityMd: "# Kel\n\nYou are Kel.\n",
+		depthMd: "",
 		briefMd: "# M6: Accounts\n",
 		skills: [],
 		...over,
@@ -384,6 +386,26 @@ async function drain(h: AgentSdkHarness, id: string) {
 		events.push(e);
 	}
 }
+
+describe("systemAppend", () => {
+	it("gives the agent its identity, then its depth file with each role skill in full, then the brief", () => {
+		expect(
+			systemAppend({
+				identityMd: "# Kel\n\nYour depth file holds each skill in full.\n",
+				depthMd: "# Kel: depth\n\n## Property tests\n\nFull text.\n",
+				briefMd: "# M6: Accounts\n",
+			}),
+		).toBe(
+			"# Kel\n\nYour depth file holds each skill in full.\n\n# Kel: depth\n\n## Property tests\n\nFull text.\n\n# M6: Accounts\n",
+		);
+	});
+
+	it("leaves out an empty depth file and a missing brief", () => {
+		expect(
+			systemAppend({ identityMd: "# Kel\n", depthMd: "", briefMd: null }),
+		).toBe("# Kel");
+	});
+});
 
 describe("AgentSdkHarness sessions", () => {
 	it("creates its config folder before the SDK starts", async () => {

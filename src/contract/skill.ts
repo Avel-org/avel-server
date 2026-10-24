@@ -86,10 +86,17 @@ export const skillListItem = z.discriminatedUnion("type", [
 
 export type SkillListItem = z.infer<typeof skillListItem>;
 
-/** One skill, with its text. */
+/**
+ * The roles a role-layer skill is attached to (role_skills), in ROLES
+ * order. Identities are built from these, approved skills only. Empty
+ * for a stack or domain skill, which goes on missions instead.
+ */
+const attached = { attachedRoles: z.array(role) };
+
+/** One skill, with its text and the roles it is attached to. */
 export const skillSchema = z.discriminatedUnion("type", [
-	z.object({ ...skillCommon, ...skillContent, ...knowledge }),
-	z.object({ ...skillCommon, ...skillContent, ...capability }),
+	z.object({ ...skillCommon, ...skillContent, ...attached, ...knowledge }),
+	z.object({ ...skillCommon, ...skillContent, ...attached, ...capability }),
 ]);
 
 export type Skill = z.infer<typeof skillSchema>;
@@ -201,6 +208,9 @@ export const approveSkillBody = z
 	.object({ contentSha256: z.string().regex(/^[0-9a-f]{64}$/) })
 	.strict();
 
+/** The whole set of roles a role-layer skill attaches to; [] detaches it from all. */
+export const setSkillRolesBody = z.object({ roles: z.array(role) }).strict();
+
 const byId = z.object({ id: z.string().uuid() });
 const bySlug = z.object({ slug: z.string().min(1).max(200) });
 
@@ -258,5 +268,14 @@ export const skillContract = c.router({
 		body: c.noBody(),
 		responses: { 200: successEnvelope(skillSchema) },
 		summary: "draft or approved to retired. Retiring twice is 409 CONFLICT.",
+	},
+	setRoles: {
+		method: "PUT",
+		path: "/api/skills/:id/roles",
+		pathParams: byId,
+		body: setSkillRolesBody,
+		responses: { 200: successEnvelope(skillSchema) },
+		summary:
+			"Sets the roles a role-layer skill is attached to. Another layer is 422 skill_not_role_layer; a retired skill is 409 CONFLICT. A draft may be attached; identities use approved skills only.",
 	},
 });
