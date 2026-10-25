@@ -1,10 +1,12 @@
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
+import { exportSchema } from "../../src/contract/export";
 import { closeDb } from "../../src/db/client";
 import { exportTable, user } from "../../src/db/schema";
 import { stamp } from "../../src/db/schema/columns";
 import type { Tx } from "../../src/db/tx";
 import type { IdGenerator } from "../../src/lib/ids";
+import { toWire } from "../../src/routes/exports";
 import { clock, inRollback, refusal, seedMission } from "./fixtures";
 
 async function seedOperator(tx: Tx, ids: IdGenerator) {
@@ -155,6 +157,31 @@ describe.skipIf(!process.env.DATABASE_URL)("export", () => {
 					.insert(exportTable)
 					.values({ ...exportRow(ids, missionId), status });
 			}
+		});
+	});
+
+	it("answers an export that failed before it rendered, with no gate run or package", async () => {
+		await inRollback(async (tx, ids) => {
+			const { missionId } = await seedMission(tx, ids);
+			const [row] = await tx
+				.insert(exportTable)
+				.values({
+					...exportRow(ids, missionId),
+					status: "failed",
+					failureCode: "render_failed",
+					failureMessage: "The source clone was gone.",
+				})
+				.returning();
+			if (!row) throw new Error("no row");
+			const wire = toWire(row);
+			expect(exportSchema.strict().parse(wire)).toEqual(wire);
+			expect(wire).toMatchObject({
+				gateRun: null,
+				package: null,
+				violations: [],
+				blocked: null,
+				failure: { code: "render_failed" },
+			});
 		});
 	});
 

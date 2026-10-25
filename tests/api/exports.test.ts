@@ -219,16 +219,16 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 					baseSha: r.pinned,
 					receiptSha256: run.receiptSha256,
 				});
-				expect(preview.package.files.map((f) => [f.path, f.change])).toEqual([
+				expect(preview.package?.files.map((f) => [f.path, f.change])).toEqual([
 					[".avel/receipt.json", "create"],
 					["src/a.ts", "overwrite"],
 					["src/b.ts", "create"],
 				]);
-				const b = preview.package.files.find((f) => f.path === "src/b.ts");
+				const b = preview.package?.files.find((f) => f.path === "src/b.ts");
 				expect(b?.blobSha).toBe(
 					gitBlobSha(new TextEncoder().encode("export const b = 2;\n")),
 				);
-				expect(preview.package.deletes).toEqual([]);
+				expect(preview.package?.deletes).toEqual([]);
 				expect(preview.violations).toEqual([]);
 				expect(preview.blocked).toBeNull();
 				expect(preview.blastRadius).toBeNull();
@@ -255,7 +255,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 				expect(done.dryRun).toBe(false);
 				expect(done.previewExportId).toBe(preview.id);
 				// Rendered again, it hashes the same as its preview.
-				expect(done.package.sha256).toBe(preview.package.sha256);
+				expect(done.package?.sha256).toBe(preview.package?.sha256);
 				expect(done.blocked).toBeNull();
 				expect(done.zip?.bytes).toBeGreaterThan(0);
 
@@ -337,13 +337,13 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 				const preview = await created(
 					await post(h, "/api/exports/preview", body),
 				);
-				expect(preview.package.files.map((f) => [f.path, f.change])).toEqual([
+				expect(preview.package?.files.map((f) => [f.path, f.change])).toEqual([
 					[path, "create"],
 					[".avel/receipt.json", "create"],
 					["src/b.ts", "create"],
 				]);
 				expect(
-					preview.package.files.find((f) => f.path === path)?.blobSha,
+					preview.package?.files.find((f) => f.path === path)?.blobSha,
 				).toBe(gitBlobSha(new TextEncoder().encode(briefMd)));
 				const done = await created(
 					await post(h, "/api/exports", {
@@ -352,7 +352,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 						previewExportId: preview.id,
 					}),
 				);
-				expect(done.package.sha256).toBe(preview.package.sha256);
+				expect(done.package?.sha256).toBe(preview.package?.sha256);
 
 				// The text moves while its frozen hash stays: the package would
 				// not carry what the agent was told.
@@ -596,7 +596,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 				expect(preview.connectionId).toBe(connectionId);
 				expect(preview.baseRef).toBe("main");
 				expect(preview.baseCommitSha).toBe("d".repeat(40));
-				expect(preview.gateRun.id).toBe(run.id);
+				expect(preview.gateRun?.id).toBe(run.id);
 				const radius = preview.blastRadius;
 				expect(radius?.target).toEqual({
 					owner: "meridian-co",
@@ -636,13 +636,13 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 							id: pr.id,
 							missionId: m.missionId,
 							sprintN: pr.sprintN,
-							packageSha256: preview.package.sha256,
+							packageSha256: preview.package?.sha256 ?? null,
 						}),
 						commitSha: "9".repeat(40),
 						state: "open",
 					},
 				});
-				expect(pr.package.sha256).toBe(preview.package.sha256);
+				expect(pr.package?.sha256).toBe(preview.package?.sha256);
 				expect(writer.opened).toHaveLength(1);
 				const sent = writer.opened[0];
 				expect(sent).toMatchObject({
@@ -654,13 +654,13 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 					deletes: [],
 				});
 				expect(sent?.files.map((f) => f.path)).toEqual(
-					pr.package.files.map((f) => f.path),
+					pr.package?.files.map((f) => f.path),
 				);
 				for (const f of sent?.files ?? []) {
 					expect(gitBlobSha(f.bytes), f.path).toBe(f.blobSha);
 				}
 				expect(sent?.body).toContain(run.id);
-				expect(sent?.body).toContain(preview.package.sha256);
+				expect(sent?.body).toContain(preview.package?.sha256);
 				const log = await h.logRows(pr.id);
 				expect(
 					log.map((l) => [
@@ -1082,7 +1082,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 				};
 				const first = await created(await post(h, "/api/exports", body));
 				const second = await created(await post(h, "/api/exports", body));
-				expect(first.package.sha256).toBe(second.package.sha256);
+				expect(first.package?.sha256).toBe(second.package?.sha256);
 				expect(first.pullRequest?.branch).not.toBe(second.pullRequest?.branch);
 				expect(second.status).toBe("pr-open");
 			},

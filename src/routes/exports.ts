@@ -105,10 +105,13 @@ export function prBranch(row: {
 	return `avel/${row.missionId.slice(0, 8)}-s${row.sprintN}-${(row.packageSha256 ?? "").slice(0, 12)}-${row.id.slice(-12)}`;
 }
 
+/** The gate run an export ships. A manifest always names one. */
+type ShippedGateRun = NonNullable<ExportWire["gateRun"]>;
+
 /** The PR's description: what shipped and the evidence behind it. */
 function prBody(
 	m: { id: string; type: string; sprintN: number },
-	gateRun: ExportWire["gateRun"],
+	gateRun: ShippedGateRun,
 	packageSha256: string,
 	exportId: string,
 ): string {
@@ -137,9 +140,9 @@ const REPLAYED = "idempotency-replayed";
  * list and violations, and the request hash replays are told apart by.
  */
 export type ExportManifest = {
-	gateRun: ExportWire["gateRun"];
+	gateRun: ShippedGateRun;
 	dispatches: ClosedDispatch[];
-	package: Pick<ExportWire["package"], "files" | "deletes">;
+	package: Pick<NonNullable<ExportWire["package"]>, "files" | "deletes">;
 	violations: Violation[];
 	blocked: ExportWire["blocked"];
 	requestSha256: string;
@@ -196,7 +199,8 @@ function prState(s: string | null): "open" | "merged" | "closed" {
 }
 
 export function toWire(row: ExportRow): ExportWire {
-	const m = row.versionManifest as ExportManifest;
+	// Null only before render (drizzle/0056): pending, rendering, or failed first.
+	const m = row.versionManifest as ExportManifest | null;
 	return {
 		id: row.id,
 		missionId: row.missionId,
@@ -207,18 +211,21 @@ export function toWire(row: ExportRow): ExportWire {
 		statusChangedAt: row.statusChangedAt.toISOString(),
 		dryRun: row.dryRun,
 		previewExportId: row.previewExportId,
-		gateRun: m.gateRun,
+		gateRun: m?.gateRun ?? null,
 		baseRef: row.baseRef,
 		baseCommitSha: row.baseCommitSha,
-		package: {
-			sha256: row.packageSha256 as string,
-			hashVersion: row.packageHashVersion as number,
-			files: m.package.files,
-			deletes: m.package.deletes,
-		},
-		violations: m.violations,
+		package:
+			m === null
+				? null
+				: {
+						sha256: row.packageSha256 as string,
+						hashVersion: row.packageHashVersion as number,
+						files: m.package.files,
+						deletes: m.package.deletes,
+					},
+		violations: m?.violations ?? [],
 		blastRadius: (row.blastRadius as BlastRadius | null) ?? null,
-		blocked: m.blocked,
+		blocked: m?.blocked ?? null,
 		pullRequest:
 			row.prNumber !== null &&
 			row.prUrl !== null &&
@@ -638,7 +645,7 @@ export function exportRoutes(deps: ExportDeps) {
 	function gateRunWire(run: {
 		id: string;
 		payload: GateRunPayload;
-	}): ExportWire["gateRun"] {
+	}): ShippedGateRun {
 		return {
 			id: run.id,
 			result: resultOfRun(run.payload),
@@ -655,7 +662,9 @@ export function exportRoutes(deps: ExportDeps) {
 			.from(exportTable)
 			.where(eq(exportTable.idempotencyKey, key));
 		if (!prior) return null;
-		if ((prior.versionManifest as ExportManifest).requestSha256 !== hash) {
+		if (
+			(prior.versionManifest as ExportManifest | null)?.requestSha256 !== hash
+		) {
 			throw new ApiError(
 				"IDEMPOTENCY_REPLAY",
 				"This idempotency key was used with a different body",

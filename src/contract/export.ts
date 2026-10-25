@@ -133,16 +133,21 @@ export const exportSchema = z.object({
 	dryRun: z.boolean(),
 	/** The preview a real export was approved from. Null for a preview, and for a zip made without one. */
 	previewExportId: uuid.nullable(),
-	/** The gate run whose integration commit this export ships. */
-	gateRun: z.object({
-		id: uuid,
-		result: z.enum(GATE_RESULTS),
-		/** The integration commit the gate judged and the package is rendered from. */
-		commitSha: sha40,
-		/** The mission's base: the commit the work started from. */
-		baseSha: sha40,
-		receiptSha256: sha256,
-	}),
+	/**
+	 * The gate run whose integration commit this export ships. Null, with
+	 * package, only before it rendered: pending, rendering, or failed first.
+	 */
+	gateRun: z
+		.object({
+			id: uuid,
+			result: z.enum(GATE_RESULTS),
+			/** The integration commit the gate judged and the package is rendered from. */
+			commitSha: sha40,
+			/** The mission's base: the commit the work started from. */
+			baseSha: sha40,
+			receiptSha256: sha256,
+		})
+		.nullable(),
 	/** A GitHub target's branch. Null for zip. */
 	baseRef: z.string().nullable(),
 	/** That branch's tip when the blast radius was computed. Null for zip and for an empty repository. */
@@ -152,19 +157,22 @@ export const exportSchema = z.object({
 	 * mission's base, plus .avel/receipt.json and each complete dispatch's
 	 * frozen brief at .avel/dispatches/<dispatch id>.md, and the paths it deleted.
 	 * `change` is against the mission's base. sha256 is packageSha256, which
-	 * leaves the receipt out, under hashVersion.
+	 * leaves the receipt out, under hashVersion. Null exactly when gateRun is.
 	 */
-	package: z.object({
-		sha256: sha256,
-		hashVersion: z.number().int().positive(),
-		files: z.array(
-			fileEntry.extend({ change: z.enum(["create", "overwrite"]) }),
-		),
-		deletes: z.array(z.string()),
-	}),
+	package: z
+		.object({
+			sha256: sha256,
+			hashVersion: z.number().int().positive(),
+			files: z.array(
+				fileEntry.extend({ change: z.enum(["create", "overwrite"]) }),
+			),
+			deletes: z.array(z.string()),
+		})
+		.nullable(),
 	/**
 	 * The path rules the package breaks. For a zip, against the mission's
-	 * base; for a GitHub target, the blast radius's own list.
+	 * base; for a GitHub target, the blast radius's own list. Empty before
+	 * it rendered.
 	 */
 	violations: z.array(violation),
 	/** GitHub targets only. Null for zip. */
