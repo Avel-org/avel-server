@@ -519,12 +519,14 @@ export function gateJudge(deps: {
 		const priorRows = await tx
 			.select({
 				id: finding.id,
-				missionId: finding.missionId,
 				clientId: finding.clientId,
 				subject: finding.subject,
 				check: finding.check,
+				missionType: mission.type,
+				sprintN: mission.sprintN,
 			})
 			.from(finding)
+			.innerJoin(mission, eq(mission.id, finding.missionId))
 			.where(
 				and(
 					eq(finding.status, "confirmed"),
@@ -542,7 +544,7 @@ export function gateJudge(deps: {
 				? [
 						{
 							findingId: f.id,
-							missionId: f.missionId,
+							foundIn: `${f.missionType} sprint ${f.sprintN}`,
 							subject: f.subject,
 							check,
 						},

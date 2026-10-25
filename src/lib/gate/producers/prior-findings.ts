@@ -8,7 +8,8 @@ export const PRIOR_FINDING_SOURCE = "prior-finding";
 /** A confirmed finding from an earlier mission, with the check it carries. */
 export type PriorCheck = {
 	findingId: string;
-	missionId: string;
+	/** Where it was found, in words: the mission's type and sprint. No ids. */
+	foundIn: string;
 	subject: string;
 	check: PermanentCheck;
 };
@@ -40,7 +41,8 @@ export function priorFindingFindings(input: {
 			.filter((f) => f.text?.includes(c.check.text))
 			.map((f) => f.path);
 		const unread = under.filter((f) => f.text === null).map((f) => f.path);
-		const named = `${c.subject} (finding ${c.findingId}, mission ${c.missionId})`;
+		// Words only: the finding's id is the finding's own id field.
+		const named = `${c.subject} (found in ${c.foundIn})`;
 		const outcome =
 			hits.length > 0 ? "fail" : unread.length > 0 ? "not_run" : "pass";
 		const subject =

@@ -692,6 +692,9 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 				effect: "block",
 			});
 			expect(back[0]?.subject).toContain("src/c.ts");
+			// No generated id in visible text; the id is in findingId.
+			expect(back[0]?.subject).not.toContain(general);
+			expect(back[0]?.subject).not.toContain(earlier.missionId);
 		});
 	});
 

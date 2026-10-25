@@ -12,7 +12,7 @@ const check = (
 	paths = ["src/**"],
 ): PriorCheck => ({
 	findingId,
-	missionId: "m-earlier",
+	foundIn: "template-booking sprint 1",
 	subject: "A debugger statement shipped",
 	check: { kind: "forbidden_text", paths, text, scope: "general" },
 });
@@ -35,7 +35,10 @@ describe("priorFindingFindings", () => {
 			],
 		);
 		expect(outcomes(fs)).toEqual([["prior:f1", "fail"]]);
-		expect(fs[0]?.subject).toContain("src/b.ts");
+		// Words only: the finding's id is the finding's own id field (FE, 2026-10-24).
+		expect(fs[0]?.subject).toBe(
+			'A debugger statement shipped (found in template-booking sprint 1): "debugger" is back in src/b.ts',
+		);
 		expect(fs[0]?.subject).not.toContain("src/a.ts");
 	});
 
