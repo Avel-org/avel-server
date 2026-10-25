@@ -51,6 +51,7 @@ import { type Executor, type Tx, withTx } from "../db/tx";
 import type { IdentityRefusal } from "../lib/identity";
 import { mergeAllowed } from "../lib/roles";
 import { ApiError } from "../middleware/errors";
+import { agentMetrics } from "./agent-metrics";
 import { firmRolesIn, notRosterable, rosteredTemplates } from "./firm";
 import { entryAccessInput } from "./roster";
 import {
@@ -320,6 +321,15 @@ export function agentTemplateRoutes(deps: RouteDeps) {
 					data: items,
 					meta: { nextCursor, total: totals.total, totals },
 				},
+			};
+		},
+
+		metrics: async ({ params, query }) => {
+			const db = deps.db();
+			const template = await liveTemplate(db, params.id);
+			return {
+				status: 200,
+				body: ok(await agentMetrics(db, template, query.origin)),
 			};
 		},
 

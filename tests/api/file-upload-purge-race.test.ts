@@ -149,6 +149,7 @@ describe.skipIf(!url)(
 					roomSources: localSources(`${files}/sources`),
 					drive: { blobs, maxBytes: DEFAULT_UPLOAD_MAX_BYTES },
 					checkRunner: null,
+					githubWebhookSecret: null,
 				});
 			const firstApp = appFor(first.db, "11111111");
 			const secondApp = appFor(db, "22222222");

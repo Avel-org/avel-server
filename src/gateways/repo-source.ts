@@ -21,8 +21,12 @@ export type TreeRequest = {
 	credentialRef: string;
 };
 
-/** A branch's tree at its tip, and which branch that was. A null commitSha is an empty repository. */
-export type BranchTree = RemoteTree & { branch: string };
+/**
+ * A branch's tree at its tip, which branch that was, and the repository's
+ * default branch (a push to it needs RepoPolicy). A null commitSha is an
+ * empty repository.
+ */
+export type BranchTree = RemoteTree & { branch: string; defaultBranch: string };
 
 /**
  * Where the repo read gets a repository from. An AppDeps gateway: production
@@ -153,7 +157,8 @@ export function githubRepoSource(options: {
 					owner: req.owner,
 					repo: req.repo,
 				});
-				const branch = req.branch ?? repo.data.default_branch;
+				const defaultBranch = repo.data.default_branch;
+				const branch = req.branch ?? defaultBranch;
 				let commitSha: string;
 				try {
 					const ref = await gh.rest.git.getRef({
@@ -170,7 +175,12 @@ export function githubRepoSource(options: {
 					commitSha = ref.data.object.sha;
 				} catch (e) {
 					if (statusOf(e) === 409) {
-						return { branch, commitSha: null, entries: new Map() };
+						return {
+							branch,
+							defaultBranch,
+							commitSha: null,
+							entries: new Map(),
+						};
 					}
 					if (statusOf(e) === 404) {
 						throw new ApiError(
@@ -203,7 +213,7 @@ export function githubRepoSource(options: {
 						entries.set(e.path, { sha: e.sha, mode: e.mode });
 					}
 				}
-				return { branch, commitSha, entries };
+				return { branch, defaultBranch, commitSha, entries };
 			} catch (e) {
 				throw githubFailure(e, {
 					owner: req.owner,

@@ -1,6 +1,6 @@
 import { initContract } from "@ts-rest/core";
 import { z } from "zod";
-import { finding, findingStatus } from "./agent";
+import { finding, findingStatus, permanentCheck } from "./agent";
 import { successEnvelope } from "./shared/envelope";
 import { pageMeta, pageQuery } from "./shared/pagination";
 
@@ -57,5 +57,14 @@ export const findingContract = c.router({
 		body: z.object({ reason: z.string().trim().min(1) }).strict(),
 		responses: { 200: successEnvelope(finding) },
 		summary: "open → dismissed, with the operator's reason",
+	},
+	setCheck: {
+		method: "PUT",
+		path: "/api/findings/:id/check",
+		pathParams: byId,
+		body: z.object({ check: permanentCheck.nullable() }).strict(),
+		responses: { 200: successEnvelope(finding) },
+		summary:
+			"Attach, replace or remove a confirmed finding's permanent check, which gates every later mission in its scope",
 	},
 });

@@ -110,6 +110,7 @@ export const deliveryBlock = z.object({
 		"preview_stale",
 		"package_hash_version_mismatch",
 		"package_hash_mismatch",
+		"direct_push_not_allowed",
 	]),
 	message: z.string(),
 });
@@ -133,16 +134,21 @@ export const exportSchema = z.object({
 	dryRun: z.boolean(),
 	/** The preview a real export was approved from. Null for a preview, and for a zip made without one. */
 	previewExportId: uuid.nullable(),
-	/** The gate run whose integration commit this export ships. */
-	gateRun: z.object({
-		id: uuid,
-		result: z.enum(GATE_RESULTS),
-		/** The integration commit the gate judged and the package is rendered from. */
-		commitSha: sha40,
-		/** The mission's base: the commit the work started from. */
-		baseSha: sha40,
-		receiptSha256: sha256,
-	}),
+	/**
+	 * The gate run whose integration commit this export ships. Null, with
+	 * package, only before it rendered: pending, rendering, or failed first.
+	 */
+	gateRun: z
+		.object({
+			id: uuid,
+			result: z.enum(GATE_RESULTS),
+			/** The integration commit the gate judged and the package is rendered from. */
+			commitSha: sha40,
+			/** The mission's base: the commit the work started from. */
+			baseSha: sha40,
+			receiptSha256: sha256,
+		})
+		.nullable(),
 	/** A GitHub target's branch. Null for zip. */
 	baseRef: z.string().nullable(),
 	/** That branch's tip when the blast radius was computed. Null for zip and for an empty repository. */
@@ -152,19 +158,22 @@ export const exportSchema = z.object({
 	 * mission's base, plus .avel/receipt.json and each complete dispatch's
 	 * frozen brief at .avel/dispatches/<dispatch id>.md, and the paths it deleted.
 	 * `change` is against the mission's base. sha256 is packageSha256, which
-	 * leaves the receipt out, under hashVersion.
+	 * leaves the receipt out, under hashVersion. Null exactly when gateRun is.
 	 */
-	package: z.object({
-		sha256: sha256,
-		hashVersion: z.number().int().positive(),
-		files: z.array(
-			fileEntry.extend({ change: z.enum(["create", "overwrite"]) }),
-		),
-		deletes: z.array(z.string()),
-	}),
+	package: z
+		.object({
+			sha256: sha256,
+			hashVersion: z.number().int().positive(),
+			files: z.array(
+				fileEntry.extend({ change: z.enum(["create", "overwrite"]) }),
+			),
+			deletes: z.array(z.string()),
+		})
+		.nullable(),
 	/**
 	 * The path rules the package breaks. For a zip, against the mission's
-	 * base; for a GitHub target, the blast radius's own list.
+	 * base; for a GitHub target, the blast radius's own list. Empty before
+	 * it rendered.
 	 */
 	violations: z.array(violation),
 	/** GitHub targets only. Null for zip. */
@@ -187,6 +196,8 @@ export const exportSchema = z.object({
 			state: z.enum(["open", "merged", "closed"]),
 		})
 		.nullable(),
+	/** A done github_push export's branch and the commit AVEL made, now its tip; null otherwise. */
+	push: z.object({ branch: z.string(), commitSha: sha40 }).nullable(),
 	/** Why a real export failed, written for the operator; null unless status is failed. */
 	failure: z.object({ code: z.string(), message: z.string() }).nullable(),
 	/** The zip's sha256 and length. Set on a done zip; its bytes are at GET /api/exports/:id/zip. */
@@ -259,10 +270,9 @@ export const exportListEnvelope = z.object({
 });
 
 /**
- * Module 10 and 11, slice 1 (J, 2026-10-22): previews for every target,
- * delivery by zip. A create for github_pr or github_push is refused
- * (export_target_not_built) until slice 2. The zip's bytes are behind a
- * byte route outside this contract: GET /api/exports/:id/zip.
+ * Module 10 and 11: previews for every target (J, 2026-10-22), and delivery
+ * by zip, GitHub pull request (2026-10-24) and push (2026-10-24). The zip's
+ * bytes are behind a byte route outside this contract: GET /api/exports/:id/zip.
  */
 export const exportContract = c.router({
 	preview: {
@@ -289,7 +299,7 @@ export const exportContract = c.router({
 			200: successEnvelope(exportSchema),
 		},
 		summary:
-			"Render the gate run again and deliver it: a zip, or a GitHub pull request (github_push is not built)",
+			"Render the gate run again and deliver it: a zip, a GitHub pull request, or a push to a branch",
 	},
 	refresh: {
 		method: "POST",

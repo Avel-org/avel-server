@@ -28,6 +28,24 @@ export type PullRequestRequest = {
 	body: string;
 };
 
+/** A push of the package onto an existing branch, as one commit on its tip. */
+export type PushRequest = {
+	owner: string;
+	repo: string;
+	credentialRef: string;
+	/** The branch pushed to, and the tip the package was checked against. */
+	base: { branch: string; commitSha: string };
+	files: readonly WriteFile[];
+	deletes: readonly string[];
+	message: string;
+};
+
+export type Pushed = {
+	branch: string;
+	/** The commit AVEL made, now the branch's tip. */
+	commitSha: string;
+};
+
 export type OpenedPullRequest = {
 	number: number;
 	url: string;
@@ -47,6 +65,12 @@ export type RepoWriter = {
 	 * tree; a commit on the base commit; a new branch; the PR.
 	 */
 	openPullRequest: (request: PullRequestRequest) => Promise<OpenedPullRequest>;
+	/**
+	 * EXPORT-ENGINE.md §8, for a push: the same blobs, tree and commit, then
+	 * updateRef on the branch, never forced. A branch that moved since its
+	 * tip was read is GitHub's to refuse, and the answer is a new preview.
+	 */
+	pushToBranch: (request: PushRequest) => Promise<Pushed>;
 	/** The open or closed PR whose head is `head` in the repository, or null. */
 	findPullRequest: (request: {
 		owner: string;
@@ -144,6 +168,99 @@ function headersOf(e: unknown): Record<string, string> {
 	return {};
 }
 
+/**
+ * The blobs, tree and commit both deliveries write (EXPORT-ENGINE.md §8),
+ * returning the commit's sha. Every file is checked against its gitBlobSha
+ * before the first is sent; blobs go one at a time, each checked against
+ * GitHub's answer; the tree always has a base. `step` names where it is.
+ */
+async function writeCommit(
+	gh: Octokit,
+	req: {
+		owner: string;
+		repo: string;
+		base: { commitSha: string };
+		files: readonly WriteFile[];
+		deletes: readonly string[];
+		message: string;
+	},
+	step: { now: string },
+): Promise<string> {
+	const { owner, repo } = req;
+	// AVEL's render disagreeing with itself: every file is checked
+	// before the first is sent, so nothing reaches the repository.
+	for (const f of req.files) {
+		if (gitBlobSha(f.bytes) !== f.blobSha) {
+			throw new ApiError(
+				"DETERMINISM_VIOLATION",
+				`${f.path} was rendered as ${f.blobSha}, but its bytes hash to ${gitBlobSha(f.bytes)}`,
+			);
+		}
+	}
+	// One at a time: GitHub's secondary rate limit counts
+	// concurrency, and a half-written package is the cost.
+	step.now = "writing a file";
+	for (const f of req.files) {
+		const blob = await gh.rest.git.createBlob({
+			owner,
+			repo,
+			content: Buffer.from(f.bytes).toString("base64"),
+			encoding: "base64",
+		});
+		if (blob.data.sha !== f.blobSha) {
+			throw new ApiError(
+				"GITHUB_REJECTED",
+				`GitHub stored ${f.path} as ${blob.data.sha}, not ${f.blobSha}: it is not the file AVEL rendered`,
+			);
+		}
+	}
+	step.now = "reading the base commit";
+	const baseTree = await baseTreeOf(gh, owner, repo, req.base.commitSha);
+	step.now = "writing the tree";
+	const tree = await gh.rest.git.createTree({
+		owner,
+		repo,
+		// Never omitted: a tree without a base deletes every file
+		// the package does not list.
+		base_tree: baseTree,
+		tree: [
+			...req.files.map((f) => ({
+				path: f.path,
+				mode: f.mode as "100644" | "100755",
+				type: "blob" as const,
+				sha: f.blobSha,
+			})),
+			// A null sha removes the path from the base tree.
+			...req.deletes.map((path) => ({
+				path,
+				mode: "100644" as const,
+				type: "blob" as const,
+				sha: null,
+			})),
+		],
+	});
+	step.now = "writing the commit";
+	const commit = await gh.rest.git.createCommit({
+		owner,
+		repo,
+		message: req.message,
+		tree: tree.data.sha,
+		parents: [req.base.commitSha],
+	});
+	return commit.data.sha;
+}
+
+/** A branch's tip, or null when GitHub has no such branch. getRef wants the short form. */
+async function tipOf(
+	gh: Octokit,
+	owner: string,
+	repo: string,
+	branch: string,
+): Promise<string | null> {
+	const ref = await gh.rest.git.getRef({ owner, repo, ref: `heads/${branch}` });
+	return ref.data.object.sha;
+}
+
 function stateOf(pr: { state: string; merged_at: string | null }) {
 	if (pr.merged_at) return "merged" as const;
 	return pr.state === "open" ? ("open" as const) : ("closed" as const);
@@ -171,76 +288,18 @@ export function githubRepoWriter(options: {
 			const gh = client(req.credentialRef);
 			const { owner, repo } = req;
 			const named = `${owner}/${repo}`;
-			let step = "writing a file";
+			const step = { now: "writing a file" };
 			try {
-				// AVEL's render disagreeing with itself: every file is checked
-				// before the first is sent, so nothing reaches the repository.
-				for (const f of req.files) {
-					if (gitBlobSha(f.bytes) !== f.blobSha) {
-						throw new ApiError(
-							"DETERMINISM_VIOLATION",
-							`${f.path} was rendered as ${f.blobSha}, but its bytes hash to ${gitBlobSha(f.bytes)}`,
-						);
-					}
-				}
-				// One at a time: GitHub's secondary rate limit counts
-				// concurrency, and a half-written package is the cost.
-				for (const f of req.files) {
-					const blob = await gh.rest.git.createBlob({
-						owner,
-						repo,
-						content: Buffer.from(f.bytes).toString("base64"),
-						encoding: "base64",
-					});
-					if (blob.data.sha !== f.blobSha) {
-						throw new ApiError(
-							"GITHUB_REJECTED",
-							`GitHub stored ${f.path} as ${blob.data.sha}, not ${f.blobSha}: it is not the file AVEL rendered`,
-						);
-					}
-				}
-				step = "reading the base commit";
-				const baseTree = await baseTreeOf(gh, owner, repo, req.base.commitSha);
-				step = "writing the tree";
-				const tree = await gh.rest.git.createTree({
-					owner,
-					repo,
-					// Never omitted: a tree without a base deletes every file
-					// the package does not list.
-					base_tree: baseTree,
-					tree: [
-						...req.files.map((f) => ({
-							path: f.path,
-							mode: f.mode as "100644" | "100755",
-							type: "blob" as const,
-							sha: f.blobSha,
-						})),
-						// A null sha removes the path from the base tree.
-						...req.deletes.map((path) => ({
-							path,
-							mode: "100644" as const,
-							type: "blob" as const,
-							sha: null,
-						})),
-					],
-				});
-				step = "writing the commit";
-				const commit = await gh.rest.git.createCommit({
-					owner,
-					repo,
-					message: req.message,
-					tree: tree.data.sha,
-					parents: [req.base.commitSha],
-				});
-				step = "creating the branch";
+				const commit = await writeCommit(gh, req, step);
+				step.now = "creating the branch";
 				// createRef wants the long form; it cannot repoint a ref.
 				await gh.rest.git.createRef({
 					owner,
 					repo,
 					ref: `refs/heads/${req.head}`,
-					sha: commit.data.sha,
+					sha: commit,
 				});
-				step = "opening the pull request";
+				step.now = "opening the pull request";
 				const pr = await gh.rest.pulls.create({
 					owner,
 					repo,
@@ -253,10 +312,51 @@ export function githubRepoWriter(options: {
 					number: pr.data.number,
 					url: pr.data.html_url,
 					branch: req.head,
-					commitSha: commit.data.sha,
+					commitSha: commit,
 				};
 			} catch (e) {
-				throw writeFailure(e, step, named);
+				throw writeFailure(e, step.now, named);
+			}
+		},
+		async pushToBranch(req) {
+			const gh = client(req.credentialRef);
+			const { owner, repo } = req;
+			const named = `${owner}/${repo}`;
+			const step = { now: "writing a file" };
+			let commit: string | null = null;
+			try {
+				commit = await writeCommit(gh, req, step);
+				step.now = "moving the branch";
+				// updateRef wants the short form, and is never forced: a branch
+				// that moved since the preview is refused, not overwritten.
+				await gh.rest.git.updateRef({
+					owner,
+					repo,
+					ref: `heads/${req.base.branch}`,
+					sha: commit,
+					force: false,
+				});
+				return { branch: req.base.branch, commitSha: commit };
+			} catch (e) {
+				if (step.now === "moving the branch" && commit !== null) {
+					if (statusOf(e) === 422) {
+						throw new ApiError(
+							"GITHUB_REJECTED",
+							`GitHub refused moving ${req.base.branch} on ${named}: it moved since its tip was read. Preview again.`,
+						);
+					}
+					// No answer: the move may have landed. Read the tip once.
+					const s = statusOf(e);
+					if (s === undefined || s >= 500) {
+						const landed = await tipOf(gh, owner, repo, req.base.branch).catch(
+							() => null,
+						);
+						if (landed === commit) {
+							return { branch: req.base.branch, commitSha: commit };
+						}
+					}
+				}
+				throw writeFailure(e, step.now, named);
 			}
 		},
 		async findPullRequest(req) {
@@ -297,5 +397,9 @@ export function noRepoWriter(): RepoWriter {
 	const refuse = async (): Promise<never> => {
 		throw new ApiError("EXTERNAL_GITHUB", "This server has no GitHub writer");
 	};
-	return { openPullRequest: refuse, findPullRequest: refuse };
+	return {
+		openPullRequest: refuse,
+		pushToBranch: refuse,
+		findPullRequest: refuse,
+	};
 }

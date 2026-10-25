@@ -1,0 +1,2 @@
+ALTER TABLE "export" ADD CONSTRAINT "export_rendered_complete" CHECK (("export"."version_manifest" is null) = ("export"."package_sha256" is null) and ("export"."version_manifest" is null) = ("export"."package_hash_version" is null));--> statement-breakpoint
+ALTER TABLE "export" ADD CONSTRAINT "export_rendered_past_rendering" CHECK ("export"."status" in ('pending', 'rendering', 'failed') or "export"."version_manifest" is not null);

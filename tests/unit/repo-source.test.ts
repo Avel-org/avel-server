@@ -409,6 +409,8 @@ describe("githubRepoSource.tree", () => {
 			branch: "release",
 		});
 		expect(t.branch).toBe("release");
+		// The default branch is reported whichever branch was read: a push to it needs RepoPolicy.
+		expect(t.defaultBranch).toBe("trunk");
 		expect(gh.paths[1]).toBe("/repos/meridian-co/app/git/ref/heads%2Frelease");
 	});
 
@@ -417,7 +419,12 @@ describe("githubRepoSource.tree", () => {
 			env,
 			fetch: github({ ref: 409 }).fetch,
 		}).tree(req);
-		expect(t).toEqual({ branch: "trunk", commitSha: null, entries: new Map() });
+		expect(t).toEqual({
+			branch: "trunk",
+			defaultBranch: "trunk",
+			commitSha: null,
+			entries: new Map(),
+		});
 	});
 
 	it("maps a missing branch, a missing repository and a truncated tree to their codes", async () => {

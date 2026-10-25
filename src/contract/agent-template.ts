@@ -312,6 +312,57 @@ export const updateAgentTemplateBody = z
 
 export type UpdateAgentTemplateBody = z.infer<typeof updateAgentTemplateBody>;
 
+/** Never combined (ROSTER-V2.md, What tells one app's feature from another). */
+export const metricsOrigin = z.enum(["client", "internal"]);
+
+/** Discipline measures nothing records yet: shown as not measured, never as 0. */
+export const NOT_RECORDED_MEASURES = [
+	"boundary_violations",
+	"blockers_absorbed",
+] as const;
+
+/**
+ * An agent's measurements (module 12; ROSTER-V2.md and DATA-CONTRACTS-V2.md).
+ * Discipline combines across every territory and engagement under the name;
+ * outcome is one row per territory, template and engagement, and rows are
+ * never summed. Internal and client work are never combined: `origin` picks
+ * one. Reports with reconstructed versions are left out, since those are
+ * for findings only.
+ */
+export const agentMetricsSchema = z.object({
+	agentTemplateId: z.string().uuid(),
+	name: z.string(),
+	origin: metricsOrigin,
+	discipline: z.object({
+		/** Closed dispatches with a recorded report. */
+		dispatches: z.number().int().nonnegative(),
+		blockersFiled: z.number().int().nonnegative(),
+		blockedReports: z.number().int().nonnegative(),
+		edgeMismatches: z.number().int().nonnegative(),
+		/** Test-file writes the exit checkpoint caught, in each mission's latest gate run. */
+		testFileWritesCaught: z.number().int().nonnegative(),
+		notRecorded: z.array(z.enum(NOT_RECORDED_MEASURES)),
+	}),
+	outcome: z.array(
+		z.object({
+			territory: z.string().nullable(),
+			templateRef: z.string().nullable(),
+			engagementId: z.string().uuid().nullable(),
+			dispatches: z.number().int().nonnegative(),
+			tokensUsed: z.number().int().nonnegative(),
+			/** US dollars, unrounded: spend accrues in fractions of a cent. */
+			spendUsd: z.number().nonnegative(),
+			wallClockMinutes: z.number().int().nonnegative(),
+			/** Missions in this row with at least one gate run. */
+			missionsGated: z.number().int().nonnegative(),
+			/** Of those, missions whose first gate run was verified. */
+			firstPassVerified: z.number().int().nonnegative(),
+		}),
+	),
+});
+
+export type AgentMetrics = z.infer<typeof agentMetricsSchema>;
+
 const byId = z.object({ id: z.string().uuid() });
 const bySlug = z.object({ slug: z.string().min(1).max(200) });
 
@@ -362,6 +413,15 @@ export const agentTemplateContract = c.router({
 		responses: { 200: templateDispatchListEnvelope },
 		summary:
 			"The template's dispatches across its identity versions, newest first, on missions the mission detail route shows. meta.totals follows the filters and ignores the cursor. A missing or deleted template is 404",
+	},
+	metrics: {
+		method: "GET",
+		path: "/api/agent-templates/:id/metrics",
+		pathParams: byId,
+		query: z.object({ origin: metricsOrigin }).strict(),
+		responses: { 200: successEnvelope(agentMetricsSchema) },
+		summary:
+			"The agent's discipline and outcome measures for client or internal work, never both. A missing or deleted template is 404",
 	},
 	rosterEntries: {
 		method: "GET",

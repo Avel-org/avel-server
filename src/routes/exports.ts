@@ -13,6 +13,7 @@ import { ok } from "../contract/shared/envelope";
 import type { PreconditionReason } from "../contract/shared/errors";
 import type { ExportStatus } from "../contract/shared/status";
 import { logActivity } from "../db/activity";
+import { directPushAllowed } from "../db/repo-policy";
 import {
 	activityLog,
 	agentTemplate,
@@ -28,11 +29,12 @@ import {
 import { live } from "../db/schema/columns";
 import { type Executor, type Tx, withTx } from "../db/tx";
 import { sha256Of } from "../gateways/blob";
-import type { RepoSource } from "../gateways/repo-source";
+import type { BranchTree, RepoSource } from "../gateways/repo-source";
 import type {
 	FoundPullRequest,
 	OpenedPullRequest,
 	PullRequestRequest,
+	PushRequest,
 	RepoWriter,
 } from "../gateways/repo-writer";
 import { requestSha256 } from "../lib/canonical";
@@ -56,7 +58,7 @@ import {
 	computeBlastRadius,
 	type DeliveryPackage,
 	type GuardResult,
-	type RemoteTree,
+	type PushTarget,
 	type Violation,
 } from "../lib/export/delivery";
 import { localTree } from "../lib/export/tree";
@@ -105,10 +107,13 @@ export function prBranch(row: {
 	return `avel/${row.missionId.slice(0, 8)}-s${row.sprintN}-${(row.packageSha256 ?? "").slice(0, 12)}-${row.id.slice(-12)}`;
 }
 
+/** The gate run an export ships. A manifest always names one. */
+type ShippedGateRun = NonNullable<ExportWire["gateRun"]>;
+
 /** The PR's description: what shipped and the evidence behind it. */
 function prBody(
 	m: { id: string; type: string; sprintN: number },
-	gateRun: ExportWire["gateRun"],
+	gateRun: ShippedGateRun,
 	packageSha256: string,
 	exportId: string,
 ): string {
@@ -136,10 +141,10 @@ const REPLAYED = "idempotency-replayed";
  * renders the same bytes later, whatever closed since), the package's file
  * list and violations, and the request hash replays are told apart by.
  */
-type ExportManifest = {
-	gateRun: ExportWire["gateRun"];
+export type ExportManifest = {
+	gateRun: ShippedGateRun;
 	dispatches: ClosedDispatch[];
-	package: Pick<ExportWire["package"], "files" | "deletes">;
+	package: Pick<NonNullable<ExportWire["package"]>, "files" | "deletes">;
 	violations: Violation[];
 	blocked: ExportWire["blocked"];
 	requestSha256: string;
@@ -195,8 +200,9 @@ function prState(s: string | null): "open" | "merged" | "closed" {
 	return s === "merged" || s === "closed" ? s : "open";
 }
 
-function toWire(row: ExportRow): ExportWire {
-	const m = row.versionManifest as ExportManifest;
+export function toWire(row: ExportRow): ExportWire {
+	// Null only before render (drizzle/0056): pending, rendering, or failed first.
+	const m = row.versionManifest as ExportManifest | null;
 	return {
 		id: row.id,
 		missionId: row.missionId,
@@ -207,18 +213,21 @@ function toWire(row: ExportRow): ExportWire {
 		statusChangedAt: row.statusChangedAt.toISOString(),
 		dryRun: row.dryRun,
 		previewExportId: row.previewExportId,
-		gateRun: m.gateRun,
+		gateRun: m?.gateRun ?? null,
 		baseRef: row.baseRef,
 		baseCommitSha: row.baseCommitSha,
-		package: {
-			sha256: row.packageSha256 as string,
-			hashVersion: row.packageHashVersion as number,
-			files: m.package.files,
-			deletes: m.package.deletes,
-		},
-		violations: m.violations,
+		package:
+			m === null
+				? null
+				: {
+						sha256: row.packageSha256 as string,
+						hashVersion: row.packageHashVersion as number,
+						files: m.package.files,
+						deletes: m.package.deletes,
+					},
+		violations: m?.violations ?? [],
 		blastRadius: (row.blastRadius as BlastRadius | null) ?? null,
-		blocked: m.blocked,
+		blocked: m?.blocked ?? null,
 		pullRequest:
 			row.prNumber !== null &&
 			row.prUrl !== null &&
@@ -231,6 +240,10 @@ function toWire(row: ExportRow): ExportWire {
 						commitSha: row.prCommitSha,
 						state: prState(row.prStatus),
 					}
+				: null,
+		push:
+			row.pushedCommitSha !== null && row.baseRef !== null
+				? { branch: row.baseRef, commitSha: row.pushedCommitSha }
 				: null,
 		failure:
 			row.failureCode !== null && row.failureMessage !== null
@@ -503,13 +516,155 @@ function zipOf(pkg: Awaited<ReturnType<typeof render>>["pkg"]) {
 }
 
 /**
- * Modules 10 and 11, slice 1 (J, 2026-10-22). A preview renders the latest
- * gate run and records what delivering it would do; a create renders it
- * again, runs the delivery guards, and delivers. Zip only for now: GitHub
- * targets can be previewed and not yet created. Everything runs inside the
- * request, so an export's status is final when its route answers.
+ * How an export's status moves, shared by the export routes and the PR
+ * webhook: each move matches the status it read, logs its change, and
+ * refuses a move the lifecycle does not allow.
+ */
+export function exportLifecycle(deps: RouteDeps) {
+	/**
+	 * Moves an export from `from` to `to` with `set`, logging
+	 * export.status_changed as the operator who asked, or as the system when
+	 * GitHub told (the PR webhook). The update matches
+	 * `from` too, so a request that read a status another has since changed
+	 * moves nothing: null, and the caller reads what is there now. Refuses a
+	 * move the lifecycle does not allow.
+	 */
+	async function moveStatus(
+		tx: Tx,
+		ctx: RequestContext,
+		row: ExportRow,
+		to: ExportStatus,
+		engagementId: string | null,
+		set: Partial<typeof exportTable.$inferInsert>,
+		by: "operator" | "system" = "operator",
+	): Promise<ExportRow | null> {
+		const from = row.status;
+		if (
+			from !== to &&
+			!canTransition(from, to, { dryRun: row.dryRun, target: row.targetKind })
+		) {
+			throw new Error(`export ${row.id} cannot move ${from} -> ${to}`);
+		}
+		const now = deps.clock.now();
+		const [updated] = await tx
+			.update(exportTable)
+			.set({
+				...set,
+				status: to,
+				// The trigger wants status_changed_at strictly later: a failure in
+				// the same millisecond as its insert would otherwise refuse.
+				...(from === to
+					? {}
+					: {
+							statusChangedAt: sql`greatest(${now.toISOString()}::timestamptz, ${exportTable.statusChangedAt} + interval '1 millisecond')`,
+						}),
+				updatedAt: now,
+			})
+			.where(and(eq(exportTable.id, row.id), eq(exportTable.status, from)))
+			.returning();
+		if (!updated) return null;
+		if (from !== to) {
+			await logActivity(tx, deps, {
+				...(by === "system"
+					? { actorKind: "system" as const }
+					: {
+							actorKind: "operator" as const,
+							actorUserId: operatorOf(ctx).id,
+						}),
+				action: "export.status_changed",
+				entityType: "export",
+				entityId: row.id,
+				missionId: row.missionId,
+				engagementId,
+				requestId: ctx.requestId,
+				payload: {
+					exportId: row.id,
+					from,
+					to,
+					...(set.prNumber ? { prNumber: set.prNumber } : {}),
+					...(set.failureCode ? { failureCode: set.failureCode } : {}),
+				},
+			});
+		}
+		return updated;
+	}
+
+	/** The export as it is now, for a caller whose move found it changed. */
+	async function current(tx: Tx, id: string): Promise<ExportRow> {
+		const [now] = await tx
+			.select()
+			.from(exportTable)
+			.where(eq(exportTable.id, id));
+		if (!now) throw new Error(`export ${id} vanished`);
+		return now;
+	}
+
+	/**
+	 * Records the PR GitHub has for this export: a delivering export becomes
+	 * pr-open with it, and a merged or closed PR then moves it on to done or
+	 * closed (1, from code review: the lifecycle has no step from delivering
+	 * straight to either). Each move matches the status before it.
+	 */
+	async function recordPullRequest(
+		tx: Tx,
+		ctx: RequestContext,
+		row: ExportRow,
+		pr: FoundPullRequest,
+		engagementId: string | null,
+		by: "operator" | "system" = "operator",
+	): Promise<ExportRow> {
+		let now = row;
+		const fields = {
+			prStatus: pr.state,
+			prNumber: pr.number,
+			prUrl: pr.url,
+			prHeadRef: pr.branch,
+			prCommitSha: row.prCommitSha ?? pr.commitSha,
+		};
+		if (now.status === "delivering") {
+			const moved = await moveStatus(
+				tx,
+				ctx,
+				now,
+				"pr-open",
+				engagementId,
+				fields,
+				by,
+			);
+			if (!moved) return current(tx, row.id);
+			now = moved;
+		}
+		if (now.status !== "pr-open") return now;
+		const to =
+			pr.state === "merged"
+				? ("done" as const)
+				: pr.state === "closed"
+					? ("closed" as const)
+					: ("pr-open" as const);
+		if (to === "pr-open" && now.prStatus === pr.state) return now;
+		const moved = await moveStatus(
+			tx,
+			ctx,
+			now,
+			to,
+			engagementId,
+			{ prStatus: pr.state },
+			by,
+		);
+		return moved ?? current(tx, row.id);
+	}
+
+	return { moveStatus, current, recordPullRequest };
+}
+
+/**
+ * Modules 10 and 11 (J, 2026-10-22). A preview renders the latest gate run
+ * and records what delivering it would do; a create renders it again, runs
+ * the delivery guards, and delivers: a zip inside the request, a pull
+ * request or a push written to GitHub after its row is recorded.
  */
 export function exportRoutes(deps: ExportDeps) {
+	const { moveStatus, current, recordPullRequest } = exportLifecycle(deps);
 	/**
 	 * Everything a preview and a create share: the gate run, the source, the
 	 * render, the violations, and for a GitHub target its branch tree.
@@ -531,7 +686,7 @@ export function exportRoutes(deps: ExportDeps) {
 			credentialRef: string;
 			owner: string;
 			repo: string;
-			tree: RemoteTree & { branch: string };
+			tree: BranchTree;
 		} | null = null;
 		if (body.target !== "zip") {
 			const repo =
@@ -576,6 +731,19 @@ export function exportRoutes(deps: ExportDeps) {
 				tree,
 			};
 		}
+		// A push's branch and its repo's policy, for checkDirectPush.
+		const push: PushTarget | null =
+			body.target === "github_push" && github
+				? {
+						branch: github.tree.branch,
+						defaultBranch: github.tree.defaultBranch,
+						allowDirectPushToDefault: await directPushAllowed(
+							tx,
+							github.owner,
+							github.repo,
+						),
+					}
+				: null;
 
 		const dispatches = await closedDispatches(tx, m.id);
 		const rendered = await render(
@@ -632,13 +800,14 @@ export function exportRoutes(deps: ExportDeps) {
 			violations: blastRadius ? blastRadius.violations : onBase.violations,
 			blastRadius,
 			github,
+			push,
 		};
 	}
 
 	function gateRunWire(run: {
 		id: string;
 		payload: GateRunPayload;
-	}): ExportWire["gateRun"] {
+	}): ShippedGateRun {
 		return {
 			id: run.id,
 			result: resultOfRun(run.payload),
@@ -655,7 +824,9 @@ export function exportRoutes(deps: ExportDeps) {
 			.from(exportTable)
 			.where(eq(exportTable.idempotencyKey, key));
 		if (!prior) return null;
-		if ((prior.versionManifest as ExportManifest).requestSha256 !== hash) {
+		if (
+			(prior.versionManifest as ExportManifest | null)?.requestSha256 !== hash
+		) {
 			throw new ApiError(
 				"IDEMPOTENCY_REPLAY",
 				"This idempotency key was used with a different body",
@@ -705,125 +876,6 @@ export function exportRoutes(deps: ExportDeps) {
 			},
 		});
 		return row;
-	}
-
-	/**
-	 * Moves an export from `from` to `to` with `set`, logging
-	 * export.status_changed as the operator who asked. The update matches
-	 * `from` too, so a request that read a status another has since changed
-	 * moves nothing: null, and the caller reads what is there now. Refuses a
-	 * move the lifecycle does not allow.
-	 */
-	async function moveStatus(
-		tx: Tx,
-		ctx: RequestContext,
-		row: ExportRow,
-		to: ExportStatus,
-		engagementId: string | null,
-		set: Partial<typeof exportTable.$inferInsert>,
-	): Promise<ExportRow | null> {
-		const from = row.status;
-		if (
-			from !== to &&
-			!canTransition(from, to, { dryRun: row.dryRun, target: row.targetKind })
-		) {
-			throw new Error(`export ${row.id} cannot move ${from} -> ${to}`);
-		}
-		const now = deps.clock.now();
-		const [updated] = await tx
-			.update(exportTable)
-			.set({
-				...set,
-				status: to,
-				// The trigger wants status_changed_at strictly later: a failure in
-				// the same millisecond as its insert would otherwise refuse.
-				...(from === to
-					? {}
-					: {
-							statusChangedAt: sql`greatest(${now.toISOString()}::timestamptz, ${exportTable.statusChangedAt} + interval '1 millisecond')`,
-						}),
-				updatedAt: now,
-			})
-			.where(and(eq(exportTable.id, row.id), eq(exportTable.status, from)))
-			.returning();
-		if (!updated) return null;
-		if (from !== to) {
-			await logActivity(tx, deps, {
-				actorKind: "operator",
-				actorUserId: operatorOf(ctx).id,
-				action: "export.status_changed",
-				entityType: "export",
-				entityId: row.id,
-				missionId: row.missionId,
-				engagementId,
-				requestId: ctx.requestId,
-				payload: {
-					exportId: row.id,
-					from,
-					to,
-					...(set.prNumber ? { prNumber: set.prNumber } : {}),
-					...(set.failureCode ? { failureCode: set.failureCode } : {}),
-				},
-			});
-		}
-		return updated;
-	}
-
-	/** The export as it is now, for a caller whose move found it changed. */
-	async function current(tx: Tx, id: string): Promise<ExportRow> {
-		const [now] = await tx
-			.select()
-			.from(exportTable)
-			.where(eq(exportTable.id, id));
-		if (!now) throw new Error(`export ${id} vanished`);
-		return now;
-	}
-
-	/**
-	 * Records the PR GitHub has for this export: a delivering export becomes
-	 * pr-open with it, and a merged or closed PR then moves it on to done or
-	 * closed (1, from code review: the lifecycle has no step from delivering
-	 * straight to either). Each move matches the status before it.
-	 */
-	async function recordPullRequest(
-		tx: Tx,
-		ctx: RequestContext,
-		row: ExportRow,
-		pr: FoundPullRequest,
-		engagementId: string | null,
-	): Promise<ExportRow> {
-		let now = row;
-		const fields = {
-			prStatus: pr.state,
-			prNumber: pr.number,
-			prUrl: pr.url,
-			prHeadRef: pr.branch,
-			prCommitSha: row.prCommitSha ?? pr.commitSha,
-		};
-		if (now.status === "delivering") {
-			const moved = await moveStatus(
-				tx,
-				ctx,
-				now,
-				"pr-open",
-				engagementId,
-				fields,
-			);
-			if (!moved) return current(tx, row.id);
-			now = moved;
-		}
-		if (now.status !== "pr-open") return now;
-		const to =
-			pr.state === "merged"
-				? ("done" as const)
-				: pr.state === "closed"
-					? ("closed" as const)
-					: ("pr-open" as const);
-		if (to === "pr-open" && now.prStatus === pr.state) return now;
-		const moved = await moveStatus(tx, ctx, now, to, engagementId, {
-			prStatus: pr.state,
-		});
-		return moved ?? current(tx, row.id);
 	}
 
 	/** Where a GitHub export goes, through its connection, checked again now. */
@@ -923,6 +975,48 @@ export function exportRoutes(deps: ExportDeps) {
 		});
 	}
 
+	/**
+	 * Pushes outside any transaction, then records done with the new tip, or
+	 * failed with the reason, which is also thrown. The writer reads the tip
+	 * once when GitHub stops answering mid-move, so a push that landed is
+	 * done. A status another request recorded meanwhile is never overwritten.
+	 */
+	async function deliverPush(
+		ctx: RequestContext,
+		row: ExportRow,
+		request: PushRequest,
+		engagementId: string | null,
+	): Promise<ExportRow> {
+		let pushed: { commitSha: string };
+		try {
+			pushed = await deps.repoWriter.pushToBranch(request);
+		} catch (e) {
+			const err =
+				e instanceof ApiError
+					? e
+					: new ApiError(
+							"EXTERNAL_GITHUB",
+							`Pushing to ${request.owner}/${request.repo} failed`,
+						);
+			const failed = await withTx(deps.db(), (tx) =>
+				moveStatus(tx, ctx, row, "failed", engagementId, {
+					failureCode: err.code,
+					failureMessage: err.message,
+				}),
+			);
+			if (!failed) return withTx(deps.db(), (tx) => current(tx, row.id));
+			throw new ApiError(err.code, err.message, {
+				details: { exportId: row.id } as never,
+			});
+		}
+		return withTx(deps.db(), async (tx) => {
+			const moved = await moveStatus(tx, ctx, row, "done", engagementId, {
+				pushedCommitSha: pushed.commitSha,
+			});
+			return moved ?? current(tx, row.id);
+		});
+	}
+
 	return tsr.platformContext<RequestContext>().router(exportContract, {
 		preview: async ({ headers, body }, ctx) => {
 			const key = headers["idempotency-key"];
@@ -970,6 +1064,7 @@ export function exportRoutes(deps: ExportDeps) {
 					currentBaseSha: baseCommitSha,
 					packageSha: p.rendered.sha256,
 					packageHashVersion: PACKAGE_HASH_VERSION,
+					push: p.push,
 				});
 				const manifest: ExportManifest = {
 					gateRun,
@@ -1039,13 +1134,6 @@ export function exportRoutes(deps: ExportDeps) {
 						{ missionId: m.id },
 					);
 				}
-				if (body.target === "github_push") {
-					throw precondition(
-						"export_target_not_built",
-						"Pushing to a branch is not built yet. Open a pull request or export a zip.",
-						{ missionId: m.id },
-					);
-				}
 				let preview: ExportRow | null = null;
 				if (body.previewExportId) {
 					const [found] = await tx
@@ -1082,6 +1170,7 @@ export function exportRoutes(deps: ExportDeps) {
 					currentBaseSha: p.github?.tree.commitSha ?? null,
 					packageSha: p.rendered.sha256,
 					packageHashVersion: PACKAGE_HASH_VERSION,
+					push: p.push,
 				});
 				// A preview of another target approves nothing here. Checked after
 				// the gate, the violations and the preview's presence, which come first.
@@ -1143,20 +1232,39 @@ export function exportRoutes(deps: ExportDeps) {
 						m.engagementId,
 					);
 					const title = `AVEL: ${m.type} sprint ${m.sprintN}`;
+					const files = p.rendered.pkg.files.map((f) => ({
+						path: f.path,
+						mode: f.mode,
+						bytes: f.bytes,
+						blobSha: f.blobSha,
+					}));
+					const message = `${title}\n\nGate run ${gateRun.id}, ${gateRun.result}. Package ${p.rendered.sha256}.`;
+					if (body.target === "github_push") {
+						const push: PushRequest = {
+							owner: p.github.owner,
+							repo: p.github.repo,
+							credentialRef: p.github.credentialRef,
+							base: { branch: p.github.tree.branch, commitSha: base },
+							files,
+							deletes: [...p.rendered.pkg.deletes],
+							message,
+						};
+						return {
+							replayed: false,
+							row,
+							push,
+							engagementId: m.engagementId,
+						};
+					}
 					const deliver: PullRequestRequest = {
 						owner: p.github.owner,
 						repo: p.github.repo,
 						credentialRef: p.github.credentialRef,
 						base: { branch: p.github.tree.branch, commitSha: base },
 						head: prBranch(row),
-						files: p.rendered.pkg.files.map((f) => ({
-							path: f.path,
-							mode: f.mode,
-							bytes: f.bytes,
-							blobSha: f.blobSha,
-						})),
+						files,
 						deletes: [...p.rendered.pkg.deletes],
-						message: `${title}\n\nGate run ${gateRun.id}, ${gateRun.result}. Package ${p.rendered.sha256}.`,
+						message,
 						title,
 						body: prBody(m, gateRun, p.rendered.sha256, row.id),
 					};
@@ -1196,6 +1304,15 @@ export function exportRoutes(deps: ExportDeps) {
 			if (result.replayed) {
 				ctx.responseHeaders.set(REPLAYED, "true");
 				return { status: 200, body: ok(toWire(result.row)) };
+			}
+			if ("push" in result && result.push) {
+				const row = await deliverPush(
+					ctx,
+					result.row,
+					result.push,
+					result.engagementId,
+				);
+				return { status: 201, body: ok(toWire(row)) };
 			}
 			if ("deliver" in result && result.deliver) {
 				const row = await deliverPullRequest(

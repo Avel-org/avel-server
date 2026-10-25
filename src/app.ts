@@ -48,6 +48,7 @@ import { exportRoutes, exportZipRoute } from "./routes/exports";
 import { type Drive, fileRoutes, intakeFileRoutes } from "./routes/files";
 import { findingRoutes } from "./routes/findings";
 import { gateRoutes } from "./routes/gate";
+import { githubWebhookRoute } from "./routes/github-webhook";
 import { health } from "./routes/health";
 import { intakeRoutes } from "./routes/intake";
 import { missionLifecycleRoutes } from "./routes/mission-lifecycle";
@@ -55,6 +56,8 @@ import { missionPlanRoutes } from "./routes/mission-plan";
 import { missionRoutes } from "./routes/missions";
 import { playbookRoutes } from "./routes/playbooks";
 import { presetRoutes } from "./routes/presets";
+import { proposalRoutes } from "./routes/proposals";
+import { repoPolicyRoutes } from "./routes/repo-policies";
 import { rosterRoutes } from "./routes/roster";
 import type { RequestContext } from "./routes/shared";
 import { skillSourceRoutes } from "./routes/skill-sources";
@@ -94,6 +97,8 @@ export type AppDeps = {
 	drive: Drive;
 	/** Runs the gate's test, typecheck and command checks (src/gateways/check-runner.ts). Null until a runner is installed: those checks report not_run. */
 	checkRunner: CheckRunner | null;
+	/** The secret GitHub signs webhook deliveries with (GITHUB_WEBHOOK_SECRET). Null: POST /api/webhooks/github does not exist. */
+	githubWebhookSecret: string | null;
 };
 
 /**
@@ -138,6 +143,8 @@ export function createApp(deps: AppDeps) {
 			roomSources: deps.roomSources,
 		}),
 		connections: connectionRoutes(routeDeps),
+		repoPolicies: repoPolicyRoutes(routeDeps),
+		proposals: proposalRoutes(routeDeps),
 		agentTemplates: agentTemplateRoutes(routeDeps),
 		identityVersions: identityVersionRoutes(routeDeps),
 		skills: skillRoutes(routeDeps),
@@ -203,6 +210,12 @@ export function createApp(deps: AppDeps) {
 			repoWriter: deps.repoWriter,
 			roomSources: deps.roomSources,
 		}),
+	);
+
+	// GitHub's deliveries: signed, not enveloped, and no session reaches them.
+	app.post(
+		"/api/webhooks/github",
+		githubWebhookRoute({ ...routeDeps, secret: deps.githubWebhookSecret }),
 	);
 
 	app.all("/api/*", async (ctx) => {

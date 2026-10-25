@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
 	githubRepoWriter,
 	type PullRequestRequest,
+	type PushRequest,
 } from "../../src/gateways/repo-writer";
 import { gitBlobSha } from "../../src/lib/export/blob";
+import { ApiError } from "../../src/middleware/errors";
 
 // The GitHub write path (EXPORT-ENGINE.md §8, §13) against a fake GitHub:
 // Octokit's own requests, answered in the shapes GitHub's REST docs give for
@@ -32,6 +34,8 @@ function fakeGitHub(
 		headers?: Record<string, string>;
 		/** The message on an `over` answer. */
 		message?: string;
+		/** What GET /git/ref/heads/<branch> answers as the tip. */
+		tip?: string;
 	} = {},
 ) {
 	const calls: Call[] = [];
@@ -87,6 +91,12 @@ function fakeGitHub(
 			});
 		}
 		if (key === "GET /pulls") return json(200, opts.pulls ?? []);
+		if (method === "PATCH" && path.startsWith("/git/refs/")) {
+			return json(200, { ref: path, object: { sha: body?.sha } });
+		}
+		if (method === "GET" && path.startsWith("/git/ref/")) {
+			return json(200, { ref: path, object: { sha: opts.tip ?? BASE_COMMIT } });
+		}
 		return json(404, { message: `no fake for ${key}` });
 	}) as typeof globalThis.fetch;
 	return { fetch: fake, calls, maxInFlight: () => maxInFlight };
@@ -121,6 +131,55 @@ const writer = (fetch: typeof globalThis.fetch) =>
 		env: (n) => (n === "ACME_TOKEN" ? "t" : undefined),
 		fetch,
 	});
+
+describe("githubRepoWriter.pushToBranch", () => {
+	const push = (): PushRequest => {
+		const { head, title, body, ...rest } = request();
+		return rest;
+	};
+
+	it("writes the same blobs, tree and commit, then moves the branch without force", async () => {
+		const gh = fakeGitHub();
+		const pushed = await writer(gh.fetch).pushToBranch(push());
+		expect(pushed).toEqual({ branch: "main", commitSha: NEW_COMMIT });
+		expect(gh.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+			"POST /git/blobs",
+			"POST /git/blobs",
+			`GET /git/commits/${BASE_COMMIT}`,
+			"POST /git/trees",
+			"POST /git/commits",
+			"PATCH /git/refs/heads%2Fmain",
+		]);
+		expect(gh.calls[3]?.body?.base_tree).toBe(BASE_TREE);
+		expect(gh.calls[5]?.body).toEqual({ sha: NEW_COMMIT, force: false });
+		// No branch is created and no pull request opened.
+		expect(
+			gh.calls.some((c) => c.method === "POST" && c.path === "/git/refs"),
+		).toBe(false);
+	});
+
+	it("names a branch that moved as the reason, and asks for a new preview", async () => {
+		const gh = fakeGitHub({ "PATCH /git/refs/heads%2Fmain": 422 });
+		const e = await writer(gh.fetch)
+			.pushToBranch(push())
+			.catch((x: unknown) => x);
+		expect(e).toBeInstanceOf(ApiError);
+		expect((e as ApiError).code).toBe("GITHUB_REJECTED");
+		expect((e as ApiError).message).toContain("Preview again");
+	});
+
+	it("reads the tip once when the move got no answer: landed is pushed, not landed is EXTERNAL_GITHUB", async () => {
+		const over = { "PATCH /git/refs/heads%2Fmain": 502 };
+		const landed = await writer(
+			fakeGitHub(over, { tip: NEW_COMMIT }).fetch,
+		).pushToBranch(push());
+		expect(landed).toEqual({ branch: "main", commitSha: NEW_COMMIT });
+		const lost = await writer(fakeGitHub(over).fetch)
+			.pushToBranch(push())
+			.catch((x: unknown) => x);
+		expect((lost as ApiError).code).toBe("EXTERNAL_GITHUB");
+	});
+});
 
 describe("githubRepoWriter.openPullRequest", () => {
 	it("writes each blob, one at a time, then a tree on the base commit's tree, a commit, a new branch and the PR", async () => {

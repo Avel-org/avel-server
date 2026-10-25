@@ -150,6 +150,8 @@ export async function withApi(
 		drive?: Drive;
 		/** The gate's check runner. Default: none installed. */
 		checkRunner?: CheckRunner;
+		/** The GitHub webhook's secret. Default: none, so the route does not exist. */
+		githubWebhookSecret?: string;
 		/**
 		 * Run the whole app as avel_app, the runtime role, instead of the
 		 * owner. Row-level security applies only then: as the owner (a
@@ -234,6 +236,7 @@ async function runApi(
 				maxBytes: DEFAULT_UPLOAD_MAX_BYTES,
 			},
 			checkRunner: options.checkRunner ?? null,
+			githubWebhookSecret: options.githubWebhookSecret ?? null,
 		});
 
 		let cookie = "";

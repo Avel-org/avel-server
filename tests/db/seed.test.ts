@@ -1,9 +1,13 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import postgres from "postgres";
 import { afterAll, describe, expect, it } from "vitest";
 import {
 	completionReport as completionReportWire,
 	dispatch as dispatchWireSchema,
 } from "../../src/contract/dispatch";
+import { exportSchema } from "../../src/contract/export";
 import { MISSION_STATUSES } from "../../src/contract/shared/status";
 import {
 	dispatchWire,
@@ -13,10 +17,16 @@ import {
 import * as schema from "../../src/db/schema";
 import { assertDevDatabase, runSeed } from "../../src/db/seed";
 import {
+	BOOKING_TEMPLATE_SHA,
 	SEED_OPERATOR_GITHUB_ID,
 	SEED_OPERATOR_ID,
 } from "../../src/db/seed/data";
+import { buildDevSources } from "../../src/db/seed/dev-sources";
+import { withTx } from "../../src/db/tx";
 import { fixedClock } from "../../src/lib/clock";
+import { localSources } from "../../src/rooms/sources";
+import { toWire as exportWire } from "../../src/routes/exports";
+import { gateJudge, gateMission } from "../../src/routes/gate";
 import { OPERATOR, testAuthConfig } from "../unit/support";
 
 /** Fixed, so two seeded databases match: running dispatches are timed from it. */
@@ -104,14 +114,15 @@ describe.skipIf(!url)("pnpm db:seed", () => {
 			// dispatches, seven reports and 43 activity rows. Canon's template
 			// (2026-10-19) added one more operator row. One approved intake per
 			// client mission (2026-10-21) added eleven intakes and their
-			// intake.approved rows.
+			// intake.approved rows. The gate-ready mission (2026-10-24) added
+			// one mission, two entries, one dispatch, its report and six rows.
 			expect(run1.counts).toMatchObject({
-				mission: 16,
+				mission: 17,
 				intake: 11,
-				roster_entry: 28,
-				dispatch: 9,
-				completion_report: 7,
-				activity_log: 128,
+				roster_entry: 30,
+				dispatch: 10,
+				completion_report: 8,
+				activity_log: 134,
 			});
 			const before = await dump(dbUrl);
 
@@ -183,7 +194,7 @@ describe.skipIf(!url)("pnpm db:seed", () => {
 				const named = await conn<{ n: number }[]>`
 					select count(*)::int as n from activity_log
 					where actor_kind = 'operator' and actor_user_id = ${SEED_OPERATOR_ID}`;
-				expect(named[0]?.n).toBe(100);
+				expect(named[0]?.n).toBe(104);
 			} finally {
 				await conn.end();
 			}
@@ -234,14 +245,14 @@ describe.skipIf(!url)("pnpm db:seed", () => {
 				const db = drizzle(conn, { schema });
 				const dispatches = await conn<{ id: string; mission_id: string }[]>`
 					select id, mission_id from dispatch order by id`;
-				expect(dispatches).toHaveLength(9);
+				expect(dispatches).toHaveLength(10);
 				for (const d of dispatches) {
 					const wire = await dispatchWire(db, d.id);
 					expect(dispatchWireSchema.strict().parse(wire)).toEqual(wire);
 				}
 				const reports = await conn<{ id: string }[]>`
 					select id from completion_report order by id`;
-				expect(reports).toHaveLength(7);
+				expect(reports).toHaveLength(8);
 				for (const r of reports) {
 					const wire = await reportWire(db, r.id);
 					expect(completionReportWire.strict().parse(wire)).toEqual(wire);
@@ -252,6 +263,66 @@ describe.skipIf(!url)("pnpm db:seed", () => {
 				expect(await missionSpentUsd(db, active?.id ?? "")).toBe(35.6);
 			} finally {
 				await conn.end();
+			}
+		},
+		BUDGET_MS,
+	);
+
+	it(
+		"renders every seeded export exactly as the contract says",
+		async () => {
+			const { drizzle } = await import("drizzle-orm/postgres-js");
+			const conn = postgres(withDatabase(url ?? "", first), {
+				max: 1,
+				onnotice: () => {},
+			});
+			try {
+				// A seeded export with no manifest made its mission's exports
+				// list answer 500 (2026-10-24).
+				const rows = await drizzle(conn, { schema })
+					.select()
+					.from(schema.exportTable)
+					.orderBy(schema.exportTable.id);
+				expect(rows).toHaveLength(7);
+				for (const row of rows) {
+					const wire = exportWire(row);
+					expect(exportSchema.strict().parse(wire)).toEqual(wire);
+				}
+			} finally {
+				await conn.end();
+			}
+		},
+		BUDGET_MS,
+	);
+
+	it(
+		"seeds one mission the gate can judge on the dev clones",
+		async () => {
+			const { drizzle } = await import("drizzle-orm/postgres-js");
+			const conn = postgres(withDatabase(url ?? "", first), {
+				max: 1,
+				onnotice: () => {},
+			});
+			const sources = mkdtempSync(join(tmpdir(), "avel-seed-sources-"));
+			try {
+				await buildDevSources(sources);
+				const [ready] = await conn<{ id: string }[]>`
+					select id from mission
+					where brief->>'summary' = 'Template: open slots. Ready for the gate.'`;
+				const judge = gateJudge({
+					roomSources: localSources(sources),
+					checkRunner: null,
+				});
+				const run = await withTx(drizzle(conn, { schema }), async (tx) =>
+					judge(tx, await gateMission(tx, ready?.id ?? ""), [], new Map()),
+				);
+				// The integration commit lays the dispatch's work on the base.
+				expect(run.baseSha).toBe(BOOKING_TEMPLATE_SHA);
+				expect(run.commitSha).toMatch(/^[0-9a-f]{40}$/);
+				expect(run.commitSha).not.toBe(run.baseSha);
+			} finally {
+				await conn.end();
+				rmSync(sources, { recursive: true, force: true });
 			}
 		},
 		BUDGET_MS,

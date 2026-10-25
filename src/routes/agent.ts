@@ -4,6 +4,7 @@ import {
 	contract,
 	type Finding,
 	ok,
+	type PermanentCheck,
 	type ReportFindingBody,
 } from "../contract";
 import { logActivity } from "../db/activity";
@@ -39,6 +40,7 @@ export function toFindingWire(r: FindingRow): Finding {
 		dismissedReason: r.dismissedReason,
 		caughtBy: r.caughtBy,
 		reportedByDispatchId: r.reportedByDispatchId,
+		check: (r.check as PermanentCheck | null) ?? null,
 		createdAt: r.createdAt.toISOString(),
 		updatedAt: r.updatedAt.toISOString(),
 	};
@@ -158,6 +160,8 @@ async function reportFinding(
 			reportedByDispatchId: dispatch.id,
 			idempotencyKey: key,
 			requestSha256: sha256,
+			// A judge files a defect; only the operator gives it a check, once confirmed.
+			check: null,
 			...stamp(deps.clock),
 		};
 		await tx.insert(finding).values(row);

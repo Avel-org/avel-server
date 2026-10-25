@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import path from "node:path";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -7,6 +7,7 @@ import {
 	exportListEnvelope,
 	exportSchema,
 	preconditionDetails,
+	repoPolicySchema,
 	successEnvelope,
 } from "../../src/contract";
 import { closeDb } from "../../src/db/client";
@@ -219,16 +220,16 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 					baseSha: r.pinned,
 					receiptSha256: run.receiptSha256,
 				});
-				expect(preview.package.files.map((f) => [f.path, f.change])).toEqual([
+				expect(preview.package?.files.map((f) => [f.path, f.change])).toEqual([
 					[".avel/receipt.json", "create"],
 					["src/a.ts", "overwrite"],
 					["src/b.ts", "create"],
 				]);
-				const b = preview.package.files.find((f) => f.path === "src/b.ts");
+				const b = preview.package?.files.find((f) => f.path === "src/b.ts");
 				expect(b?.blobSha).toBe(
 					gitBlobSha(new TextEncoder().encode("export const b = 2;\n")),
 				);
-				expect(preview.package.deletes).toEqual([]);
+				expect(preview.package?.deletes).toEqual([]);
 				expect(preview.violations).toEqual([]);
 				expect(preview.blocked).toBeNull();
 				expect(preview.blastRadius).toBeNull();
@@ -255,7 +256,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 				expect(done.dryRun).toBe(false);
 				expect(done.previewExportId).toBe(preview.id);
 				// Rendered again, it hashes the same as its preview.
-				expect(done.package.sha256).toBe(preview.package.sha256);
+				expect(done.package?.sha256).toBe(preview.package?.sha256);
 				expect(done.blocked).toBeNull();
 				expect(done.zip?.bytes).toBeGreaterThan(0);
 
@@ -337,13 +338,13 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 				const preview = await created(
 					await post(h, "/api/exports/preview", body),
 				);
-				expect(preview.package.files.map((f) => [f.path, f.change])).toEqual([
+				expect(preview.package?.files.map((f) => [f.path, f.change])).toEqual([
 					[path, "create"],
 					[".avel/receipt.json", "create"],
 					["src/b.ts", "create"],
 				]);
 				expect(
-					preview.package.files.find((f) => f.path === path)?.blobSha,
+					preview.package?.files.find((f) => f.path === path)?.blobSha,
 				).toBe(gitBlobSha(new TextEncoder().encode(briefMd)));
 				const done = await created(
 					await post(h, "/api/exports", {
@@ -352,7 +353,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 						previewExportId: preview.id,
 					}),
 				);
-				expect(done.package.sha256).toBe(preview.package.sha256);
+				expect(done.package?.sha256).toBe(preview.package?.sha256);
 
 				// The text moves while its frozen hash stays: the package would
 				// not carry what the agent was told.
@@ -491,7 +492,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 		);
 	});
 
-	it("refuses an export with no gate run, of an older run, of a moved commit, or by push", async () => {
+	it("refuses an export with no gate run, of an older run, or of a moved commit", async () => {
 		const r = repo();
 		await withApi(
 			async (h) => {
@@ -518,16 +519,6 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 				);
 				expect(reasonOf(old)).toBe("gate_run_not_latest");
 
-				const push = await refused(
-					await post(h, "/api/exports", {
-						missionId: m.missionId,
-						target: "github_push",
-						gateRunId: second.id,
-						connectionId: randomUUID(),
-					}),
-				);
-				expect(reasonOf(push)).toBe("export_target_not_built");
-
 				// Another dispatch closed since the gate: its commit no longer rebuilds.
 				await closedDispatch(h, m, r, { "src/c.ts": "export const c = 3;\n" });
 				const moved = await refused(
@@ -545,6 +536,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 		const repos = fixtureRepos({}, ["MERIDIAN_GITHUB_TOKEN"], {
 			"meridian-co/app": {
 				branch: "main",
+				defaultBranch: "main",
 				commitSha: "d".repeat(40),
 				entries: new Map([
 					["src", { sha: "e".repeat(40), mode: "040000" }],
@@ -596,7 +588,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 				expect(preview.connectionId).toBe(connectionId);
 				expect(preview.baseRef).toBe("main");
 				expect(preview.baseCommitSha).toBe("d".repeat(40));
-				expect(preview.gateRun.id).toBe(run.id);
+				expect(preview.gateRun?.id).toBe(run.id);
 				const radius = preview.blastRadius;
 				expect(radius?.target).toEqual({
 					owner: "meridian-co",
@@ -636,13 +628,13 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 							id: pr.id,
 							missionId: m.missionId,
 							sprintN: pr.sprintN,
-							packageSha256: preview.package.sha256,
+							packageSha256: preview.package?.sha256 ?? null,
 						}),
 						commitSha: "9".repeat(40),
 						state: "open",
 					},
 				});
-				expect(pr.package.sha256).toBe(preview.package.sha256);
+				expect(pr.package?.sha256).toBe(preview.package?.sha256);
 				expect(writer.opened).toHaveLength(1);
 				const sent = writer.opened[0];
 				expect(sent).toMatchObject({
@@ -654,13 +646,13 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 					deletes: [],
 				});
 				expect(sent?.files.map((f) => f.path)).toEqual(
-					pr.package.files.map((f) => f.path),
+					pr.package?.files.map((f) => f.path),
 				);
 				for (const f of sent?.files ?? []) {
 					expect(gitBlobSha(f.bytes), f.path).toBe(f.blobSha);
 				}
 				expect(sent?.body).toContain(run.id);
-				expect(sent?.body).toContain(preview.package.sha256);
+				expect(sent?.body).toContain(preview.package?.sha256);
 				const log = await h.logRows(pr.id);
 				expect(
 					log.map((l) => [
@@ -1082,7 +1074,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 				};
 				const first = await created(await post(h, "/api/exports", body));
 				const second = await created(await post(h, "/api/exports", body));
-				expect(first.package.sha256).toBe(second.package.sha256);
+				expect(first.package?.sha256).toBe(second.package?.sha256);
 				expect(first.pullRequest?.branch).not.toBe(second.pullRequest?.branch);
 				expect(second.status).toBe("pr-open");
 			},
@@ -1113,6 +1105,330 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 			{ roomSources: r.roomSources, repos: g.repos, repoWriter: writer },
 		);
 	});
+
+	it("pushes from a preview to a branch that is not the default, and records the new tip", async () => {
+		const r = repo();
+		const g = githubTree();
+		g.tree.branch = "release";
+		const writer = recordingWriter();
+		await withApi(
+			async (h) => {
+				const s = await githubReady(h, r);
+				const push = {
+					missionId: s.missionId,
+					target: "github_push",
+					connectionId: s.connectionId,
+					ref: "release",
+				};
+				// No preview: a push is refused before anything is written.
+				const bare = await refused(
+					await post(h, "/api/exports", { ...push, gateRunId: s.runId }),
+				);
+				expect(bare.code).toBe("PREVIEW_REQUIRED");
+				expect(writer.pushed).toEqual([]);
+
+				const preview = await created(
+					await post(h, "/api/exports/preview", push),
+				);
+				expect(preview.blocked).toBeNull();
+				const done = await created(
+					await post(h, "/api/exports", {
+						...push,
+						gateRunId: s.runId,
+						previewExportId: preview.id,
+					}),
+				);
+				expect(done).toMatchObject({
+					status: "done",
+					targetKind: "github_push",
+					baseRef: "release",
+					pullRequest: null,
+					push: { branch: "release", commitSha: "8".repeat(40) },
+					failure: null,
+				});
+				expect(writer.opened).toEqual([]);
+				expect(writer.pushed).toHaveLength(1);
+				expect(writer.pushed[0]).toMatchObject({
+					owner: "meridian-co",
+					repo: "app",
+					base: { branch: "release", commitSha: "d".repeat(40) },
+				});
+				const log = await h.logRows(done.id);
+				expect(
+					log.map((l) => [
+						l.action,
+						(l.payload as { status?: string; to?: string }).status ??
+							(l.payload as { to?: string }).to,
+					]),
+				).toEqual([
+					["export.created", "delivering"],
+					["export.status_changed", "done"],
+				]);
+			},
+			{ roomSources: r.roomSources, repos: g.repos, repoWriter: writer },
+		);
+	});
+
+	it("refuses a push to the default branch until its RepoPolicy allows it, with a confirmation", async () => {
+		const r = repo();
+		const g = githubTree();
+		const writer = recordingWriter();
+		await withApi(
+			async (h) => {
+				const s = await githubReady(h, r);
+				const push = {
+					missionId: s.missionId,
+					target: "github_push",
+					connectionId: s.connectionId,
+				};
+				const first = await created(
+					await post(h, "/api/exports/preview", push),
+				);
+				expect(first.blocked?.reason).toBe("direct_push_not_allowed");
+				const refusedPush = await refused(
+					await post(h, "/api/exports", {
+						...push,
+						gateRunId: s.runId,
+						previewExportId: first.id,
+					}),
+				);
+				expect(reasonOf(refusedPush)).toBe("direct_push_not_allowed");
+				expect(writer.pushed).toEqual([]);
+
+				const put = (body: unknown) =>
+					h.call("/api/repo-policies", { method: "PUT", body });
+				const unconfirmed = await refused(
+					await put({
+						repoUrl: "https://github.com/Meridian-Co/App",
+						allowDirectPushToDefault: true,
+					}),
+				);
+				expect(reasonOf(unconfirmed)).toBe("direct_push_unconfirmed");
+				const set = await put({
+					repoUrl: "https://github.com/Meridian-Co/App",
+					allowDirectPushToDefault: true,
+					confirmDirectPush: true,
+				});
+				expect(set.status, await set.clone().text()).toBe(200);
+				const policy = successEnvelope(repoPolicySchema).parse(
+					await set.json(),
+				).data;
+				expect(policy).toMatchObject({
+					repoUrl: "https://github.com/meridian-co/app",
+					allowDirectPushToDefault: true,
+					label: null,
+					defaultTarget: null,
+				});
+				const listed = (await (await h.call("/api/repo-policies")).json()) as {
+					data: Array<{ id: string }>;
+					meta: { total: number };
+				};
+				expect(listed.data.map((p) => p.id)).toEqual([policy.id]);
+				expect(listed.meta.total).toBe(1);
+				const [row] = await h.logRows(policy.id);
+				expect(row).toMatchObject({
+					action: "repo_policy.set",
+					entityType: "repo_policy",
+					payload: { allowDirectPushToDefault: true, was: null },
+				});
+
+				const second = await created(
+					await post(h, "/api/exports/preview", push),
+				);
+				expect(second.blocked).toBeNull();
+				const done = await created(
+					await post(h, "/api/exports", {
+						...push,
+						gateRunId: s.runId,
+						previewExportId: second.id,
+					}),
+				);
+				expect(done.push).toEqual({
+					branch: "main",
+					commitSha: "8".repeat(40),
+				});
+
+				// Turning it off needs no confirmation, and the next push refuses again.
+				const off = await put({
+					repoUrl: "https://github.com/meridian-co/app",
+					allowDirectPushToDefault: false,
+				});
+				expect(off.status).toBe(200);
+				const third = await created(
+					await post(h, "/api/exports/preview", push),
+				);
+				expect(third.blocked?.reason).toBe("direct_push_not_allowed");
+			},
+			{ roomSources: r.roomSources, repos: g.repos, repoWriter: writer },
+		);
+	});
+
+	it("fails a push GitHub refuses, and says why", async () => {
+		const r = repo();
+		const g = githubTree();
+		g.tree.branch = "release";
+		const writer = recordingWriter({
+			pushFails: new ApiError(
+				"GITHUB_REJECTED",
+				"GitHub refused moving release on meridian-co/app: it moved since its tip was read. Preview again.",
+			),
+		});
+		await withApi(
+			async (h) => {
+				const s = await githubReady(h, r);
+				const push = {
+					missionId: s.missionId,
+					target: "github_push",
+					connectionId: s.connectionId,
+					ref: "release",
+				};
+				const preview = await created(
+					await post(h, "/api/exports/preview", push),
+				);
+				const failed = await refused(
+					await post(h, "/api/exports", {
+						...push,
+						gateRunId: s.runId,
+						previewExportId: preview.id,
+					}),
+					502,
+				);
+				expect(failed.code).toBe("GITHUB_REJECTED");
+				const id = (failed.details as { exportId: string }).exportId;
+				const row = await created(await h.call(`/api/exports/${id}`), 200);
+				expect(row).toMatchObject({
+					status: "failed",
+					push: null,
+					failure: { code: "GITHUB_REJECTED" },
+				});
+			},
+			{ roomSources: r.roomSources, repos: g.repos, repoWriter: writer },
+		);
+	});
+
+	it("moves a PR export to done or closed from GitHub's signed webhook, as the system", async () => {
+		const r = repo();
+		const g = githubTree();
+		const writer = recordingWriter();
+		const secret = "whsec-test";
+		await withApi(
+			async (h) => {
+				const s = await githubReady(h, r);
+				const open = async () =>
+					created(
+						await post(h, "/api/exports", {
+							missionId: s.missionId,
+							target: "github_pr",
+							gateRunId: s.runId,
+							connectionId: s.connectionId,
+						}),
+					);
+				const merged = await open();
+				const closed = await open();
+				const deliver = (
+					pr: { number: number; branch: string },
+					over: { merged?: boolean; repo?: string; signature?: string },
+				) => {
+					const body = JSON.stringify({
+						action: "closed",
+						pull_request: {
+							number: pr.number,
+							html_url: `https://github.com/meridian-co/app/pull/${pr.number}`,
+							merged: over.merged ?? false,
+							head: { ref: pr.branch, sha: "9".repeat(40) },
+						},
+						repository: { full_name: over.repo ?? "Meridian-Co/App" },
+					});
+					return h.call("/api/webhooks/github", {
+						method: "POST",
+						body: JSON.parse(body),
+						headers: {
+							// No session: GitHub has none. The signature is the credential.
+							cookie: "",
+							"x-github-event": "pull_request",
+							"x-hub-signature-256":
+								over.signature ??
+								`sha256=${createHmac("sha256", secret).update(body).digest("hex")}`,
+						},
+					});
+				};
+				const prOf = (e: typeof merged) => ({
+					number: e.pullRequest?.number ?? 0,
+					branch: e.pullRequest?.branch ?? "",
+				});
+
+				const unsigned = await deliver(prOf(merged), {
+					merged: true,
+					signature: "sha256=00",
+				});
+				expect(unsigned.status).toBe(401);
+				// Another repository's PR with the same number and branch moves nothing.
+				const elsewhere = await deliver(prOf(merged), {
+					merged: true,
+					repo: "someone/else",
+				});
+				expect(elsewhere.status).toBe(204);
+				const still = await created(
+					await h.call(`/api/exports/${merged.id}`),
+					200,
+				);
+				expect(still.status).toBe("pr-open");
+
+				expect((await deliver(prOf(merged), { merged: true })).status).toBe(
+					204,
+				);
+				expect((await deliver(prOf(closed), { merged: false })).status).toBe(
+					204,
+				);
+				const done = await created(
+					await h.call(`/api/exports/${merged.id}`),
+					200,
+				);
+				expect(done).toMatchObject({
+					status: "done",
+					pullRequest: { state: "merged" },
+				});
+				const shut = await created(
+					await h.call(`/api/exports/${closed.id}`),
+					200,
+				);
+				expect(shut).toMatchObject({
+					status: "closed",
+					pullRequest: { state: "closed" },
+				});
+				// Created, delivering to pr-open (the operator), then pr-open to done.
+				const moved = (await h.logRows(merged.id)).at(-1);
+				expect(moved).toMatchObject({
+					action: "export.status_changed",
+					actorKind: "system",
+					actorUserId: null,
+					payload: { from: "pr-open", to: "done" },
+				});
+				// A replayed delivery changes nothing.
+				expect((await deliver(prOf(merged), { merged: true })).status).toBe(
+					204,
+				);
+				expect(await h.logRows(merged.id)).toHaveLength(3);
+			},
+			{
+				roomSources: r.roomSources,
+				repos: g.repos,
+				repoWriter: writer,
+				githubWebhookSecret: secret,
+			},
+		);
+	});
+
+	it("has no webhook route when no secret is configured", async () => {
+		await withApi(async (h) => {
+			const res = await h.call("/api/webhooks/github", {
+				method: "POST",
+				body: {},
+				headers: { cookie: "", "x-github-event": "ping" },
+			});
+			expect(res.status).toBe(404);
+		});
+	});
 });
 
 /** meridian-co/app's main branch, which a test may move. */
@@ -1120,6 +1436,7 @@ function githubTree() {
 	const aBlob = gitBlobSha(new TextEncoder().encode("export const a = 1;\n"));
 	const tree = {
 		branch: "main",
+		defaultBranch: "main",
 		commitSha: "d".repeat(40) as string | null,
 		entries: new Map([
 			["src", { sha: "e".repeat(40), mode: "040000" }],

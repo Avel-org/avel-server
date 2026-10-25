@@ -1,5 +1,5 @@
 import { tsr } from "@ts-rest/serverless/fetch";
-import { and, asc, count, desc, eq, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, isNotNull, ne, sql } from "drizzle-orm";
 import {
 	type BriefCheck,
 	briefSchema,
@@ -8,6 +8,7 @@ import {
 	type GateRunSummary,
 	gateContract,
 	ok,
+	type PermanentCheck,
 	type PlaybookGate,
 	ROLE_SIDE,
 	type Role,
@@ -48,10 +49,13 @@ import { GATE_CONFIG, type GateConfig } from "../lib/gate/config";
 import { planIntegration } from "../lib/gate/integration";
 import {
 	briefCheckFindings,
+	type ChangedText,
 	type DependencyManifest,
 	dependencyFindings,
 	type JudgeRun,
 	judgeCoverageFindings,
+	type PriorCheck,
+	priorFindingFindings,
 	protectedPathFindings,
 	RUNNER_SOURCE,
 	type SecretScanFile,
@@ -510,8 +514,59 @@ export function gateJudge(deps: {
 			});
 		}
 
+		// Module 12: every confirmed finding from another mission whose check is
+		// in this mission's scope: general, or scoped to this mission's client.
+		const priorRows = await tx
+			.select({
+				id: finding.id,
+				clientId: finding.clientId,
+				subject: finding.subject,
+				check: finding.check,
+				missionType: mission.type,
+				sprintN: mission.sprintN,
+			})
+			.from(finding)
+			.innerJoin(mission, eq(mission.id, finding.missionId))
+			.where(
+				and(
+					eq(finding.status, "confirmed"),
+					isNotNull(finding.check),
+					ne(finding.missionId, m.id),
+				),
+			)
+			.orderBy(asc(finding.id));
+		const priorChecks: PriorCheck[] = priorRows.flatMap((f) => {
+			const check = f.check as PermanentCheck;
+			const inScope =
+				check.scope === "general" ||
+				(f.clientId !== null && f.clientId === m.clientId);
+			return inScope
+				? [
+						{
+							findingId: f.id,
+							foundIn: `${f.missionType} sprint ${f.sprintN}`,
+							subject: f.subject,
+							check,
+						},
+					]
+				: [];
+		});
+		const changedText: ChangedText[] = changed.map((p) => {
+			const h = blob(head[p] as string);
+			return {
+				path: p,
+				text: h.whole ? new TextDecoder().decode(h.bytes) : null,
+			};
+		});
+
 		const checks = brief.success ? brief.data.checks : [];
 		const findings: GateFinding[] = [
+			...priorFindingFindings({
+				checks: priorChecks,
+				changed: changedText,
+				gate: GATE_CONFIG.judgeCoverageGate,
+				commitSha,
+			}),
 			...specCheckFindings(m.brief, commitSha),
 			...secretScanFindings(scanned, commitSha, GATE_CONFIG.secretScan),
 			...dependencyFindings(manifests, commitSha),

@@ -228,6 +228,8 @@ const app = createApp({
 		maxBytes: uploadMaxBytes,
 	},
 	checkRunner,
+	// Unset or empty: no webhook route, and a PR export settles by refresh only.
+	githubWebhookSecret: process.env.GITHUB_WEBHOOK_SECRET || null,
 });
 
 // The real harness files reports and findings through the app itself, in

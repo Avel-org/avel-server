@@ -69,10 +69,11 @@ describe.skipIf(!url)("migration 0012 on a database with exports", () => {
 					values ('00000000-0000-4000-8000-000000000001', 'C', 'active', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z')`;
 				await conn`insert into mission (id, engagement_id, origin, type, brief, sprint_n, status, cut, cut_source, repo_url, created_at, updated_at)
 					values ('00000000-0000-4000-8000-000000000002', null, 'internal', 'full-build', '{}', 1, 'active', 'vertical', 'derived', 'https://github.com/x/y', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z')`;
-				await conn`insert into export (id, mission_id, sprint_n, idempotency_key, target_kind, status, created_at, updated_at)
+				// The done export is rendered, or migration 0056 refuses it.
+				await conn`insert into export (id, mission_id, sprint_n, idempotency_key, target_kind, status, version_manifest, package_sha256, package_hash_version, created_at, updated_at)
 					values
-					('00000000-0000-4000-8000-000000000003', '00000000-0000-4000-8000-000000000002', 1, 'k1', 'zip', 'done', '2026-09-02T00:00:00Z', '2026-09-05T00:00:00Z'),
-					('00000000-0000-4000-8000-000000000004', '00000000-0000-4000-8000-000000000002', 1, 'k2', 'zip', 'failed', '2026-09-03T00:00:00Z', '2026-09-03T00:00:00Z')`;
+					('00000000-0000-4000-8000-000000000003', '00000000-0000-4000-8000-000000000002', 1, 'k1', 'zip', 'done', '{}', ${"a".repeat(64)}, 1, '2026-09-02T00:00:00Z', '2026-09-05T00:00:00Z'),
+					('00000000-0000-4000-8000-000000000004', '00000000-0000-4000-8000-000000000002', 1, 'k2', 'zip', 'failed', null, null, null, '2026-09-03T00:00:00Z', '2026-09-03T00:00:00Z')`;
 
 				await migrate(drizzle(conn), { migrationsFolder: "drizzle" });
 
