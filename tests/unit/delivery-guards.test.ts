@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	checkDeliverable,
 	checkDeterminism,
+	checkDirectPush,
 	checkGateVerified,
 	checkNoViolations,
 	checkPreviewFresh,
@@ -146,6 +147,28 @@ describe("checkDeterminism", () => {
 	});
 });
 
+describe("checkDirectPush", () => {
+	const push = { branch: "main", defaultBranch: "main" };
+	it("refuses a push to the default branch unless its policy allows it", () => {
+		expect(
+			reason(checkDirectPush({ ...push, allowDirectPushToDefault: false })),
+		).toBe("direct_push_not_allowed");
+		expect(
+			checkDirectPush({ ...push, allowDirectPushToDefault: true }).ok,
+		).toBe(true);
+	});
+	it("allows any other branch, and every other target", () => {
+		expect(
+			checkDirectPush({
+				branch: "release",
+				defaultBranch: "main",
+				allowDirectPushToDefault: false,
+			}).ok,
+		).toBe(true);
+		expect(checkDirectPush(null).ok).toBe(true);
+	});
+});
+
 describe("checkDeliverable", () => {
 	const good: DeliverableInput = {
 		gateResult: "verified",
@@ -162,8 +185,18 @@ describe("checkDeliverable", () => {
 		currentBaseSha: BASE,
 		packageSha: PKG,
 		packageHashVersion: 1,
+		push: {
+			branch: "release",
+			defaultBranch: "main",
+			allowDirectPushToDefault: false,
+		},
 	};
 	const preview = good.preview as NonNullable<DeliverableInput["preview"]>;
+	const toDefault = {
+		branch: "main",
+		defaultBranch: "main",
+		allowDirectPushToDefault: false,
+	};
 
 	it("allows a verified, clean, fresh, matching delivery", () => {
 		expect(checkDeliverable(good)).toEqual({ ok: true, warnings: [] });
@@ -178,6 +211,7 @@ describe("checkDeliverable", () => {
 				"blast_radius_violation",
 			],
 			[{ preview: null }, "preview_required"],
+			[{ push: toDefault }, "direct_push_not_allowed"],
 			[
 				{ preview: { ...preview, missionId: OTHER } },
 				"preview_mission_mismatch",
@@ -200,10 +234,12 @@ describe("checkDeliverable", () => {
 			currentBaseSha: MOVED,
 			packageSha: "d".repeat(64),
 			packageHashVersion: 2,
+			push: toDefault,
 		};
 		const order = [
 			"gate_failed",
 			"blast_radius_violation",
+			"direct_push_not_allowed",
 			"preview_mission_mismatch",
 			"preview_stale",
 			"package_hash_version_mismatch",
@@ -212,6 +248,7 @@ describe("checkDeliverable", () => {
 		const fixes: Array<Partial<DeliverableInput>> = [
 			{ gateResult: "verified" },
 			{ violations: [] },
+			{ push: good.push },
 			{ preview },
 			{ currentBaseSha: BASE },
 			{ packageHashVersion: 1 },

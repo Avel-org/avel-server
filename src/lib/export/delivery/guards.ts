@@ -27,6 +27,7 @@ export const REFUSAL_REASONS = [
 	"preview_stale",
 	"package_hash_version_mismatch",
 	"package_hash_mismatch",
+	"direct_push_not_allowed",
 ] as const;
 export type RefusalReason = (typeof REFUSAL_REASONS)[number];
 
@@ -179,6 +180,29 @@ export function checkDeterminism(
 	return allowed();
 }
 
+/**
+ * A push to the repository's default branch needs its RepoPolicy to allow
+ * it; a repo with no policy never does (DATA-CONTRACTS-V2.md, RepoPolicy).
+ * Any other branch, and any other target, is allowed here.
+ */
+export function checkDirectPush(push: PushTarget | null): GuardResult {
+	if (push === null || push.branch !== push.defaultBranch) return allowed();
+	if (push.allowDirectPushToDefault) return allowed();
+	return {
+		ok: false,
+		code: "PRECONDITION_FAILED",
+		reason: "direct_push_not_allowed",
+		message: `${push.branch} is the repository's default branch, and its policy does not allow a direct push. Open a pull request, or push to another branch.`,
+	};
+}
+
+/** Where a github_push writes, and whether its repo's policy allows the default branch. */
+export type PushTarget = {
+	branch: string;
+	defaultBranch: string;
+	allowDirectPushToDefault: boolean;
+};
+
 export type LinkedPreview = {
 	exportId: string;
 	missionId: string;
@@ -197,11 +221,14 @@ export type DeliverableInput = {
 	currentBaseSha: string | null;
 	packageSha: string;
 	packageHashVersion: number;
+	/** A github_push's branch and policy; null for every other target. */
+	push: PushTarget | null;
 };
 
 /**
  * Every guard, in a fixed order, and the first refusal wins: gate, then
- * violations, then the preview's presence, mission, freshness and hash.
+ * violations, then the preview's presence, a push's policy, then the
+ * preview's mission, freshness and hash.
  * Without a linked preview the last three have nothing to compare. Warnings
  * from guards that allowed are kept.
  */
@@ -211,6 +238,7 @@ export function checkDeliverable(input: DeliverableInput): GuardResult {
 		() => checkGateVerified(input.gateResult),
 		() => checkNoViolations(input.violations),
 		() => checkPreviewRequired(input.target, input.preview?.exportId ?? null),
+		() => checkDirectPush(input.push),
 	];
 	const preview = input.preview;
 	if (preview !== null) {

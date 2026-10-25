@@ -89,6 +89,7 @@ export const activityAction = z.enum([
 	"agent_template.created",
 	"mission.gate_queued",
 	"mission.gate_failed",
+	"repo_policy.set",
 ]);
 
 /** Must equal the activity_entity_type pgEnum; tests/api/activity.test.ts checks it. */
@@ -113,6 +114,7 @@ export const activityEntityType = z.enum([
 	"canon_question",
 	"client_memory",
 	"file",
+	"repo_policy",
 ]);
 
 export type ActivityActorKind = z.infer<typeof activityActorKind>;

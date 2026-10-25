@@ -13,6 +13,7 @@ import { ok } from "../contract/shared/envelope";
 import type { PreconditionReason } from "../contract/shared/errors";
 import type { ExportStatus } from "../contract/shared/status";
 import { logActivity } from "../db/activity";
+import { directPushAllowed } from "../db/repo-policy";
 import {
 	activityLog,
 	agentTemplate,
@@ -28,11 +29,12 @@ import {
 import { live } from "../db/schema/columns";
 import { type Executor, type Tx, withTx } from "../db/tx";
 import { sha256Of } from "../gateways/blob";
-import type { RepoSource } from "../gateways/repo-source";
+import type { BranchTree, RepoSource } from "../gateways/repo-source";
 import type {
 	FoundPullRequest,
 	OpenedPullRequest,
 	PullRequestRequest,
+	PushRequest,
 	RepoWriter,
 } from "../gateways/repo-writer";
 import { requestSha256 } from "../lib/canonical";
@@ -56,7 +58,7 @@ import {
 	computeBlastRadius,
 	type DeliveryPackage,
 	type GuardResult,
-	type RemoteTree,
+	type PushTarget,
 	type Violation,
 } from "../lib/export/delivery";
 import { localTree } from "../lib/export/tree";
@@ -238,6 +240,10 @@ export function toWire(row: ExportRow): ExportWire {
 						commitSha: row.prCommitSha,
 						state: prState(row.prStatus),
 					}
+				: null,
+		push:
+			row.pushedCommitSha !== null && row.baseRef !== null
+				? { branch: row.baseRef, commitSha: row.pushedCommitSha }
 				: null,
 		failure:
 			row.failureCode !== null && row.failureMessage !== null
@@ -538,7 +544,7 @@ export function exportRoutes(deps: ExportDeps) {
 			credentialRef: string;
 			owner: string;
 			repo: string;
-			tree: RemoteTree & { branch: string };
+			tree: BranchTree;
 		} | null = null;
 		if (body.target !== "zip") {
 			const repo =
@@ -583,6 +589,19 @@ export function exportRoutes(deps: ExportDeps) {
 				tree,
 			};
 		}
+		// A push's branch and its repo's policy, for checkDirectPush.
+		const push: PushTarget | null =
+			body.target === "github_push" && github
+				? {
+						branch: github.tree.branch,
+						defaultBranch: github.tree.defaultBranch,
+						allowDirectPushToDefault: await directPushAllowed(
+							tx,
+							github.owner,
+							github.repo,
+						),
+					}
+				: null;
 
 		const dispatches = await closedDispatches(tx, m.id);
 		const rendered = await render(
@@ -639,6 +658,7 @@ export function exportRoutes(deps: ExportDeps) {
 			violations: blastRadius ? blastRadius.violations : onBase.violations,
 			blastRadius,
 			github,
+			push,
 		};
 	}
 
@@ -932,6 +952,48 @@ export function exportRoutes(deps: ExportDeps) {
 		});
 	}
 
+	/**
+	 * Pushes outside any transaction, then records done with the new tip, or
+	 * failed with the reason, which is also thrown. The writer reads the tip
+	 * once when GitHub stops answering mid-move, so a push that landed is
+	 * done. A status another request recorded meanwhile is never overwritten.
+	 */
+	async function deliverPush(
+		ctx: RequestContext,
+		row: ExportRow,
+		request: PushRequest,
+		engagementId: string | null,
+	): Promise<ExportRow> {
+		let pushed: { commitSha: string };
+		try {
+			pushed = await deps.repoWriter.pushToBranch(request);
+		} catch (e) {
+			const err =
+				e instanceof ApiError
+					? e
+					: new ApiError(
+							"EXTERNAL_GITHUB",
+							`Pushing to ${request.owner}/${request.repo} failed`,
+						);
+			const failed = await withTx(deps.db(), (tx) =>
+				moveStatus(tx, ctx, row, "failed", engagementId, {
+					failureCode: err.code,
+					failureMessage: err.message,
+				}),
+			);
+			if (!failed) return withTx(deps.db(), (tx) => current(tx, row.id));
+			throw new ApiError(err.code, err.message, {
+				details: { exportId: row.id } as never,
+			});
+		}
+		return withTx(deps.db(), async (tx) => {
+			const moved = await moveStatus(tx, ctx, row, "done", engagementId, {
+				pushedCommitSha: pushed.commitSha,
+			});
+			return moved ?? current(tx, row.id);
+		});
+	}
+
 	return tsr.platformContext<RequestContext>().router(exportContract, {
 		preview: async ({ headers, body }, ctx) => {
 			const key = headers["idempotency-key"];
@@ -979,6 +1041,7 @@ export function exportRoutes(deps: ExportDeps) {
 					currentBaseSha: baseCommitSha,
 					packageSha: p.rendered.sha256,
 					packageHashVersion: PACKAGE_HASH_VERSION,
+					push: p.push,
 				});
 				const manifest: ExportManifest = {
 					gateRun,
@@ -1048,13 +1111,6 @@ export function exportRoutes(deps: ExportDeps) {
 						{ missionId: m.id },
 					);
 				}
-				if (body.target === "github_push") {
-					throw precondition(
-						"export_target_not_built",
-						"Pushing to a branch is not built yet. Open a pull request or export a zip.",
-						{ missionId: m.id },
-					);
-				}
 				let preview: ExportRow | null = null;
 				if (body.previewExportId) {
 					const [found] = await tx
@@ -1091,6 +1147,7 @@ export function exportRoutes(deps: ExportDeps) {
 					currentBaseSha: p.github?.tree.commitSha ?? null,
 					packageSha: p.rendered.sha256,
 					packageHashVersion: PACKAGE_HASH_VERSION,
+					push: p.push,
 				});
 				// A preview of another target approves nothing here. Checked after
 				// the gate, the violations and the preview's presence, which come first.
@@ -1152,20 +1209,39 @@ export function exportRoutes(deps: ExportDeps) {
 						m.engagementId,
 					);
 					const title = `AVEL: ${m.type} sprint ${m.sprintN}`;
+					const files = p.rendered.pkg.files.map((f) => ({
+						path: f.path,
+						mode: f.mode,
+						bytes: f.bytes,
+						blobSha: f.blobSha,
+					}));
+					const message = `${title}\n\nGate run ${gateRun.id}, ${gateRun.result}. Package ${p.rendered.sha256}.`;
+					if (body.target === "github_push") {
+						const push: PushRequest = {
+							owner: p.github.owner,
+							repo: p.github.repo,
+							credentialRef: p.github.credentialRef,
+							base: { branch: p.github.tree.branch, commitSha: base },
+							files,
+							deletes: [...p.rendered.pkg.deletes],
+							message,
+						};
+						return {
+							replayed: false,
+							row,
+							push,
+							engagementId: m.engagementId,
+						};
+					}
 					const deliver: PullRequestRequest = {
 						owner: p.github.owner,
 						repo: p.github.repo,
 						credentialRef: p.github.credentialRef,
 						base: { branch: p.github.tree.branch, commitSha: base },
 						head: prBranch(row),
-						files: p.rendered.pkg.files.map((f) => ({
-							path: f.path,
-							mode: f.mode,
-							bytes: f.bytes,
-							blobSha: f.blobSha,
-						})),
+						files,
 						deletes: [...p.rendered.pkg.deletes],
-						message: `${title}\n\nGate run ${gateRun.id}, ${gateRun.result}. Package ${p.rendered.sha256}.`,
+						message,
 						title,
 						body: prBody(m, gateRun, p.rendered.sha256, row.id),
 					};
@@ -1205,6 +1281,15 @@ export function exportRoutes(deps: ExportDeps) {
 			if (result.replayed) {
 				ctx.responseHeaders.set(REPLAYED, "true");
 				return { status: 200, body: ok(toWire(result.row)) };
+			}
+			if ("push" in result && result.push) {
+				const row = await deliverPush(
+					ctx,
+					result.row,
+					result.push,
+					result.engagementId,
+				);
+				return { status: 201, body: ok(toWire(row)) };
 			}
 			if ("deliver" in result && result.deliver) {
 				const row = await deliverPullRequest(

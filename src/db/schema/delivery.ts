@@ -152,6 +152,9 @@ export const exportTable = pgTable(
 		prUrl: text("pr_url"),
 		prHeadRef: text("pr_head_ref"),
 		prCommitSha: text("pr_commit_sha"),
+		// A done github_push export's commit, the new tip of the branch it
+		// pushed to (2026-10-24). The branch is base_ref.
+		pushedCommitSha: text("pushed_commit_sha"),
 		// Why a real export failed, for the operator: an error code and the
 		// server's own message, never GitHub's response body.
 		failureCode: text("failure_code"),
@@ -195,6 +198,10 @@ export const exportTable = pgTable(
 		check(
 			"export_pr_complete",
 			sql`(${t.prNumber} is null) = (${t.prUrl} is null) and (${t.prNumber} is null) = (${t.prHeadRef} is null) and (${t.prNumber} is null) = (${t.prCommitSha} is null)`,
+		),
+		check(
+			"export_pushed_commit_sha",
+			sql`${t.pushedCommitSha} is null or (${t.targetKind} = 'github_push' and ${t.status} = 'done' and ${t.pushedCommitSha} ~ '^[0-9a-f]{40}$')`,
 		),
 		check(
 			"export_pr_only_github_pr",

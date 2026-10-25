@@ -10,6 +10,7 @@ import type {
 import type {
 	FoundPullRequest,
 	PullRequestRequest,
+	PushRequest,
 	RepoWriter,
 } from "../../src/gateways/repo-writer";
 import type { Snapshot } from "../../src/lib/repo-read/snapshot";
@@ -112,7 +113,8 @@ export function fixtureRepos(
 /**
  * A RepoWriter that records what it is asked and answers from `script`:
  * openPullRequest with PR number 42 (or throws `fail`), findPullRequest
- * with `found` when its branch is the one asked for, else null.
+ * with `found` when its branch is the one asked for, else null, and
+ * pushToBranch with commit 888… (or throws `pushFails`).
  */
 export function recordingWriter(
 	script: {
@@ -122,18 +124,28 @@ export function recordingWriter(
 		during?: (req: PullRequestRequest) => Promise<void>;
 		/** findPullRequest throws this, as GitHub not answering. */
 		findFails?: ApiError;
+		/** pushToBranch throws this. */
+		pushFails?: ApiError;
 	} = {},
 ): RepoWriter & {
 	opened: PullRequestRequest[];
+	pushed: PushRequest[];
 	finds: Array<{ owner: string; repo: string; head: string }>;
 	script: typeof script;
 } {
 	const opened: PullRequestRequest[] = [];
+	const pushed: PushRequest[] = [];
 	const finds: Array<{ owner: string; repo: string; head: string }> = [];
 	return {
 		opened,
+		pushed,
 		finds,
 		script,
+		async pushToBranch(req) {
+			pushed.push(req);
+			if (script.pushFails) throw script.pushFails;
+			return { branch: req.base.branch, commitSha: "8".repeat(40) };
+		},
 		async openPullRequest(req) {
 			// As createRef does: a branch that exists is never repointed.
 			const taken = opened.some((o) => o.head === req.head);

@@ -110,6 +110,7 @@ export const deliveryBlock = z.object({
 		"preview_stale",
 		"package_hash_version_mismatch",
 		"package_hash_mismatch",
+		"direct_push_not_allowed",
 	]),
 	message: z.string(),
 });
@@ -195,6 +196,8 @@ export const exportSchema = z.object({
 			state: z.enum(["open", "merged", "closed"]),
 		})
 		.nullable(),
+	/** A done github_push export's branch and the commit AVEL made, now its tip; null otherwise. */
+	push: z.object({ branch: z.string(), commitSha: sha40 }).nullable(),
 	/** Why a real export failed, written for the operator; null unless status is failed. */
 	failure: z.object({ code: z.string(), message: z.string() }).nullable(),
 	/** The zip's sha256 and length. Set on a done zip; its bytes are at GET /api/exports/:id/zip. */
@@ -267,10 +270,9 @@ export const exportListEnvelope = z.object({
 });
 
 /**
- * Module 10 and 11, slice 1 (J, 2026-10-22): previews for every target,
- * delivery by zip. A create for github_pr or github_push is refused
- * (export_target_not_built) until slice 2. The zip's bytes are behind a
- * byte route outside this contract: GET /api/exports/:id/zip.
+ * Module 10 and 11: previews for every target (J, 2026-10-22), and delivery
+ * by zip, GitHub pull request (2026-10-24) and push (2026-10-24). The zip's
+ * bytes are behind a byte route outside this contract: GET /api/exports/:id/zip.
  */
 export const exportContract = c.router({
 	preview: {
@@ -297,7 +299,7 @@ export const exportContract = c.router({
 			200: successEnvelope(exportSchema),
 		},
 		summary:
-			"Render the gate run again and deliver it: a zip, or a GitHub pull request (github_push is not built)",
+			"Render the gate run again and deliver it: a zip, a GitHub pull request, or a push to a branch",
 	},
 	refresh: {
 		method: "POST",

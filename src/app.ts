@@ -55,6 +55,7 @@ import { missionPlanRoutes } from "./routes/mission-plan";
 import { missionRoutes } from "./routes/missions";
 import { playbookRoutes } from "./routes/playbooks";
 import { presetRoutes } from "./routes/presets";
+import { repoPolicyRoutes } from "./routes/repo-policies";
 import { rosterRoutes } from "./routes/roster";
 import type { RequestContext } from "./routes/shared";
 import { skillSourceRoutes } from "./routes/skill-sources";
@@ -138,6 +139,7 @@ export function createApp(deps: AppDeps) {
 			roomSources: deps.roomSources,
 		}),
 		connections: connectionRoutes(routeDeps),
+		repoPolicies: repoPolicyRoutes(routeDeps),
 		agentTemplates: agentTemplateRoutes(routeDeps),
 		identityVersions: identityVersionRoutes(routeDeps),
 		skills: skillRoutes(routeDeps),

@@ -7,6 +7,7 @@ import {
 	exportListEnvelope,
 	exportSchema,
 	preconditionDetails,
+	repoPolicySchema,
 	successEnvelope,
 } from "../../src/contract";
 import { closeDb } from "../../src/db/client";
@@ -491,7 +492,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 		);
 	});
 
-	it("refuses an export with no gate run, of an older run, of a moved commit, or by push", async () => {
+	it("refuses an export with no gate run, of an older run, or of a moved commit", async () => {
 		const r = repo();
 		await withApi(
 			async (h) => {
@@ -518,16 +519,6 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 				);
 				expect(reasonOf(old)).toBe("gate_run_not_latest");
 
-				const push = await refused(
-					await post(h, "/api/exports", {
-						missionId: m.missionId,
-						target: "github_push",
-						gateRunId: second.id,
-						connectionId: randomUUID(),
-					}),
-				);
-				expect(reasonOf(push)).toBe("export_target_not_built");
-
 				// Another dispatch closed since the gate: its commit no longer rebuilds.
 				await closedDispatch(h, m, r, { "src/c.ts": "export const c = 3;\n" });
 				const moved = await refused(
@@ -545,6 +536,7 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 		const repos = fixtureRepos({}, ["MERIDIAN_GITHUB_TOKEN"], {
 			"meridian-co/app": {
 				branch: "main",
+				defaultBranch: "main",
 				commitSha: "d".repeat(40),
 				entries: new Map([
 					["src", { sha: "e".repeat(40), mode: "040000" }],
@@ -1113,6 +1105,206 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 			{ roomSources: r.roomSources, repos: g.repos, repoWriter: writer },
 		);
 	});
+
+	it("pushes from a preview to a branch that is not the default, and records the new tip", async () => {
+		const r = repo();
+		const g = githubTree();
+		g.tree.branch = "release";
+		const writer = recordingWriter();
+		await withApi(
+			async (h) => {
+				const s = await githubReady(h, r);
+				const push = {
+					missionId: s.missionId,
+					target: "github_push",
+					connectionId: s.connectionId,
+					ref: "release",
+				};
+				// No preview: a push is refused before anything is written.
+				const bare = await refused(
+					await post(h, "/api/exports", { ...push, gateRunId: s.runId }),
+				);
+				expect(bare.code).toBe("PREVIEW_REQUIRED");
+				expect(writer.pushed).toEqual([]);
+
+				const preview = await created(
+					await post(h, "/api/exports/preview", push),
+				);
+				expect(preview.blocked).toBeNull();
+				const done = await created(
+					await post(h, "/api/exports", {
+						...push,
+						gateRunId: s.runId,
+						previewExportId: preview.id,
+					}),
+				);
+				expect(done).toMatchObject({
+					status: "done",
+					targetKind: "github_push",
+					baseRef: "release",
+					pullRequest: null,
+					push: { branch: "release", commitSha: "8".repeat(40) },
+					failure: null,
+				});
+				expect(writer.opened).toEqual([]);
+				expect(writer.pushed).toHaveLength(1);
+				expect(writer.pushed[0]).toMatchObject({
+					owner: "meridian-co",
+					repo: "app",
+					base: { branch: "release", commitSha: "d".repeat(40) },
+				});
+				const log = await h.logRows(done.id);
+				expect(
+					log.map((l) => [
+						l.action,
+						(l.payload as { status?: string; to?: string }).status ??
+							(l.payload as { to?: string }).to,
+					]),
+				).toEqual([
+					["export.created", "delivering"],
+					["export.status_changed", "done"],
+				]);
+			},
+			{ roomSources: r.roomSources, repos: g.repos, repoWriter: writer },
+		);
+	});
+
+	it("refuses a push to the default branch until its RepoPolicy allows it, with a confirmation", async () => {
+		const r = repo();
+		const g = githubTree();
+		const writer = recordingWriter();
+		await withApi(
+			async (h) => {
+				const s = await githubReady(h, r);
+				const push = {
+					missionId: s.missionId,
+					target: "github_push",
+					connectionId: s.connectionId,
+				};
+				const first = await created(
+					await post(h, "/api/exports/preview", push),
+				);
+				expect(first.blocked?.reason).toBe("direct_push_not_allowed");
+				const refusedPush = await refused(
+					await post(h, "/api/exports", {
+						...push,
+						gateRunId: s.runId,
+						previewExportId: first.id,
+					}),
+				);
+				expect(reasonOf(refusedPush)).toBe("direct_push_not_allowed");
+				expect(writer.pushed).toEqual([]);
+
+				const put = (body: unknown) =>
+					h.call("/api/repo-policies", { method: "PUT", body });
+				const unconfirmed = await refused(
+					await put({
+						repoUrl: "https://github.com/Meridian-Co/App",
+						allowDirectPushToDefault: true,
+					}),
+				);
+				expect(reasonOf(unconfirmed)).toBe("direct_push_unconfirmed");
+				const set = await put({
+					repoUrl: "https://github.com/Meridian-Co/App",
+					allowDirectPushToDefault: true,
+					confirmDirectPush: true,
+				});
+				expect(set.status, await set.clone().text()).toBe(200);
+				const policy = successEnvelope(repoPolicySchema).parse(
+					await set.json(),
+				).data;
+				expect(policy).toMatchObject({
+					repoUrl: "https://github.com/meridian-co/app",
+					allowDirectPushToDefault: true,
+					label: null,
+					defaultTarget: null,
+				});
+				const listed = (await (await h.call("/api/repo-policies")).json()) as {
+					data: Array<{ id: string }>;
+					meta: { total: number };
+				};
+				expect(listed.data.map((p) => p.id)).toEqual([policy.id]);
+				expect(listed.meta.total).toBe(1);
+				const [row] = await h.logRows(policy.id);
+				expect(row).toMatchObject({
+					action: "repo_policy.set",
+					entityType: "repo_policy",
+					payload: { allowDirectPushToDefault: true, was: null },
+				});
+
+				const second = await created(
+					await post(h, "/api/exports/preview", push),
+				);
+				expect(second.blocked).toBeNull();
+				const done = await created(
+					await post(h, "/api/exports", {
+						...push,
+						gateRunId: s.runId,
+						previewExportId: second.id,
+					}),
+				);
+				expect(done.push).toEqual({
+					branch: "main",
+					commitSha: "8".repeat(40),
+				});
+
+				// Turning it off needs no confirmation, and the next push refuses again.
+				const off = await put({
+					repoUrl: "https://github.com/meridian-co/app",
+					allowDirectPushToDefault: false,
+				});
+				expect(off.status).toBe(200);
+				const third = await created(
+					await post(h, "/api/exports/preview", push),
+				);
+				expect(third.blocked?.reason).toBe("direct_push_not_allowed");
+			},
+			{ roomSources: r.roomSources, repos: g.repos, repoWriter: writer },
+		);
+	});
+
+	it("fails a push GitHub refuses, and says why", async () => {
+		const r = repo();
+		const g = githubTree();
+		g.tree.branch = "release";
+		const writer = recordingWriter({
+			pushFails: new ApiError(
+				"GITHUB_REJECTED",
+				"GitHub refused moving release on meridian-co/app: it moved since its tip was read. Preview again.",
+			),
+		});
+		await withApi(
+			async (h) => {
+				const s = await githubReady(h, r);
+				const push = {
+					missionId: s.missionId,
+					target: "github_push",
+					connectionId: s.connectionId,
+					ref: "release",
+				};
+				const preview = await created(
+					await post(h, "/api/exports/preview", push),
+				);
+				const failed = await refused(
+					await post(h, "/api/exports", {
+						...push,
+						gateRunId: s.runId,
+						previewExportId: preview.id,
+					}),
+					502,
+				);
+				expect(failed.code).toBe("GITHUB_REJECTED");
+				const id = (failed.details as { exportId: string }).exportId;
+				const row = await created(await h.call(`/api/exports/${id}`), 200);
+				expect(row).toMatchObject({
+					status: "failed",
+					push: null,
+					failure: { code: "GITHUB_REJECTED" },
+				});
+			},
+			{ roomSources: r.roomSources, repos: g.repos, repoWriter: writer },
+		);
+	});
 });
 
 /** meridian-co/app's main branch, which a test may move. */
@@ -1120,6 +1312,7 @@ function githubTree() {
 	const aBlob = gitBlobSha(new TextEncoder().encode("export const a = 1;\n"));
 	const tree = {
 		branch: "main",
+		defaultBranch: "main",
 		commitSha: "d".repeat(40) as string | null,
 		entries: new Map([
 			["src", { sha: "e".repeat(40), mode: "040000" }],

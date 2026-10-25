@@ -21,6 +21,7 @@ import { missionLifecycleContract } from "./mission-lifecycle";
 import { missionPlanContract } from "./mission-plan";
 import { playbookContract } from "./playbook";
 import { presetContract } from "./preset";
+import { repoPolicyContract } from "./repo-policy";
 import { rosterContract } from "./roster";
 import { errorEnvelope, successEnvelope } from "./shared/envelope";
 import { skillContract } from "./skill";
@@ -46,6 +47,7 @@ export * from "./mission-lifecycle";
 export * from "./mission-plan";
 export * from "./playbook";
 export * from "./preset";
+export * from "./repo-policy";
 export * from "./repo-read";
 export * from "./role-labels";
 export * from "./roster";
@@ -100,6 +102,7 @@ export const contract = c.router(
 		gate: gateContract,
 		exports: exportContract,
 		connections: connectionContract,
+		repoPolicies: repoPolicyContract,
 		agentTemplates: agentTemplateContract,
 		identityVersions: identityVersionContract,
 		skills: skillContract,
