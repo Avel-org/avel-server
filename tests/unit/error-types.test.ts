@@ -151,6 +151,10 @@ describe("the error envelope is a discriminated union on code", () => {
 			"export_target_repo_missing",
 			"direct_push_not_allowed",
 			"direct_push_unconfirmed",
+			"finding_not_confirmed",
+			"check_scope_needs_client",
+			"proposal_not_pending",
+			"proposal_action_not_built",
 			"export_not_pr_open",
 			"skill_not_role_layer",
 		]);

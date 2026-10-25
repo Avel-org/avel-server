@@ -1,6 +1,7 @@
 import { initContract } from "@ts-rest/core";
 import { z } from "zod";
 import { artifactRef, blocker, completionReport, dispatch } from "./dispatch";
+import { repoPath } from "./intake";
 import { successEnvelope } from "./shared/envelope";
 import { idempotencyHeaders } from "./shared/idempotency";
 
@@ -66,6 +67,25 @@ export const findingStatus = z.enum(FINDING_STATUSES);
 export type FindingStatus = z.infer<typeof findingStatus>;
 
 /** A defect recorded against a mission (DATA-CONTRACTS-V2.md, Finding). */
+/**
+ * A confirmed finding's permanent check (module 12; J, 2026-10-24): the gate
+ * runs it on every later mission in its scope, over the files that mission's
+ * work changed. forbidden_text fails when any changed file under `paths`
+ * holds `text`, matched literally and case-sensitively: a literal, because
+ * an operator-written regex could hang the gate. `client` runs it only on
+ * missions of the finding's own client; `general` on every mission.
+ */
+export const permanentCheck = z
+	.object({
+		kind: z.literal("forbidden_text"),
+		paths: z.array(repoPath).min(1).max(20),
+		text: z.string().min(1).max(200),
+		scope: z.enum(["client", "general"]),
+	})
+	.strict();
+
+export type PermanentCheck = z.infer<typeof permanentCheck>;
+
 export const finding = z.object({
 	id: z.string().uuid(),
 	missionId: z.string().uuid(),
@@ -80,6 +100,8 @@ export const finding = z.object({
 	caughtBy: z.string(),
 	/** The run that reported it; null when code or the operator recorded it. */
 	reportedByDispatchId: z.string().uuid().nullable(),
+	/** The check later missions are gated against; null for none. Only a confirmed finding has one. */
+	check: permanentCheck.nullable(),
 	createdAt: z.string().datetime(),
 	updatedAt: z.string().datetime(),
 });

@@ -585,6 +585,116 @@ describe.skipIf(!process.env.DATABASE_URL)("/api gate", () => {
 		}
 	});
 
+	it("gates every later mission against a confirmed finding's permanent check, in its scope", async () => {
+		const r = repo();
+		await gated(r, async (h, m) => {
+			// An earlier mission's findings: one confirmed, one still open, and
+			// one confirmed on a client's mission.
+			const earlier = await activeMission(h.tx, m.ids);
+			const clientId = m.ids.next();
+			await h.tx.insert(client).values({
+				id: clientId,
+				name: "Other client",
+				status: "active",
+				...stamp(clock),
+			});
+			const defect = (
+				id: string,
+				status: "open" | "confirmed",
+				cid: string | null,
+			) => ({
+				id,
+				missionId: earlier.missionId,
+				clientId: cid,
+				rule: "no debugger statements",
+				subject: "A debugger statement shipped",
+				severity: "high" as const,
+				class: "leftover",
+				status,
+				caughtBy: "operator",
+				...stamp(clock),
+			});
+			const [general, open, scoped] = [
+				m.ids.next(),
+				m.ids.next(),
+				m.ids.next(),
+			];
+			await h.tx
+				.insert(finding)
+				.values([
+					defect(general, "confirmed", null),
+					defect(open, "open", null),
+					defect(scoped, "confirmed", clientId),
+				]);
+			const put = (id: string, check: unknown) =>
+				h.call(`/api/findings/${id}/check`, { method: "PUT", body: { check } });
+			const debuggerCheck = {
+				kind: "forbidden_text",
+				paths: ["src/**"],
+				text: "debugger",
+				scope: "general",
+			};
+			expect((await refusal(await put(open, debuggerCheck))).reason).toBe(
+				"finding_not_confirmed",
+			);
+			expect(
+				(
+					await refusal(
+						await put(general, { ...debuggerCheck, scope: "client" }),
+					)
+				).reason,
+			).toBe("check_scope_needs_client");
+			const set = await put(general, debuggerCheck);
+			expect(set.status, await set.clone().text()).toBe(200);
+			// Scoped to another client: never run on this internal mission.
+			const other = await put(scoped, {
+				...debuggerCheck,
+				text: "console.log",
+				scope: "client",
+			});
+			expect(other.status).toBe(200);
+			const [logged] = await h.tx
+				.select()
+				.from(activityLog)
+				.where(eq(activityLog.entityId, general));
+			expect(logged).toMatchObject({
+				action: "finding.check_set",
+				payload: { check: debuggerCheck, was: null },
+			});
+
+			await playbookFor(h, m, [...QA_AND_ACCEPTANCE], RUNNABLE_PLAN);
+			const priorOf = async () => {
+				const res = await run(h, m.missionId);
+				expect(res.status, await res.clone().text()).toBe(200);
+				const posted = successEnvelope(gateRunSchema).parse(
+					await res.json(),
+				).data;
+				return posted.gates
+					.flatMap((g) => g.reasons)
+					.filter((x) => x.kind === "prior_finding");
+			};
+			await closedDispatch(h, m, r, {
+				"src/b.ts": "export const b = 2;\nconsole.log(b);\n",
+			});
+			const clean = await priorOf();
+			expect(clean.map((x) => [x.findingId, x.effect])).toEqual([
+				[`prior:${general}`, "pass"],
+			]);
+
+			await closedDispatch(h, m, r, {
+				"src/c.ts": "export const c = 3;\ndebugger;\n",
+			});
+			const back = await priorOf();
+			expect(back).toHaveLength(1);
+			expect(back[0]).toMatchObject({
+				findingId: `prior:${general}`,
+				rule: "prior_finding_failed",
+				effect: "block",
+			});
+			expect(back[0]?.subject).toContain("src/c.ts");
+		});
+	});
+
 	it("fails security on a secret the work committed, and keeps the secret out of the receipt", async () => {
 		const r = repo();
 		// Built at run time, so this file holds no literal a push-protection scanner reads as a key.

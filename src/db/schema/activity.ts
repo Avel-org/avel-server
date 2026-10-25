@@ -111,6 +111,9 @@ export const activityAction = pgEnum("activity_action", [
 	"mission.gate_queued",
 	"mission.gate_failed",
 	"repo_policy.set",
+	"finding.check_set",
+	"proposal.approved",
+	"proposal.dismissed",
 ]);
 
 export const activityEntityType = pgEnum("activity_entity_type", [
@@ -135,6 +138,7 @@ export const activityEntityType = pgEnum("activity_entity_type", [
 	"client_memory",
 	"file",
 	"repo_policy",
+	"proposal",
 ]);
 
 /**

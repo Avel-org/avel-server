@@ -6,6 +6,7 @@ import {
 	DEPENDENCIES_SOURCE,
 	FILE_EXISTS_SOURCE,
 	JUDGE_COVERAGE_SOURCE,
+	PRIOR_FINDING_SOURCE,
 	PROTECTED_PATHS_SOURCE,
 	REGISTRY_SOURCE,
 	RUNNER_SOURCE,
@@ -16,8 +17,9 @@ import {
 import { matchesGlob, supportedGlob } from "../../../src/rooms/globs";
 
 describe("GATE_CONFIG", () => {
-	it("is version 2, with coverage on the qa gate", () => {
-		expect(GATE_CONFIG.version).toBe(2);
+	it("is version 3, with coverage on the qa gate", () => {
+		// 3: module 12's prior-finding checks (2026-10-24).
+		expect(GATE_CONFIG.version).toBe(3);
 		expect(GATE_CONFIG.judgeCoverageGate).toBe("qa");
 		expect(GATES).toContain(GATE_CONFIG.judgeCoverageGate);
 	});
@@ -32,6 +34,7 @@ describe("GATE_CONFIG", () => {
 				JUDGE_COVERAGE_SOURCE,
 				SECRET_SCAN_SOURCE,
 				DEPENDENCIES_SOURCE,
+				PRIOR_FINDING_SOURCE,
 			].sort(),
 		);
 		expect(GATE_CONFIG.availableSources).not.toContain(RUNNER_SOURCE);

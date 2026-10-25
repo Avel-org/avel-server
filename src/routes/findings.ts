@@ -6,6 +6,7 @@ import { finding, mission } from "../db/schema";
 import { live, touch } from "../db/schema/columns";
 import { type Executor, type Tx, withTx } from "../db/tx";
 import { ApiError } from "../middleware/errors";
+import { supportedGlob } from "../rooms/globs";
 import { toFindingWire } from "./agent";
 import {
 	after,
@@ -121,5 +122,67 @@ export function findingRoutes(deps: RouteDeps) {
 			status: 200,
 			body: ok(await triage(params.id, "dismissed", body.reason, ctx)),
 		}),
+
+		/**
+		 * Module 12 (J, 2026-10-24): a confirmed finding's permanent check.
+		 * Replacing or removing one is allowed and logged; the receipt of every
+		 * gate run records which checks it ran, so history stays answerable.
+		 */
+		setCheck: async ({ params, body }, ctx) => {
+			const operator = operatorOf(ctx);
+			const unsupported = (body.check?.paths ?? []).filter(
+				(g) => !supportedGlob(g),
+			);
+			if (unsupported.length > 0) {
+				throw new ApiError(
+					"VALIDATION_FAILED",
+					`Unsupported path globs: ${unsupported.join(", ")}`,
+				);
+			}
+			const updated = await withTx(deps.db(), async (tx) => {
+				const [row] = await tx
+					.select({ f: finding, engagementId: mission.engagementId })
+					.from(finding)
+					.innerJoin(
+						mission,
+						and(eq(mission.id, finding.missionId), live(mission)),
+					)
+					.where(eq(finding.id, params.id))
+					.for("update", { of: finding });
+				if (!row) throw notFound("finding", params.id);
+				if (row.f.status !== "confirmed") {
+					throw new ApiError(
+						"PRECONDITION_FAILED",
+						`Only a confirmed finding takes a check; this one is ${row.f.status}`,
+						{ details: { reason: "finding_not_confirmed" } },
+					);
+				}
+				if (body.check?.scope === "client" && row.f.clientId === null) {
+					throw new ApiError(
+						"PRECONDITION_FAILED",
+						"The finding has no client, so its check cannot be scoped to one. Make it general.",
+						{ details: { reason: "check_scope_needs_client" } },
+					);
+				}
+				const [written] = await tx
+					.update(finding)
+					.set({ check: body.check, ...touch(deps.clock) })
+					.where(eq(finding.id, params.id))
+					.returning();
+				await logActivity(tx, deps, {
+					actorKind: "operator",
+					actorUserId: operator.id,
+					action: "finding.check_set",
+					entityType: "finding",
+					entityId: params.id,
+					missionId: row.f.missionId,
+					engagementId: row.engagementId,
+					requestId: ctx.requestId,
+					payload: { check: body.check, was: row.f.check ?? null },
+				});
+				return toFindingWire(written as typeof finding.$inferSelect);
+			});
+			return { status: 200, body: ok(updated) };
+		},
 	});
 }

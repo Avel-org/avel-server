@@ -619,10 +619,17 @@ export const finding = pgTable(
 		idempotencyKey: text("idempotency_key"),
 		// SHA-256 of the request body, stored beside the key (Idempotency).
 		requestSha256: text("request_sha256"),
+		// The permanent check later missions are gated against (module 12,
+		// 2026-10-24), as the contract's PermanentCheck. Confirmed findings only.
+		check: jsonb("check"),
 		...timestamps,
 	},
 	(t) => [
 		index("finding_mission_id_idx").on(t.missionId),
+		check(
+			"finding_check_only_confirmed",
+			sql`${t.check} is null or ${t.status} = 'confirmed'`,
+		),
 		index("finding_client_id_idx").on(t.clientId),
 		// A judge's finding lands on its own dispatch's mission, never another.
 		foreignKey({

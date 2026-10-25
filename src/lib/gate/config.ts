@@ -6,6 +6,7 @@ import {
 	type DependencyRules,
 	FILE_EXISTS_SOURCE,
 	JUDGE_COVERAGE_SOURCE,
+	PRIOR_FINDING_SOURCE,
 	PROTECTED_PATHS_SOURCE,
 	SECRET_SCAN_CONFIG,
 	SECRET_SCAN_SOURCE,
@@ -40,9 +41,12 @@ export type GateConfig = {
  * Version 2 (2026-10-22) installs the security gate's code-reading checks:
  * the secret scan and the dependency check. Their rules are fields here,
  * so the receipt's config hash changes when one does.
+ *
+ * Version 3 (2026-10-24) installs module 12's prior-finding checks: each
+ * confirmed finding's permanent check, run on what the work changed.
  */
 export const GATE_CONFIG: GateConfig = Object.freeze({
-	version: 2,
+	version: 3,
 	availableSources: Object.freeze([
 		SPEC_CHECK_SOURCE,
 		FILE_EXISTS_SOURCE,
@@ -51,6 +55,7 @@ export const GATE_CONFIG: GateConfig = Object.freeze({
 		JUDGE_COVERAGE_SOURCE,
 		SECRET_SCAN_SOURCE,
 		DEPENDENCIES_SOURCE,
+		PRIOR_FINDING_SOURCE,
 	]),
 	// Templates keep tests in their own directories (SANDBOX.md).
 	testGlobs: Object.freeze(["tests/**", "**/*.test.ts", "**/*.spec.ts"]),

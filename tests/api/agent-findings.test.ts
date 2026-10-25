@@ -70,6 +70,7 @@ describe.skipIf(!process.env.DATABASE_URL)("POST /api/agent/findings", () => {
 				dismissedReason: null,
 				caughtBy: j.agent.slug,
 				reportedByDispatchId: j.run.id,
+				check: null,
 				createdAt: clock.now().toISOString(),
 				updatedAt: clock.now().toISOString(),
 			});

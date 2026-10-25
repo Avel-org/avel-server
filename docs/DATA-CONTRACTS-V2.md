@@ -495,6 +495,8 @@ timestamps
 
 **The finding routes land with module 9,** not 12 (decided 2026-10-06), because confirming a judge's finding is part of gating.
 
+*As built 2026-10-24 (module 12, drizzle/0058):* a confirmed finding may carry one permanent `check` (jsonb, a CHECK keeps it to confirmed findings), set, replaced or removed by `PUT /api/findings/:id/check` and logged as `finding.check_set`. The only kind is `forbidden_text`: literal `text` under `paths` globs, with `scope` `client` (only missions of the finding's client) or `general`. The gate runs every in-scope check from other missions over the files the work changed, as a `prior_finding` (`GATE_CONFIG` version 3). This is what `verification.findings` above describes; the receipt carries it until Export.verification is built.
+
 **A judge's finding names the run that wrote it** `[specced]`. `reported_by_dispatch_id?` is an FK to Dispatch. The server sets it from the token, and it is null when code or the operator records the finding. It carries the per-dispatch idempotency key (*Idempotency*), and it attributes a judge's finding to one run. Decided by the operator on 2026-10-06, built before module 9: the fourth new foreign key under the freeze exceptions.
 
 ### KnowledgeEntry

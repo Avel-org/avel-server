@@ -1102,6 +1102,16 @@ J approved this on 2026-10-24, from BE Main's proposal and spike. It reverses pa
 - **Optional now, required before the first real client mission** `[specced]`. `AVEL_AGENT_IMAGE` unset runs the agent on the host with a warning. Nothing refuses yet.
 - **Canon moves later**, in its own step `[specced]`.
 
+## Decided 2026-10-24: confirmed defects become checks, and the proposal queue comes first
+
+J chose these on 2026-10-24, when modules 12 and 14 were started.
+
+- **The operator attaches a check to a confirmed finding** `[built]`. A finding's `rule` is free text, so nothing could be matched against it. Rejected: matching a later judge finding's rule and subject, which depends on a model writing the same words twice. A finding with no check is not enforced.
+- **The first kind is `forbidden_text`** `[built]`: a literal, case-sensitive text under path globs, run on what the work changed, never the base's own files. A literal and not a regex, because an operator-written regex can hang the gate and JavaScript has no regex timeout. Test and command checks `[specced]` need the check runner in this path and are not built.
+- **A check is `client` or `general`** `[built]`. `client` runs only on missions of the finding's own client, so a client's defect never gates another client's work: the same one-way door as `KnowledgeEntry.client_id`. A finding with no client cannot be scoped to one.
+- **The proposal queue is built before any source** `[built]`: list, approve and dismiss. Approving starts the kind's action through the normal path, and no kind's action is built yet, so approve refuses `proposal_action_not_built`. Next module, calibration, post-delivery and Canon proposals come later, each with its action.
+- **The export-level `gate_override` stays superseded.** `STATE.md` had listed it as unbuilt after *the gate answers verified, pass or fail* (2026-10-21) removed it.
+
 ---
 
 ## Open questions
