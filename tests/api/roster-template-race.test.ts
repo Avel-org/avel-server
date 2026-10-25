@@ -224,6 +224,7 @@ describe.skipIf(!url)(
 					roomSources: anySource,
 					drive: { blobs: memoryBlobs(), maxBytes: DEFAULT_UPLOAD_MAX_BYTES },
 					checkRunner: null,
+					githubWebhookSecret: null,
 				});
 			const apps = {
 				adder: appFor(adder, "11111111"),

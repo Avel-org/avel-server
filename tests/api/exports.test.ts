@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import path from "node:path";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -1304,6 +1304,130 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 			},
 			{ roomSources: r.roomSources, repos: g.repos, repoWriter: writer },
 		);
+	});
+
+	it("moves a PR export to done or closed from GitHub's signed webhook, as the system", async () => {
+		const r = repo();
+		const g = githubTree();
+		const writer = recordingWriter();
+		const secret = "whsec-test";
+		await withApi(
+			async (h) => {
+				const s = await githubReady(h, r);
+				const open = async () =>
+					created(
+						await post(h, "/api/exports", {
+							missionId: s.missionId,
+							target: "github_pr",
+							gateRunId: s.runId,
+							connectionId: s.connectionId,
+						}),
+					);
+				const merged = await open();
+				const closed = await open();
+				const deliver = (
+					pr: { number: number; branch: string },
+					over: { merged?: boolean; repo?: string; signature?: string },
+				) => {
+					const body = JSON.stringify({
+						action: "closed",
+						pull_request: {
+							number: pr.number,
+							html_url: `https://github.com/meridian-co/app/pull/${pr.number}`,
+							merged: over.merged ?? false,
+							head: { ref: pr.branch, sha: "9".repeat(40) },
+						},
+						repository: { full_name: over.repo ?? "Meridian-Co/App" },
+					});
+					return h.call("/api/webhooks/github", {
+						method: "POST",
+						body: JSON.parse(body),
+						headers: {
+							// No session: GitHub has none. The signature is the credential.
+							cookie: "",
+							"x-github-event": "pull_request",
+							"x-hub-signature-256":
+								over.signature ??
+								`sha256=${createHmac("sha256", secret).update(body).digest("hex")}`,
+						},
+					});
+				};
+				const prOf = (e: typeof merged) => ({
+					number: e.pullRequest?.number ?? 0,
+					branch: e.pullRequest?.branch ?? "",
+				});
+
+				const unsigned = await deliver(prOf(merged), {
+					merged: true,
+					signature: "sha256=00",
+				});
+				expect(unsigned.status).toBe(401);
+				// Another repository's PR with the same number and branch moves nothing.
+				const elsewhere = await deliver(prOf(merged), {
+					merged: true,
+					repo: "someone/else",
+				});
+				expect(elsewhere.status).toBe(204);
+				const still = await created(
+					await h.call(`/api/exports/${merged.id}`),
+					200,
+				);
+				expect(still.status).toBe("pr-open");
+
+				expect((await deliver(prOf(merged), { merged: true })).status).toBe(
+					204,
+				);
+				expect((await deliver(prOf(closed), { merged: false })).status).toBe(
+					204,
+				);
+				const done = await created(
+					await h.call(`/api/exports/${merged.id}`),
+					200,
+				);
+				expect(done).toMatchObject({
+					status: "done",
+					pullRequest: { state: "merged" },
+				});
+				const shut = await created(
+					await h.call(`/api/exports/${closed.id}`),
+					200,
+				);
+				expect(shut).toMatchObject({
+					status: "closed",
+					pullRequest: { state: "closed" },
+				});
+				// Created, delivering to pr-open (the operator), then pr-open to done.
+				const moved = (await h.logRows(merged.id)).at(-1);
+				expect(moved).toMatchObject({
+					action: "export.status_changed",
+					actorKind: "system",
+					actorUserId: null,
+					payload: { from: "pr-open", to: "done" },
+				});
+				// A replayed delivery changes nothing.
+				expect((await deliver(prOf(merged), { merged: true })).status).toBe(
+					204,
+				);
+				expect(await h.logRows(merged.id)).toHaveLength(3);
+			},
+			{
+				roomSources: r.roomSources,
+				repos: g.repos,
+				repoWriter: writer,
+				githubWebhookSecret: secret,
+			},
+		);
+	});
+
+	it("has no webhook route when no secret is configured", async () => {
+		await withApi(async (h) => {
+			const res = await h.call("/api/webhooks/github", {
+				method: "POST",
+				body: {},
+				headers: { cookie: "", "x-github-event": "ping" },
+			});
+			expect(res.status).toBe(404);
+		});
 	});
 });
 

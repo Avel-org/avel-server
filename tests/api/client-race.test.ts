@@ -185,6 +185,7 @@ describe.skipIf(!url)(
 					roomSources: anySource,
 					drive: { blobs: memoryBlobs(), maxBytes: DEFAULT_UPLOAD_MAX_BYTES },
 					checkRunner: null,
+					githubWebhookSecret: null,
 				}),
 				creator: createApp({
 					clock,
@@ -204,6 +205,7 @@ describe.skipIf(!url)(
 					roomSources: anySource,
 					drive: { blobs: memoryBlobs(), maxBytes: DEFAULT_UPLOAD_MAX_BYTES },
 					checkRunner: null,
+					githubWebhookSecret: null,
 				}),
 			};
 			const { cookie } = await signInWithGitHub(apps.creator, OPERATOR);

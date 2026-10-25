@@ -250,6 +250,7 @@ describe.skipIf(!url)(
 					roomSources,
 					drive: { blobs: memoryBlobs(), maxBytes: DEFAULT_UPLOAD_MAX_BYTES },
 					checkRunner: null,
+					githubWebhookSecret: null,
 				});
 			const operatorApp = appFor(halter, "11111111");
 			const agentApp = appFor(reporter, "22222222");

@@ -5,9 +5,17 @@ import type { RequestIdVariables } from "./request-id";
 
 export type AuthVariables = RequestIdVariables & { operator: Operator };
 
-/** Paths under /api/* that answer without a session. Everything else requires one. */
+/**
+ * Paths under /api/* that answer without a session. Everything else requires
+ * one. The GitHub webhook has no session; it is signed instead, and checks
+ * that itself (src/routes/github-webhook.ts).
+ */
 export function isPublicPath(path: string): boolean {
-	return path === "/api/health" || path.startsWith("/api/auth/");
+	return (
+		path === "/api/health" ||
+		path.startsWith("/api/auth/") ||
+		path === "/api/webhooks/github"
+	);
 }
 
 /**

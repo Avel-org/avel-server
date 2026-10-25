@@ -164,7 +164,7 @@ Four deliberate exceptions:
 
 - **Zip download** — authenticated `GET`, streams the frozen package.
 - **File bytes** `[specced]`, after the first mission — upload and download for the Drive (*File*).
-- **GitHub webhook** — receives, does not envelope. It moves an Export from `pr-open` to `done` when the PR merges, and to `closed` when the PR is closed without merging.
+- **GitHub webhook** — receives, does not envelope. It moves an Export from `pr-open` to `done` when the PR merges, and to `closed` when the PR is closed without merging. *As built 2026-10-24:* `POST /api/webhooks/github`, sessionless, signed with `GITHUB_WEBHOOK_SECRET` (`X-Hub-Signature-256`; unsigned or wrong is 401, no secret configured is 404). The export is found by PR number, branch and repository, and the move is logged as the system. Every other event answers 204.
 - **Sign-in** — Better Auth's own routes at `/api/auth/*`, GitHub provider. An allowlist of GitHub ids in an environment variable is checked in Better Auth's sign-in hook; any other GitHub account is refused.
 
 ---
