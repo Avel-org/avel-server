@@ -72,13 +72,6 @@ export function repoPolicyRoutes(deps: RouteDeps) {
 					"A GitHub repository: https://github.com/owner/repo",
 				);
 			}
-			if (body.allowDirectPushToDefault && body.confirmDirectPush !== true) {
-				throw new ApiError(
-					"PRECONDITION_FAILED",
-					"Allowing a direct push to the default branch needs confirmDirectPush: true",
-					{ details: { reason: "direct_push_unconfirmed" } },
-				);
-			}
 			const repoUrl = repoPolicyUrl(named.owner, named.repo);
 			const row = await withTx(deps.db(), async (tx) => {
 				// One writer per repository at a time, so two first sets cannot
@@ -90,6 +83,19 @@ export function repoPolicyRoutes(deps: RouteDeps) {
 					.select()
 					.from(repoPolicy)
 					.where(and(eq(repoPolicy.repoUrl, repoUrl), live(repoPolicy)));
+				// Only turning it on is the deliberate act. Read under the lock,
+				// so two sets cannot both see it off and skip the confirmation.
+				if (
+					body.allowDirectPushToDefault &&
+					!prior?.allowDirectPushToDefault &&
+					body.confirmDirectPush !== true
+				) {
+					throw new ApiError(
+						"PRECONDITION_FAILED",
+						"Allowing a direct push to the default branch needs confirmDirectPush: true",
+						{ details: { reason: "direct_push_unconfirmed" } },
+					);
+				}
 				const values = {
 					label: body.label === undefined ? (prior?.label ?? null) : body.label,
 					allowDirectPushToDefault: body.allowDirectPushToDefault,
