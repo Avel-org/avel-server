@@ -18,6 +18,11 @@ import {
 } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { GATE_JOB_FAILURES, GATE_JOB_STATUSES } from "../../contract/gate-job";
+import {
+	PROPOSAL_KINDS,
+	PROPOSAL_SOURCES,
+	PROPOSAL_STATUSES,
+} from "../../contract/proposal";
 import { EXPORT_STATUSES, INTAKE_STATUSES } from "../../contract/shared/status";
 import { engagement } from "./agency";
 import { user } from "./auth";
@@ -48,19 +53,9 @@ const at = (name: string) =>
 // Built from the contract arrays, so the database and avel-web cannot drift.
 export const intakeStatus = pgEnum("intake_status", INTAKE_STATUSES);
 export const exportStatus = pgEnum("export_status", EXPORT_STATUSES);
-export const proposalKind = pgEnum("proposal_kind", [
-	"next_module",
-	"calibration",
-	"post_delivery",
-	"intake_questions",
-]);
-export const proposalSource = pgEnum("proposal_source", ["code", "model"]);
-export const proposalStatus = pgEnum("proposal_status", [
-	"pending",
-	"approved",
-	"dismissed",
-	"expired",
-]);
+export const proposalKind = pgEnum("proposal_kind", PROPOSAL_KINDS);
+export const proposalSource = pgEnum("proposal_source", PROPOSAL_SOURCES);
+export const proposalStatus = pgEnum("proposal_status", PROPOSAL_STATUSES);
 
 /**
  * Canon's proposal. Never a Mission until an operator approves it. The derived_*
