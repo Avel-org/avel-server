@@ -73,6 +73,22 @@ describe("seed intakes", () => {
 	});
 
 	it("draws every intake id, and its log row's, after every other seed id, so no earlier id moved", () => {
+		// The gate-ready mission (2026-10-24) is drawn after the intakes, so
+		// it is checked apart: its rows hold the ids that follow theirs.
+		const gateReady = rows.mission.find(
+			(m) =>
+				(m.brief as { summary: string }).summary ===
+				"Template: open slots. Ready for the gate.",
+		)?.id;
+		const later = new Set(
+			[
+				...rows.mission.filter((r) => r.id === gateReady),
+				...rows.rosterEntry.filter((r) => r.missionId === gateReady),
+				...rows.dispatch.filter((r) => r.missionId === gateReady),
+				...rows.completionReport.filter((r) => r.missionId === gateReady),
+				...rows.activityLog.filter((r) => r.missionId === gateReady),
+			].map((r) => r.id as string),
+		);
 		const added = new Set([
 			...rows.intake.map((i) => i.id as string),
 			...rows.activityLog
@@ -97,7 +113,7 @@ describe("seed intakes", () => {
 			...rows.activityLog,
 		]
 			.map((r) => r.id as string)
-			.filter((id) => !added.has(id))
+			.filter((id) => !added.has(id) && !later.has(id))
 			.map(seq);
 		const lowest = Math.min(...[...added].map(seq));
 		// The other rows hold every id from 1 up to the first intake's, with
@@ -110,5 +126,10 @@ describe("seed intakes", () => {
 			Array.from({ length: added.size }, (_, k) => lowest + k),
 		);
 		expect(added.size).toBe(2 * rows.intake.length);
+		// Between them, one id per export: its manifest's gate run, in no row.
+		const after = lowest + added.size + rows.export.length;
+		expect([...later].map(seq).sort((a, b) => a - b)).toEqual(
+			Array.from({ length: later.size }, (_, k) => after + k),
+		);
 	});
 });

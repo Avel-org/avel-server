@@ -299,9 +299,10 @@ describe("seed dispatches", () => {
 		for (const a of rows.activityLog) split[a.actorKind] += 1;
 		// 89: Canon's identity_regenerated row (2026-10-19) is the seed operator's.
 		// 100: plus the eleven intake.approved rows, one per client mission
-		// (2026-10-21).
-		expect(split).toEqual({ operator: 100, system: 24, agent: 4, canon: 0 });
-		expect(rows.activityLog).toHaveLength(128);
+		// (2026-10-21). 104 and 6: the gate-ready mission's four operator rows
+		// and its agent's two (2026-10-24).
+		expect(split).toEqual({ operator: 104, system: 24, agent: 6, canon: 0 });
+		expect(rows.activityLog).toHaveLength(134);
 		for (const a of rows.activityLog) {
 			expect(a.actorUserId, a.action).toBe(
 				a.actorKind === "operator" ? SEED_OPERATOR_ID : null,

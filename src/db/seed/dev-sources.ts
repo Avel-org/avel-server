@@ -1,5 +1,7 @@
 import path from "node:path";
-import { DEV_BOOKING_SHA } from "../../lib/templates";
+import { DEV_BOOKING_SHA, DEV_GATE_READY_SHA } from "../../lib/templates";
+import { git, gitOk } from "../../rooms/git";
+import { dispatchRef } from "../../rooms/snapshot";
 import { cloneDir } from "../../rooms/sources";
 import { buildSeed, SEED_EPOCH, seedIds } from "./data";
 import { buildDevTemplateBooking } from "./dev-template";
@@ -13,6 +15,8 @@ export type DevSource = { path: string; head: string; want: string };
  * repos/<owner>/<repo>, since each client's repository started from the
  * template at its pin. Each clone's head is returned beside the commit it
  * must be at; a directory already there is left alone, never overwritten.
+ * Each seeded dispatch that reports DEV_GATE_READY_SHA gets its dispatch ref
+ * on that commit in every clone, where the gate looks for its work.
  */
 export async function buildDevSources(dir: string): Promise<DevSource[]> {
 	const targets = new Map<string, string>([
@@ -35,6 +39,10 @@ export async function buildDevSources(dir: string): Promise<DevSource[]> {
 		}
 		targets.set(clone, i.repoCommitSha);
 	}
+	const gateReady = rows.completionReport
+		.filter((r) => r.resultCommitSha === DEV_GATE_READY_SHA)
+		.map((r) => r.dispatchId)
+		.sort();
 	const out: DevSource[] = [];
 	for (const [clone, want] of [...targets].sort(([a], [b]) =>
 		a < b ? -1 : a > b ? 1 : 0,
@@ -44,7 +52,19 @@ export async function buildDevSources(dir: string): Promise<DevSource[]> {
 				`${clone} is read at ${want}, which no dev fixture builds`,
 			);
 		}
-		out.push({ path: clone, head: await buildDevTemplateBooking(clone), want });
+		const head = await buildDevTemplateBooking(clone);
+		const holds = await gitOk(
+			["cat-file", "-e", `${DEV_GATE_READY_SHA}^{commit}`],
+			{
+				cwd: clone,
+			},
+		);
+		for (const id of holds ? gateReady : []) {
+			await git(["update-ref", dispatchRef(id), DEV_GATE_READY_SHA], {
+				cwd: clone,
+			});
+		}
+		out.push({ path: clone, head, want });
 	}
 	return out;
 }

@@ -6,7 +6,7 @@ import { generateIdentity, type IdentitySkill } from "../../lib/identity";
 import type { IdGenerator } from "../../lib/ids";
 import { PRICE_VERSION } from "../../lib/prices";
 import { skillContentSha256 } from "../../lib/skill-hash";
-import { DEV_BOOKING_SHA } from "../../lib/templates";
+import { DEV_BOOKING_SHA, DEV_GATE_READY_SHA } from "../../lib/templates";
 import { ownerRepo } from "../../rooms/sources";
 import type { ExportManifest } from "../../routes/exports";
 import { skillsSha256 } from "../../runner/skills";
@@ -1605,10 +1605,12 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 		rereads?: number;
 		blockers?: Row<typeof completionReport>["blockers"];
 		edgeMismatches?: Row<typeof completionReport>["edgeMismatches"];
+		/** A commit the dev fixture's clones hold. Without one the gate refuses the dispatch. */
+		resultCommitSha?: string;
 	};
 	const addDispatch = (d: {
 		missionId: string;
-		engagementId: string;
+		engagementId: string | null;
 		slug: AgentSlug;
 		territory?: string;
 		briefRef: { moduleId: string; requirementIds: string[] } | null;
@@ -1772,6 +1774,7 @@ export function buildSeed(ids: IdGenerator, runAt: Date): SeedRows {
 			rereads: r.rereads ?? 0,
 			blockers: r.blockers ?? [],
 			edgeMismatches: r.edgeMismatches ?? [],
+			resultCommitSha: r.resultCommitSha ?? null,
 			filedBy: r.filedBy,
 			deletedAt: null,
 			createdAt: endAt,
@@ -2137,6 +2140,51 @@ ${(m.brief as { summary: string }).summary}
 		};
 		e.versionManifest = manifest;
 	}
+
+	// Added last, so every earlier seed id stays where it was. The one seeded
+	// mission the gate can judge (2026-10-24): active, internal, on the
+	// template-booking fixture, and its one dispatch is complete with a
+	// result commit every dev clone holds (DEV_GATE_READY_SHA, built by
+	// `pnpm dev:sources`). Every other seeded mission fails a precondition.
+	const gateReady = addMission({
+		engagementId: null,
+		repo: "avel-org/template-booking",
+		sprint: 3,
+		summary: "Template: open slots. Ready for the gate.",
+		created: 28,
+		path: [["active", 28]],
+	});
+	addEntries(gateReady, 28, [
+		[operator, ["A"], true, null],
+		[atlas, ["B"], true, 40_000, "scheduling"],
+	]);
+	addDispatch({
+		missionId: gateReady,
+		engagementId: null,
+		slug: "atlas",
+		territory: "scheduling",
+		briefRef: null,
+		status: "complete",
+		split: [6_000, 2_000, 8_000, 500],
+		spendUsd: "0.90",
+		wallClockMinutes: 45,
+		day: 28,
+		created: 1,
+		started: 2,
+		ended: 3,
+		report: {
+			filedBy: "agent",
+			written: [
+				{
+					path: "src/features/scheduling/slots.ts",
+					sha256: fakeSha("artifact:src/features/scheduling/slots.ts"),
+				},
+			],
+			filesTouched: 1,
+			fileTypesTouched: ["ts"],
+			resultCommitSha: DEV_GATE_READY_SHA,
+		},
+	});
 
 	return rows;
 }
