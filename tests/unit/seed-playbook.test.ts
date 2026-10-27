@@ -7,7 +7,6 @@ import {
 	SPEC_CHECK_GATE,
 	TEST_GLOB_GATE,
 } from "../../src/lib/gate/producers";
-import { SEED_RUN_AT } from "./seed-run-at";
 
 // A mandatory gate that nothing feeds blocks every run, and no override can
 // clear it, so a seeded mission type with one could never pass.
@@ -20,7 +19,7 @@ const FED = new Set<string>([
 ]);
 
 describe("seed playbooks", () => {
-	const rows = buildSeed(seedIds(), SEED_RUN_AT);
+	const rows = buildSeed(seedIds());
 
 	it("make mandatory only the gates some producer feeds", () => {
 		const unfed = rows.playbook.flatMap((p) =>

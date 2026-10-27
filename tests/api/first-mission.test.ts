@@ -21,7 +21,6 @@ import { writeTool } from "../../src/rooms/tools";
 import { FakeHarness } from "../../src/runner/harness";
 import { gitIn, removeDir, tempDir } from "../unit/git-fixtures";
 import { fixtureRepos, snapshotOfCommit } from "../unit/repo-fixtures";
-import { SEED_RUN_AT } from "../unit/seed-run-at";
 import { bearer } from "./agent-fixtures";
 import { gateRunOf, jobDeps } from "./gate-job-fixtures";
 import { type ApiHarness, withApi } from "./support";
@@ -87,7 +86,7 @@ const PLAN = {
 };
 
 // The seed's playbook, so the test judges what avel_dev judges.
-const booking = buildSeed(seedRowIds(), SEED_RUN_AT).playbook.find(
+const booking = buildSeed(seedRowIds()).playbook.find(
 	(p) => p.missionType === "template-booking",
 );
 

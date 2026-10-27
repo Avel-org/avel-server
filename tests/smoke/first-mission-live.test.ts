@@ -40,7 +40,6 @@ import { reportsOf, row, runnerDeps } from "../api/runner-fixtures";
 import { type ApiHarness, clock, withApi } from "../api/support";
 import { removeDir, tempDir } from "../unit/git-fixtures";
 import { fixtureRepos, snapshotOfCommit } from "../unit/repo-fixtures";
-import { SEED_RUN_AT } from "../unit/seed-run-at";
 import { BASE_URL, captureLogger } from "../unit/support";
 
 // Checklist item 6: one Canon turn and one dispatch on the real Claude
@@ -162,7 +161,7 @@ const PLAN = {
 	],
 };
 
-const booking = buildSeed(seedRowIds(), SEED_RUN_AT).playbook.find(
+const booking = buildSeed(seedRowIds()).playbook.find(
 	(p) => p.missionType === "template-booking",
 );
 

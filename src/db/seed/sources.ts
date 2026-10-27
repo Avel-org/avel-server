@@ -1,10 +1,9 @@
 import { existsSync } from "node:fs";
 import { buildDevSources } from "./dev-sources";
 
-// `pnpm dev:sources`: builds the dev seed's clones under AVEL_SOURCES_DIR
-// (from .env when present): the template-booking dev fixture, and each
-// seeded client mission's repository at the commit its intake read, so
-// dispatch rooms on avel_dev open on a commit a clone really holds.
+// `pnpm dev:sources`: builds the dev seed's clone under AVEL_SOURCES_DIR
+// (from .env when present): the template-booking dev fixture, so dispatch
+// rooms on avel_dev open on a commit a clone really holds.
 if (existsSync(".env")) process.loadEnvFile(".env");
 
 const dir = process.env.AVEL_SOURCES_DIR;
