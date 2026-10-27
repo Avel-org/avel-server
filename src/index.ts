@@ -114,9 +114,9 @@ if (!checkRunner) {
 }
 
 // Agent rooms on local Docker (decided 2026-10-24): each real agent's
-// Claude Code process in its own container, holding no key. Unset, it runs
-// on the host. Throws on an image not pinned by digest, or when the Linux
-// Claude Code binary is not installed. A restart removes what a crashed
+// Claude Code process in its own container, holding no key. Unset, the real
+// harness refuses to start (harnessFromEnv). Throws on an image not pinned
+// by digest, or when the Linux Claude Code binary is not installed. A restart removes what a crashed
 // server left; this assumes one server process, as gate jobs do.
 const agentImage = process.env.AVEL_AGENT_IMAGE || undefined;
 const agentRooms = agentImage
@@ -146,11 +146,6 @@ if (sdk) {
 		{ model: sdk.model, harness: sdk.version },
 		"REAL HARNESS is ON: started dispatches run a real model and spend money",
 	);
-	if (!agentRooms) {
-		logger.warn(
-			"No agent rooms: each agent's process runs on this host as this user, with the API key (set AVEL_AGENT_IMAGE)",
-		);
-	}
 } else {
 	logger.warn(
 		"No model is connected: dispatches run the FakeHarness and Canon answers every message with a fixed reply",

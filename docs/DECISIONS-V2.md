@@ -1099,7 +1099,7 @@ J approved this on 2026-10-24, from BE Main's proposal and spike. It reverses pa
 - **The proxy holds the API key** `[built]`. The agent's container has a placeholder and the proxy as its API address. Rejected: the key in the container's environment, simpler, but then an escaped process holds the one credential its room has.
 - **The proxy forwards the messages API only** `[built]` (`POST /v1/messages`, `/v1/messages/count_tokens`), from the spike: forwarding any path would let an agent spend AVEL's key on any endpoint.
 - **No image of AVEL's own** `[built]`. The binary is the SDK's Linux build at the SDK's version, installed by pnpm from the lockfile and mounted read-only into a pinned public image (the check runner's works). Rejected: an image built locally, which has no registry digest to pin.
-- **Optional now, required before the first real client mission** `[specced]`. `AVEL_AGENT_IMAGE` unset runs the agent on the host with a warning. Nothing refuses yet.
+- **Required before the first real client mission** `[built]` (2026-10-27). With `AVEL_HARNESS=agent-sdk`, the server refuses to start while `AVEL_AGENT_IMAGE` is unset (`harnessFromEnv`, `src/runner/wiring.ts`). Until 2026-10-27 it was optional, and unset ran the agent on the host with a warning.
 - **Canon moves later**, in its own step `[specced]`.
 
 ## Decided 2026-10-24: confirmed defects become checks, and the proposal queue comes first
