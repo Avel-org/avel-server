@@ -1158,7 +1158,7 @@ Warnings are playbook-relative — read the playbook's `gates`, so absences a pl
 - **Foreign keys are `ON DELETE no action`,** except `session.user_id` and `account.user_id`, which cascade. A user who acted cannot be hard-deleted. As built 2026-10-05.
 - **Versioning is counter-only.** No version-history table, deliberately.
 - **Determinism in the render.** No clock, no randomness, no unstable ordering in rendered bytes.
-- **Zod defines shape once.** Tables derive via `drizzle-zod`; the contract imports the same schemas. One definition, three consumers.
+- **The contract defines the wire's shapes in Zod; tables are Drizzle.** The wire is not a table's shape (camelCase, columns left out, joined fields), so no schema is derived from a table (*Decided 2026-10-28* in `DECISIONS-V2.md`; this replaced "tables derive via `drizzle-zod`").
 - **Enums are pgEnums when code branches on them**; catalogs are tables when they're labels that grow.
 
 ---

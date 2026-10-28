@@ -9,7 +9,6 @@ import {
 	uniqueIndex,
 	uuid,
 } from "drizzle-orm/pg-core";
-import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { engagement } from "./agency";
 import { id, softDelete, timestamps } from "./columns";
 import { exportTargetKind } from "./enums";
@@ -86,10 +85,3 @@ export const skillSource = pgTable("skill_source", {
 	...softDelete,
 	...timestamps,
 });
-
-export const connectionInsert = createInsertSchema(connection);
-export const connectionSelect = createSelectSchema(connection);
-export const repoPolicyInsert = createInsertSchema(repoPolicy);
-export const repoPolicySelect = createSelectSchema(repoPolicy);
-export const skillSourceInsert = createInsertSchema(skillSource);
-export const skillSourceSelect = createSelectSchema(skillSource);

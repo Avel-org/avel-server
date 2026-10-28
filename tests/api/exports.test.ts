@@ -29,7 +29,7 @@ import { ApiError } from "../../src/middleware/errors";
 import { worktreeRooms } from "../../src/rooms/provider";
 import { snapshotDispatch } from "../../src/rooms/snapshot";
 import type { RoomSourceResolver } from "../../src/rooms/sources";
-import { prBranch } from "../../src/routes/exports";
+import { prBranch } from "../../src/routes/export-support";
 import {
 	DISPATCH_PLAN,
 	dispatchValues,

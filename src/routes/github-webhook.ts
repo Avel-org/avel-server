@@ -6,7 +6,7 @@ import { exportTable, mission } from "../db/schema";
 import { withTx } from "../db/tx";
 import type { BlastRadius } from "../lib/export/delivery";
 import { ApiError } from "../middleware/errors";
-import { exportLifecycle } from "./exports";
+import { exportLifecycle } from "./export-lifecycle";
 import type { RouteDeps } from "./shared";
 
 /** The header GitHub signs a delivery with: sha256=<hex HMAC of the raw body>. */
@@ -86,6 +86,9 @@ export function githubWebhookRoute(
 
 		const requestId = ctx.get("requestId") as string;
 		await withTx(deps.db(), async (tx) => {
+			// No live(mission): an export records a pull request that exists on
+			// GitHub, so its close is recorded whatever became of the mission,
+			// as agent.ts reads its owner. No route removes a mission today.
 			const rows = await tx
 				.select({ row: exportTable, engagementId: mission.engagementId })
 				.from(exportTable)

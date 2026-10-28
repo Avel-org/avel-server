@@ -14,8 +14,8 @@
 | API contract | **ts-rest** | Emits a real OpenAPI artifact; the previous choice emitted none. |
 | HTTP server | **Hono** on `@hono/node-server` | ts-rest's fetch handler (`@ts-rest/serverless`) mounts on a Hono route. |
 | Runner | tsx | Runs `pnpm dev` and `pnpm start`. No build step. |
-| Validation | Zod | One definition, three consumers (tables, contract, runtime). |
-| ORM | Drizzle | Tables derive from Zod via `drizzle-zod`. |
+| Validation | Zod | The contract's shapes, checked at runtime on requests and responses. |
+| ORM | Drizzle | Tables in `src/db/schema/`; insert types come from `$inferInsert`. |
 | Database | **Neon (Postgres)** | DB branching per feature branch; scale-to-zero. |
 | DB driver | postgres.js | Through `drizzle-orm/postgres-js`. |
 | Local database | Docker, `pgvector/pgvector:pg17` | `avel_dev` and `avel_test`. CI runs the same image. |

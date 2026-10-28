@@ -12,7 +12,6 @@ import {
 	uniqueIndex,
 	uuid,
 } from "drizzle-orm/pg-core";
-import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { user } from "./auth";
 import { id, softDelete, timestamps } from "./columns";
 import { role } from "./enums";
@@ -113,10 +112,3 @@ export const missionSkills = pgTable(
 		index("mission_skills_skill_id_idx").on(t.skillId),
 	],
 );
-
-export const skillInsert = createInsertSchema(skill);
-export const skillSelect = createSelectSchema(skill);
-export const roleSkillsInsert = createInsertSchema(roleSkills);
-export const roleSkillsSelect = createSelectSchema(roleSkills);
-export const missionSkillsInsert = createInsertSchema(missionSkills);
-export const missionSkillsSelect = createSelectSchema(missionSkills);
