@@ -6,7 +6,7 @@ import { exportTable, user } from "../../src/db/schema";
 import { stamp } from "../../src/db/schema/columns";
 import type { Tx } from "../../src/db/tx";
 import type { IdGenerator } from "../../src/lib/ids";
-import { toWire } from "../../src/routes/exports";
+import { toWire } from "../../src/routes/export-support";
 import { clock, inRollback, refusal, seedMission } from "./fixtures";
 
 async function seedOperator(tx: Tx, ids: IdGenerator) {

@@ -6,7 +6,7 @@ import { exportTable, mission } from "../db/schema";
 import { withTx } from "../db/tx";
 import type { BlastRadius } from "../lib/export/delivery";
 import { ApiError } from "../middleware/errors";
-import { exportLifecycle } from "./exports";
+import { exportLifecycle } from "./export-lifecycle";
 import type { RouteDeps } from "./shared";
 
 /** The header GitHub signs a delivery with: sha256=<hex HMAC of the raw body>. */
