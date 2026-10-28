@@ -15,7 +15,9 @@ import { applyUsage, type RunnerDeps, writeDispatchStep } from "./runner";
  * The harness and Canon's model the server runs with (step 9d), from its
  * environment. The FakeHarness and the offline Canon model unless
  * AVEL_HARNESS=agent-sdk, which runs real agents on the Claude Agent SDK
- * and spends real money; it refuses to start without ANTHROPIC_API_KEY.
+ * and spends real money; it refuses to start without ANTHROPIC_API_KEY,
+ * and without agent rooms (AVEL_AGENT_IMAGE), so no agent's process runs on
+ * this host holding the key (decided 2026-10-24, required 2026-10-27).
  * The key is taken out of `env` once read, so no other child process
  * (git) inherits it. Any other AVEL_HARNESS value keeps the FakeHarness,
  * as .env.example says.
@@ -52,7 +54,7 @@ export function harnessFromEnv(
 		clock: Clock;
 		/** The gate's check runner: the agents' run_checks uses it too. */
 		checkRunner: CheckRunner | null;
-		/** Where agents' processes run; null runs them on the host. */
+		/** Where agents' processes run; agent-sdk refuses to start without them. */
 		agentRooms?: AgentRooms | null;
 		/** The SDK's query; tests pass a scripted one. */
 		query?: QueryFn;
@@ -69,6 +71,12 @@ export function harnessFromEnv(
 	if (!apiKey) {
 		throw new Error("AVEL_HARNESS=agent-sdk needs ANTHROPIC_API_KEY");
 	}
+	const agentRooms = options.agentRooms ?? null;
+	if (!agentRooms) {
+		throw new Error(
+			"AVEL_HARNESS=agent-sdk needs AVEL_AGENT_IMAGE: no agent runs on this host",
+		);
+	}
 	delete env.ANTHROPIC_API_KEY;
 	const { logger } = options;
 	const sdk = new AgentSdkHarness({
@@ -79,7 +87,7 @@ export function harnessFromEnv(
 		logger,
 		clock: options.clock,
 		checkRunner: options.checkRunner,
-		agentRooms: options.agentRooms ?? null,
+		agentRooms,
 		maxBudgetUsd: Number(env.AVEL_HARNESS_MAX_BUDGET_USD ?? 2),
 		maxTurns: Number(env.AVEL_HARNESS_MAX_TURNS ?? 60),
 		maxCheckRuns: checkRunsFromEnv(env.AVEL_MAX_CHECK_RUNS),

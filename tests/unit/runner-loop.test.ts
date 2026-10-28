@@ -1,5 +1,6 @@
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AgentRooms } from "../../src/gateways/docker-agent-rooms";
 import { fixedClock } from "../../src/lib/clock";
 import { sequentialIds } from "../../src/lib/ids";
 import { AgentSdkHarness } from "../../src/runner/agent-sdk-harness";
@@ -270,12 +271,19 @@ describe("intervalFromEnv", () => {
 });
 
 describe("harnessFromEnv", () => {
-	const options = () => ({
+	// Never opened: harnessFromEnv only hands it to the harness.
+	const rooms: AgentRooms = {
+		id: "test-rooms",
+		open: () => Promise.reject(new Error("not opened in these tests")),
+		sweep: async () => {},
+	};
+	const options = (agentRooms: AgentRooms | null = rooms) => ({
 		stateDir: path.join("state", "avel"),
 		ids: sequentialIds(),
 		logger: captureLogger().logger,
 		clock: fixedClock("2026-10-23T09:00:00.000Z"),
 		checkRunner: null,
+		agentRooms,
 	});
 
 	it("runs the FakeHarness and the offline Canon model unless AVEL_HARNESS is agent-sdk", () => {
@@ -284,7 +292,8 @@ describe("harnessFromEnv", () => {
 				AVEL_HARNESS: value,
 				ANTHROPIC_API_KEY: "sk-test",
 			};
-			const chosen = harnessFromEnv(env, options());
+			// No agent rooms: the FakeHarness runs nothing on the host.
+			const chosen = harnessFromEnv(env, options(null));
 			expect(chosen.harness, String(value)).toBeInstanceOf(FakeHarness);
 			expect(chosen.sdk).toBeNull();
 			expect(chosen.canonModel).toBeInstanceOf(FakeCanonModel);
@@ -301,6 +310,19 @@ describe("harnessFromEnv", () => {
 					options(),
 				),
 			).toThrow("AVEL_HARNESS=agent-sdk needs ANTHROPIC_API_KEY");
+		}
+	});
+
+	it("refuses agent-sdk without agent rooms, and leaves the key where it was", () => {
+		for (const agentRooms of [null, undefined]) {
+			const env: NodeJS.ProcessEnv = {
+				AVEL_HARNESS: "agent-sdk",
+				ANTHROPIC_API_KEY: "sk-test",
+			};
+			expect(() => harnessFromEnv(env, { ...options(), agentRooms })).toThrow(
+				"AVEL_HARNESS=agent-sdk needs AVEL_AGENT_IMAGE: no agent runs on this host",
+			);
+			expect(env.ANTHROPIC_API_KEY).toBe("sk-test");
 		}
 	});
 
