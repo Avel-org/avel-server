@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { clientIdOfClient } from "../../src/db/client-id";
 import * as schema from "../../src/db/schema";
-import { client, engagement, intake, user } from "../../src/db/schema";
+import { client, engagement, user } from "../../src/db/schema";
 import { stamp } from "../../src/db/schema/columns";
 import type { Tx } from "../../src/db/tx";
 import { clock } from "./fixtures";
@@ -64,14 +65,14 @@ export async function seedTenants(
 			startedAt: clock.now(),
 			...stamp(clock),
 		});
-		await tx.insert(intake).values({
-			id: intakeId,
-			engagementId,
-			status: "draft",
-			sourceMd: "# Brief",
-			openQuestions: [],
-			...stamp(clock),
-		});
+		// Raw, naming only these columns: a migration test seeds a database
+		// migrated to an earlier step, where Drizzle's insert would name every
+		// column the schema has now (consent_file_id arrived in 0059).
+		const at = clock.now().toISOString();
+		await tx.execute(
+			sql`insert into intake (id, engagement_id, status, source_md, open_questions, created_at, updated_at)
+				values (${intakeId}, ${engagementId}, 'draft', '# Brief', '{}', ${at}::timestamptz, ${at}::timestamptz)`,
+		);
 		const scope = await clientIdOfClient(tx, clientId);
 		if (!scope) throw new Error("seedTenants: the client row is missing");
 		tenants.push({ clientId, engagementId, intakeId, scope });

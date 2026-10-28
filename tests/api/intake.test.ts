@@ -181,6 +181,7 @@ describe.skipIf(!url)("/api/intakes", () => {
 				draftedByCanonSessionId: null,
 				openCanonSessionId: null,
 				recommendedRoster: null,
+				consentFileId: null,
 				createdAt: clock.now().toISOString(),
 				updatedAt: clock.now().toISOString(),
 			});

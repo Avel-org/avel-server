@@ -16,6 +16,7 @@ export const READINESS_REASONS = [
 	"plan_check_failed",
 	"coherence_blocked",
 	"estimate_missing",
+	"consent_missing",
 ] as const;
 
 export const readinessReason = z.enum(READINESS_REASONS);
@@ -42,9 +43,18 @@ export type ReadinessWarning = z.infer<typeof readinessWarning>;
  * - estimate_missing: rosterEntryIds, and one issue per entry at
  *   ["roster", entryId, "estimatedTokens"].
  * - engagement_closed: engagementId.
+ * - consent_missing: intakeId, and consentFileId when the marked file was
+ *   purged. Only when the playbook's requiredFields lists "consent".
  */
 export const readinessBlocker = preconditionDetails
-	.pick({ issues: true, rosterEntryIds: true, wave: true, engagementId: true })
+	.pick({
+		issues: true,
+		rosterEntryIds: true,
+		wave: true,
+		engagementId: true,
+		intakeId: true,
+		consentFileId: true,
+	})
 	.extend({ reason: readinessReason })
 	.strict();
 

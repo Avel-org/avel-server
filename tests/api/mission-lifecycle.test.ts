@@ -11,18 +11,22 @@ import {
 } from "../../src/contract";
 import { preconditionDetails } from "../../src/contract/shared/errors";
 import { closeDb } from "../../src/db/client";
+import { clientIdOfIntake } from "../../src/db/client-id";
 import {
 	activityLog,
 	agentTemplate,
 	client,
 	engagement,
+	file,
+	intake,
+	intakeFiles,
 	mission,
 	playbook,
 	rosterEntry,
 	rosterPreset,
 } from "../../src/db/schema";
 import { stamp } from "../../src/db/schema/columns";
-import type { Tx } from "../../src/db/tx";
+import { type Tx, withClientScope } from "../../src/db/tx";
 import { type ApiHarness, clock, withApi } from "./support";
 
 const readinessBody = successEnvelope(missionReadiness);
@@ -224,6 +228,10 @@ describe.skipIf(!process.env.DATABASE_URL)("mission start and halt", () => {
 				.update(rosterEntry)
 				.set({ waves: ["C"], estimatedTokens: null })
 				.where(eq(rosterEntry.id, s.entryId));
+			await tx
+				.update(playbook)
+				.set({ requiredFields: ["consent"] })
+				.where(eq(playbook.missionType, s.type));
 
 			const r = await readiness(call, s.missionId);
 			expect(r.ready).toBe(false);
@@ -253,8 +261,14 @@ describe.skipIf(!process.env.DATABASE_URL)("mission start and halt", () => {
 					},
 				],
 			});
+			// No approved intake, so nowhere to mark consent.
+			expect(r.blockers[4]).toEqual({
+				reason: "consent_missing",
+				intakeId: null,
+				consentFileId: null,
+			});
 			// No ceiling is a warning, never a blocker (J, 2026-10-20).
-			expect(r.blockers).toHaveLength(4);
+			expect(r.blockers).toHaveLength(5);
 			expect(r.warnings).toEqual([{ reason: "spend_ceiling_missing" }]);
 
 			const d = await refusal(await post(call, s.missionId, "start"));
@@ -445,3 +459,204 @@ async function clientOf(tx: Tx, engagementId: string) {
 		.where(eq(engagement.id, engagementId));
 	return row?.clientId;
 }
+
+describe.skipIf(!process.env.DATABASE_URL)("client consent at start", () => {
+	afterAll(closeDb);
+
+	/**
+	 * seed's ready mission, with a playbook that requires consent, an approved
+	 * intake for it, and two files on that intake (one more on a second intake
+	 * of the same engagement). Nothing is marked yet.
+	 */
+	async function withConsent(h: ApiHarness) {
+		await h.signIn();
+		const s = await seed(h.tx, h.ns);
+		await h.tx
+			.update(playbook)
+			.set({ requiredFields: ["brief", "repo_url", "consent"] })
+			.where(eq(playbook.missionType, s.type));
+		const operator = await h.operatorId();
+		const intakeRow = (over: Partial<typeof intake.$inferInsert> = {}) => ({
+			id: s.id(),
+			engagementId: s.engagementId,
+			status: "draft" as const,
+			sourceMd: "# Brief",
+			openQuestions: [],
+			...stamp(clock),
+			...over,
+		});
+		const approved = intakeRow({
+			status: "approved",
+			approvedBy: operator,
+			approvedAt: clock.now(),
+			missionId: s.missionId,
+		});
+		const other = intakeRow();
+		await h.tx.insert(intake).values([approved, other]);
+		const clientId = await clientIdOfIntake(h.tx, approved.id);
+		if (!clientId) throw new Error("no client");
+		const fileRow = (name: string) => ({
+			id: s.id(),
+			scope: "engagement" as const,
+			clientId,
+			engagementId: s.engagementId,
+			name,
+			mime: "application/pdf",
+			bytes: 10,
+			sha256: "a".repeat(64),
+			storageKey: `clients/${clientId}/${"a".repeat(64)}`,
+			uploadedBy: operator,
+			purgedAt: null,
+			...stamp(clock),
+		});
+		const consent = fileRow("consent.pdf");
+		const notes = fileRow("notes.pdf");
+		const elsewhere = fileRow("elsewhere.pdf");
+		await withClientScope(h.tx, clientId, async (t) => {
+			await t.insert(file).values([consent, notes, elsewhere]);
+			await t.insert(intakeFiles).values([
+				{ intakeId: approved.id, fileId: consent.id },
+				{ intakeId: approved.id, fileId: notes.id },
+				{ intakeId: other.id, fileId: elsewhere.id },
+			]);
+		});
+		const mark = (intakeId: string, fileId: string) =>
+			h.call(`/api/intakes/${intakeId}/consent`, {
+				method: "PUT",
+				body: { fileId },
+			});
+		const unmark = (intakeId: string) =>
+			h.call(`/api/intakes/${intakeId}/consent`, { method: "DELETE" });
+		return {
+			...s,
+			clientId,
+			approvedId: approved.id,
+			otherId: other.id,
+			consentId: consent.id,
+			elsewhereId: elsewhere.id,
+			mark,
+			unmark,
+		};
+	}
+
+	const consentOf = async (res: Response) => {
+		expect(res.status, await res.clone().text()).toBe(200);
+		const body = (await res.json()) as {
+			data: { consentFileId: string | null };
+		};
+		return body.data.consentFileId;
+	};
+
+	it("blocks start until the approved intake marks a live consent file, then starts", async () => {
+		await withApi(async (h) => {
+			const s = await withConsent(h);
+			expect((await readiness(h.call, s.missionId)).blockers).toEqual([
+				{
+					reason: "consent_missing",
+					intakeId: s.approvedId,
+					consentFileId: null,
+				},
+			]);
+			expect(await refusal(await post(h.call, s.missionId, "start"))).toEqual({
+				reason: "consent_missing",
+				intakeId: s.approvedId,
+				consentFileId: null,
+				missionId: s.missionId,
+			});
+
+			expect(await consentOf(await s.mark(s.approvedId, s.consentId))).toBe(
+				s.consentId,
+			);
+			const logged = await h.logRows(s.approvedId);
+			expect(logged.map((r) => [r.action, r.payload])).toEqual([
+				[
+					"intake.updated",
+					{ fields: ["consentFileId"], consentFileId: s.consentId },
+				],
+			]);
+			expect(await readiness(h.call, s.missionId)).toMatchObject({
+				ready: true,
+				blockers: [],
+			});
+			expect((await post(h.call, s.missionId, "start")).status).toBe(200);
+		});
+	});
+
+	it("blocks again once the consent file is purged, and names it", async () => {
+		await withApi(async (h) => {
+			const s = await withConsent(h);
+			await consentOf(await s.mark(s.approvedId, s.consentId));
+			await withClientScope(h.tx, s.clientId, (t) =>
+				t
+					.update(file)
+					.set({ purgedAt: clock.now(), storageKey: null })
+					.where(eq(file.id, s.consentId)),
+			);
+			expect((await readiness(h.call, s.missionId)).blockers).toEqual([
+				{
+					reason: "consent_missing",
+					intakeId: s.approvedId,
+					consentFileId: s.consentId,
+				},
+			]);
+			// The purged file cannot be marked again.
+			expect(await refusal(await s.mark(s.approvedId, s.consentId))).toEqual({
+				reason: "consent_file_purged",
+				consentFileId: s.consentId,
+			});
+		});
+	});
+
+	it("blocks with no intake when the mission has no approved one", async () => {
+		await withApi(async (h) => {
+			const s = await withConsent(h);
+			await h.tx
+				.update(intake)
+				.set({ deletedAt: clock.now() })
+				.where(eq(intake.id, s.approvedId));
+			expect((await readiness(h.call, s.missionId)).blockers).toEqual([
+				{ reason: "consent_missing", intakeId: null, consentFileId: null },
+			]);
+		});
+	});
+
+	it("marks only one of the intake's own files, never on a rejected intake, and unmarks idempotently", async () => {
+		await withApi(async (h) => {
+			const s = await withConsent(h);
+			// Another intake's file, and a file that does not exist: 404.
+			expect((await s.mark(s.approvedId, s.elsewhereId)).status).toBe(404);
+			expect(
+				(await s.mark(s.approvedId, "00000000-0000-4000-8000-00000000dead"))
+					.status,
+			).toBe(404);
+
+			await h.tx
+				.update(intake)
+				.set({ status: "rejected" })
+				.where(eq(intake.id, s.otherId));
+			expect((await s.mark(s.otherId, s.elsewhereId)).status).toBe(409);
+
+			await consentOf(await s.mark(s.approvedId, s.consentId));
+			expect(await consentOf(await s.unmark(s.approvedId))).toBeNull();
+			expect(await consentOf(await s.unmark(s.approvedId))).toBeNull();
+			// The mark and one unmark; the second unmark changed nothing.
+			expect(await h.logRows(s.approvedId)).toHaveLength(2);
+		});
+	});
+
+	it("refuses, in the database, a consent file the intake does not hold", async () => {
+		await withApi(async (h) => {
+			const s = await withConsent(h);
+			await expect(
+				h.tx.transaction((t) =>
+					t
+						.update(intake)
+						.set({ consentFileId: s.elsewhereId })
+						.where(eq(intake.id, s.approvedId)),
+				),
+			).rejects.toMatchObject({
+				cause: { constraint_name: "intake_consent_file_fk" },
+			});
+		});
+	});
+});

@@ -249,6 +249,12 @@ export const intakeSchema = z.object({
 			agents: z.array(presetAgentSchema.extend({ reason: z.string() })),
 		})
 		.nullable(),
+	/**
+	 * The intake file marked as the client's written consent to build with AI
+	 * agents (2026-10-28). It stays set when that file is purged, so the
+	 * mission blocks again on consent_missing.
+	 */
+	consentFileId: uuid.nullable(),
 	createdAt: iso,
 	updatedAt: iso,
 });
@@ -368,6 +374,9 @@ export const intakeListEnvelope = z.object({
 
 const byId = z.object({ id: uuid });
 
+/** The intake file to mark as the client's consent. */
+export const markConsentBody = z.object({ fileId: uuid }).strict();
+
 export const intakeContract = c.router({
 	list: {
 		method: "GET",
@@ -432,6 +441,23 @@ export const intakeContract = c.router({
 		responses: { 200: successEnvelope(intakeSchema) },
 		summary:
 			"Draft or proposed. Confirms or rejects brief sources; the server stamps who and when. Status is unchanged.",
+	},
+	markConsent: {
+		method: "PUT",
+		path: "/api/intakes/:id/consent",
+		pathParams: byId,
+		body: markConsentBody,
+		responses: { 200: successEnvelope(intakeSchema) },
+		summary:
+			"Marks one of the intake's live files as the client's consent. Draft, proposed or approved; a purged file is 422 consent_file_purged.",
+	},
+	unmarkConsent: {
+		method: "DELETE",
+		path: "/api/intakes/:id/consent",
+		pathParams: byId,
+		body: c.noBody(),
+		responses: { 200: successEnvelope(intakeSchema) },
+		summary: "Clears the consent mark. Idempotent.",
 	},
 	reject: {
 		method: "POST",
