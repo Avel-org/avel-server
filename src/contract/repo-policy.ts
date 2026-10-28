@@ -32,9 +32,10 @@ const GITHUB_REPO =
 
 /**
  * Sets one repository's policy, creating it when there is none. Turning on
- * a direct push to the default branch needs confirmDirectPush: true, so it
- * is a deliberate act and never a toggle a stray request flips
- * (ROUTES.md, /settings/repositories). The server refuses it otherwise.
+ * a direct push to the default branch (off or no policy, to on) needs
+ * confirmDirectPush: true, so it is a deliberate act and never a toggle a
+ * stray request flips (ROUTES.md, /settings/repositories). The server
+ * refuses it otherwise. A set that leaves it on, or turns it off, needs none.
  */
 export const setRepoPolicyBody = z
 	.object({

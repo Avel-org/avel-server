@@ -1232,6 +1232,21 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 					payload: { allowDirectPushToDefault: true, was: null },
 				});
 
+				// Only turning it on needs the confirmation; a set that leaves it on does not.
+				const renamed = await put({
+					repoUrl: "https://github.com/meridian-co/app",
+					label: "Meridian app",
+					allowDirectPushToDefault: true,
+				});
+				expect(renamed.status, await renamed.clone().text()).toBe(200);
+				expect(
+					successEnvelope(repoPolicySchema).parse(await renamed.json()).data,
+				).toMatchObject({
+					id: policy.id,
+					label: "Meridian app",
+					allowDirectPushToDefault: true,
+				});
+
 				const second = await created(
 					await post(h, "/api/exports/preview", push),
 				);
@@ -1258,6 +1273,14 @@ describe.skipIf(!process.env.DATABASE_URL)("/api exports", () => {
 					await post(h, "/api/exports/preview", push),
 				);
 				expect(third.blocked?.reason).toBe("direct_push_not_allowed");
+				// Off to on again needs the confirmation again.
+				const reopened = await refused(
+					await put({
+						repoUrl: "https://github.com/meridian-co/app",
+						allowDirectPushToDefault: true,
+					}),
+				);
+				expect(reasonOf(reopened)).toBe("direct_push_unconfirmed");
 			},
 			{ roomSources: r.roomSources, repos: g.repos, repoWriter: writer },
 		);
