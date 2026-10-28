@@ -16,7 +16,6 @@ import {
 	uniqueIndex,
 	uuid,
 } from "drizzle-orm/pg-core";
-import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { GATE_JOB_FAILURES, GATE_JOB_STATUSES } from "../../contract/gate-job";
 import {
 	PROPOSAL_KINDS,
@@ -339,10 +338,3 @@ export const proposal = pgTable(
 		index("proposal_mission_id_idx").on(t.missionId),
 	],
 );
-
-export const intakeInsert = createInsertSchema(intake);
-export const intakeSelect = createSelectSchema(intake);
-export const exportInsert = createInsertSchema(exportTable);
-export const exportSelect = createSelectSchema(exportTable);
-export const proposalInsert = createInsertSchema(proposal);
-export const proposalSelect = createSelectSchema(proposal);

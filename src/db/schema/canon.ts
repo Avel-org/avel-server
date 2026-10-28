@@ -16,7 +16,6 @@ import {
 	uniqueIndex,
 	uuid,
 } from "drizzle-orm/pg-core";
-import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import {
 	CANON_MESSAGE_ROLES,
 	CANON_MODES,
@@ -528,14 +527,3 @@ export const clientMemory = pgTable(
 		),
 	],
 );
-
-export const canonSessionInsert = createInsertSchema(canonSession);
-export const canonSessionSelect = createSelectSchema(canonSession);
-export const canonMessageInsert = createInsertSchema(canonMessage);
-export const canonMessageSelect = createSelectSchema(canonMessage);
-export const canonQuestionInsert = createInsertSchema(canonQuestion);
-export const canonQuestionSelect = createSelectSchema(canonQuestion);
-export const clientMemoryInsert = createInsertSchema(clientMemory);
-export const clientMemorySelect = createSelectSchema(clientMemory);
-export const canonStepInsert = createInsertSchema(canonStep);
-export const canonStepSelect = createSelectSchema(canonStep);

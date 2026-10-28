@@ -7,7 +7,6 @@ import {
 	uniqueIndex,
 	uuid,
 } from "drizzle-orm/pg-core";
-import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { id, softDelete, timestamps } from "./columns";
 
 export const clientStatus = pgEnum("client_status", ["active", "closed"]);
@@ -51,8 +50,3 @@ export const engagement = pgTable(
 		uniqueIndex("engagement_id_client_id_uq").on(t.id, t.clientId),
 	],
 );
-
-export const clientInsert = createInsertSchema(client);
-export const clientSelect = createSelectSchema(client);
-export const engagementInsert = createInsertSchema(engagement);
-export const engagementSelect = createSelectSchema(engagement);

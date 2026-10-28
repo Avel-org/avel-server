@@ -86,6 +86,9 @@ export function githubWebhookRoute(
 
 		const requestId = ctx.get("requestId") as string;
 		await withTx(deps.db(), async (tx) => {
+			// No live(mission): an export records a pull request that exists on
+			// GitHub, so its close is recorded whatever became of the mission,
+			// as agent.ts reads its owner. No route removes a mission today.
 			const rows = await tx
 				.select({ row: exportTable, engagementId: mission.engagementId })
 				.from(exportTable)

@@ -1,6 +1,6 @@
 # avel-server
 
-The server for the AVEL Command Center: the contract every client shares, the API, and the database — and, as modules are built, the gate, the render, and delivery.
+The server for the AVEL Command Center: the contract every client shares, the API and the database. The gate, the render and delivery are built here module by module.
 
 **For what is built and what is not, read [`docs/STATE.md`](docs/STATE.md).** This README never states build status.
 
@@ -10,10 +10,14 @@ Requires Node 22 or later and pnpm 10. The exact pnpm version is pinned in `pack
 
 ```bash
 pnpm install
-cp .env.example .env
-docker compose up -d        # local Postgres
+cp .env.example .env        # then fill in the auth values (below)
+docker compose up -d        # local Postgres: avel_dev, avel_test and the avel_app role
+pnpm db:migrate             # migrate avel_dev
+pnpm db:seed                # the catalog: agents, presets, playbook
 pnpm dev                    # http://localhost:8787/api/health
 ```
+
+`pnpm dev` refuses to start until `.env` has `BETTER_AUTH_SECRET` (32+ characters), the GitHub OAuth app's `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`, and your numeric GitHub user id in `AVEL_OPERATOR_GITHUB_IDS`. `.env.example` explains each, and the rest are optional.
 
 ## Check it
 

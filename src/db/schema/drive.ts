@@ -11,7 +11,6 @@ import {
 	timestamp,
 	uuid,
 } from "drizzle-orm/pg-core";
-import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { client, engagement } from "./agency";
 import { user } from "./auth";
 import { id, softDelete, timestamps } from "./columns";
@@ -100,8 +99,3 @@ export const intakeFiles = pgTable(
 		index("intake_files_file_id_idx").on(t.fileId),
 	],
 );
-
-export const fileInsert = createInsertSchema(file);
-export const fileSelect = createSelectSchema(file);
-export const intakeFilesInsert = createInsertSchema(intakeFiles);
-export const intakeFilesSelect = createSelectSchema(intakeFiles);

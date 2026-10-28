@@ -9,7 +9,6 @@ import {
 	timestamp,
 	uuid,
 } from "drizzle-orm/pg-core";
-import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { client, engagement } from "./agency";
 import { user } from "./auth";
 import { canonSession } from "./canon";
@@ -215,6 +214,3 @@ export const activityLog = pgTable(
 		),
 	],
 );
-
-export const activityLogInsert = createInsertSchema(activityLog);
-export const activityLogSelect = createSelectSchema(activityLog);

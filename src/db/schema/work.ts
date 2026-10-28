@@ -15,7 +15,6 @@ import {
 	uniqueIndex,
 	uuid,
 } from "drizzle-orm/pg-core";
-import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import type { IdentityInputs } from "../../contract/agent-template";
 import { type BriefRef, reportFiledBy } from "../../contract/dispatch";
 import { DELIVERABLES } from "../../contract/playbook";
@@ -682,26 +681,3 @@ export const knowledgeEntry = pgTable(
 		index("knowledge_entry_client_id_idx").on(t.clientId),
 	],
 );
-
-export const agentTemplateInsert = createInsertSchema(agentTemplate);
-export const agentTemplateSelect = createSelectSchema(agentTemplate);
-export const agentIdentityVersionInsert =
-	createInsertSchema(agentIdentityVersion);
-export const agentIdentityVersionSelect =
-	createSelectSchema(agentIdentityVersion);
-export const rosterPresetInsert = createInsertSchema(rosterPreset);
-export const rosterPresetSelect = createSelectSchema(rosterPreset);
-export const playbookInsert = createInsertSchema(playbook);
-export const playbookSelect = createSelectSchema(playbook);
-export const missionInsert = createInsertSchema(mission);
-export const missionSelect = createSelectSchema(mission);
-export const rosterEntryInsert = createInsertSchema(rosterEntry);
-export const rosterEntrySelect = createSelectSchema(rosterEntry);
-export const dispatchInsert = createInsertSchema(dispatch);
-export const dispatchSelect = createSelectSchema(dispatch);
-export const completionReportInsert = createInsertSchema(completionReport);
-export const completionReportSelect = createSelectSchema(completionReport);
-export const findingInsert = createInsertSchema(finding);
-export const findingSelect = createSelectSchema(finding);
-export const knowledgeEntryInsert = createInsertSchema(knowledgeEntry);
-export const knowledgeEntrySelect = createSelectSchema(knowledgeEntry);
