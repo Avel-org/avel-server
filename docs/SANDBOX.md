@@ -177,6 +177,15 @@ Each rule has a test on real Docker, watched to fail without it, and they run in
 
 Not covered: the server itself and AVEL's tools still run on the host as the operator's user; what the agent reads through its tools can go to the model, which is the agent's job; containers share the host kernel (Docker Desktop adds a VM on Windows and macOS). Canon's turns still run on the host.
 
+### As built 2026-10-28: browsers in the check container
+
+`[built]` (J, 2026-10-28, for browser checks such as Playwright, axe and Lighthouse). `docker/check-image/Dockerfile` is the pinned Node image plus Debian's Chromium and fonts, with `CHROME_PATH` and `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` set. It is a check image only; agent rooms keep the plain one.
+
+- **Chromium runs with `--no-sandbox`.** Its own sandbox needs user namespaces, which a container with no capabilities and no new privileges does not grant; without the flag it refuses to start (measured). The check container is the sandbox: no network, no capabilities, the `node` user, caps on memory, CPU and processes. A project's browser configs pass `--no-sandbox --disable-dev-shm-usage`, because the container's `/dev/shm` is small.
+- **Nothing downloads a browser.** The install runs with `--ignore-scripts` behind the registry-only proxy, so a Playwright browser download could not run anyway; tests use the image's Chromium.
+- **The digest is what is pinned,** never the Dockerfile: apt serves whatever bookworm holds at build time. A rebuild is a new digest and a new receipt `runner`.
+- Tested through the real check runner (`tests/unit/docker-check-runner.test.ts`, on `AVEL_DOCKER_BROWSER_TEST_IMAGE`): a page renders in the browser image, and the same check fails on the plain image. CI does not set the browser image yet.
+
 ## Mounts stop writes. They do not stop whole-tree commands.
 
 Found on the first day of the frontend build, 2026-08-29. Three sessions ran concurrently in one working directory with declared mounts. Two incidents, one cause.

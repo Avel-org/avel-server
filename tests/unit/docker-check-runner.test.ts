@@ -398,3 +398,40 @@ describe.skipIf(!IMAGE)("dockerCheckRunner on Docker", () => {
 		expect(leftover()).toBe("");
 	});
 });
+
+// The browser check image (docker/check-image), opt in with
+// AVEL_DOCKER_BROWSER_TEST_IMAGE. It is AVEL_DOCKER_TEST_IMAGE plus
+// Chromium, so the same check fails on the plain image.
+const BROWSER_IMAGE = process.env.AVEL_DOCKER_BROWSER_TEST_IMAGE;
+
+describe.skipIf(!BROWSER_IMAGE)(
+	"dockerCheckRunner on the browser image",
+	() => {
+		const page = `<!doctype html><title>t</title><h1>GTS ok</h1>`;
+		const render = () =>
+			check(
+				`"$CHROME_PATH" --headless=new --no-sandbox --disable-dev-shm-usage --disable-gpu --dump-dom "file://$PWD/index.html" | grep -q "GTS ok"`,
+			);
+
+		it("renders a page in Chromium inside the check container, with no network and no capabilities", async () => {
+			const r = repo({ "index.html": page });
+			const [res] = await dockerCheckRunner({
+				image: BROWSER_IMAGE as string,
+				ids: sequentialIds(),
+			}).run(request(r.dir, r.commits[0] as string, [render()]));
+			expect([res?.outcome, res?.exitCode], res?.output).toEqual(["pass", 0]);
+			expect(leftover()).toBe("");
+		});
+
+		it.skipIf(!IMAGE)(
+			"fails the same check on the plain image, which has no browser",
+			async () => {
+				const r = repo({ "index.html": page });
+				const [res] = await runner().run(
+					request(r.dir, r.commits[0] as string, [render()]),
+				);
+				expect(res?.outcome).toBe("fail");
+			},
+		);
+	},
+);
