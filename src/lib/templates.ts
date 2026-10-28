@@ -24,18 +24,9 @@ const DEV_BOOKING_COVER = ".avel/cover.png";
 export const DEV_BOOKING_SHA = "3c34369fd2c403ec35f1d24760ff183a840842e2";
 
 /**
- * A dispatch's work on the dev fixture: one commit on DEV_BOOKING_SHA that
- * changes src/features/scheduling/, kept under DEV_GATE_READY_REF. The dev
- * seed's gate-ready mission reports it as its one complete dispatch's
- * result, so that mission can queue a gate job on avel_dev.
- */
-export const DEV_GATE_READY_SHA = "612671d7f052c5601344ebe09bdffa776b07583c";
-export const DEV_GATE_READY_REF = "refs/avel/dev/gate-ready";
-
-/**
  * What dev reads when no template credential is configured, so the page
  * works on avel_dev with no token. template-booking's sha is the one the
- * seeded missions record. template-integration is unreadable on purpose: it
+ * dev fixture builds. template-integration is unreadable on purpose: it
  * has not been built, and the page must show that row too.
  */
 export const DEV_TEMPLATE_READS: Readonly<Record<string, TemplateRead | null>> =

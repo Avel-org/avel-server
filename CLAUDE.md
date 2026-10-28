@@ -17,7 +17,7 @@ pnpm install
 cp .env.example .env              # DATABASE_URL, PORT=8787, and the auth vars (see below)
 docker compose up -d              # Postgres 17 + pgvector; avel_dev and avel_test
 pnpm db:migrate                   # migrate avel_dev (reads .env)
-pnpm db:seed                      # deterministic dev data; refuses any database not ending in _dev
+pnpm db:seed                      # the catalog only (agents, presets, playbook); refuses any database not ending in _dev
 pnpm dev                          # tsx watch; http://localhost:8787/api/health
 
 pnpm check                        # exactly what CI runs, in CI's order:

@@ -5,7 +5,6 @@ import {
 	seedId,
 	seedIds,
 } from "../../src/db/seed/data";
-import { SEED_RUN_AT } from "./seed-run-at";
 
 // A UI shows an id's first 8 characters. Seed ids once all began 5eed0000,
 // so every short id on a seeded page read the same.
@@ -36,7 +35,7 @@ describe("seed ids", () => {
 
 	it("cover every row the seed builds without colliding", () => {
 		const gen = seedIds();
-		buildSeed(gen, SEED_RUN_AT);
+		buildSeed(gen);
 		const used = gen.next();
 		const n = Number(used.slice(-12));
 		const all = ids(n);
