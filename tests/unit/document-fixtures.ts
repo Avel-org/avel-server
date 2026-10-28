@@ -1,3 +1,5 @@
+import { deflateRawSync } from "node:zlib";
+
 /**
  * Real PDF and docx bytes built in code, so the extraction tests run on
  * files a reader would open and commit no binaries.
@@ -57,11 +59,12 @@ export function pdfOf(
 /** A docx whose body holds these paragraphs. */
 export function docxOf(
 	paragraphs: readonly string[],
-	options: { claimInflated?: number } = {},
+	options: { claimInflated?: number; deflate?: boolean; padding?: number } = {},
 ): Uint8Array {
-	const body = paragraphs
-		.map((p) => `<w:p><w:r><w:t xml:space="preserve">${p}</w:t></w:r></w:p>`)
-		.join("");
+	const body =
+		paragraphs
+			.map((p) => `<w:p><w:r><w:t xml:space="preserve">${p}</w:t></w:r></w:p>`)
+			.join("") + " ".repeat(options.padding ?? 0);
 	return zipOf(
 		{
 			"[Content_Types].xml":
@@ -75,12 +78,13 @@ export function docxOf(
 }
 
 /**
- * A zip of stored (uncompressed) entries. claimInflated makes the central
- * directory state that size for its last entry, as a zip bomb's would.
+ * A zip of stored entries, or deflated ones with `deflate`. claimInflated
+ * makes the central directory state that size for its last entry, as a zip
+ * bomb's would.
  */
 export function zipOf(
 	files: Record<string, string>,
-	options: { claimInflated?: number } = {},
+	options: { claimInflated?: number; deflate?: boolean } = {},
 ): Uint8Array {
 	const enc = new TextEncoder();
 	const local: number[] = [];
@@ -88,23 +92,25 @@ export function zipOf(
 	const entries = Object.entries(files);
 	entries.forEach(([name, text], i) => {
 		const nameBytes = enc.encode(name);
-		const data = enc.encode(text);
-		const crc = crc32(data);
+		const raw = enc.encode(text);
+		const crc = crc32(raw);
+		const data = options.deflate ? deflateRawSync(raw) : raw;
+		const method = options.deflate ? 8 : 0;
 		const offset = local.length;
 		const claimed =
 			i === entries.length - 1 && options.claimInflated !== undefined
 				? options.claimInflated
-				: data.length;
+				: raw.length;
 		local.push(
 			...u32(0x04034b50),
 			...u16(20),
 			...u16(0),
-			...u16(0),
+			...u16(method),
 			...u16(0),
 			...u16(0),
 			...u32(crc),
 			...u32(data.length),
-			...u32(data.length),
+			...u32(raw.length),
 			...u16(nameBytes.length),
 			...u16(0),
 			...nameBytes,
@@ -115,7 +121,7 @@ export function zipOf(
 			...u16(20),
 			...u16(20),
 			...u16(0),
-			...u16(0),
+			...u16(method),
 			...u16(0),
 			...u16(0),
 			...u32(crc),

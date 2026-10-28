@@ -1118,7 +1118,7 @@ J chose these on 2026-10-24, when modules 12 and 14 were started.
 
 J chose this on 2026-10-28, from a codebase audit.
 
-- **The 56 `drizzle-zod` schemas are deleted** `[built]`. Every table exported an insert and a select schema; nothing in `src/` or `tests/` imported one. The wire shapes in `src/contract/` are written by hand, because the wire is camelCase, leaves columns out and adds joined fields, so a table's shape was never the wire's. The insert types Drizzle infers (`$inferInsert`) still force an id and times on every insert, which is what the no-defaults rule needs. Rejected: wiring them into the contract, which would couple the public surface to column changes.
+- **The 58 `drizzle-zod` schemas are deleted (29 tables, an insert and a select each)** `[built]`. Every table exported an insert and a select schema; nothing in `src/` or `tests/` imported one. The wire shapes in `src/contract/` are written by hand, because the wire is camelCase, leaves columns out and adds joined fields, so a table's shape was never the wire's. The insert types Drizzle infers (`$inferInsert`) still force an id and times on every insert, which is what the no-defaults rule needs. Rejected: wiring them into the contract, which would couple the public surface to column changes.
 - `drizzle-zod` stays as a dev dependency: `tests/db/columns.test.ts` uses it to check the column helpers.
 
 ---

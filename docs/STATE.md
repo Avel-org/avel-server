@@ -2,7 +2,7 @@
 
 *The single source of truth for build status, counts, and gaps. **No other document may state build status, entity counts, or agent counts.** They link here.*
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-28
 
 ---
 
