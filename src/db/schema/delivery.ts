@@ -27,6 +27,7 @@ import { engagement } from "./agency";
 import { user } from "./auth";
 import { canonSession } from "./canon";
 import { id, softDelete, timestamps } from "./columns";
+import { intakeFiles } from "./drive";
 import { cut, exportTargetKind, gate, type Wave } from "./enums";
 import { connection } from "./platform";
 import { mission, rosterPreset } from "./work";
@@ -95,6 +96,11 @@ export const intake = pgTable(
 		// Canon's roster recommendation, shown beside the presets, never stored
 		// as one.
 		recommendedRoster: jsonb("recommended_roster").$type<RecommendedRoster>(),
+		// The intake file that is the client's written consent to build with
+		// AI agents (J, 2026-10-28). The composite key below holds it to one
+		// of this intake's own files; a purge keeps it, pointing at the
+		// tombstone, so start blocks again.
+		consentFileId: uuid("consent_file_id"),
 		...softDelete,
 		...timestamps,
 	},
@@ -103,6 +109,11 @@ export const intake = pgTable(
 		index("intake_engagement_id_idx").on(t.engagementId),
 		// The target of canon_session_intake_engagement_fk.
 		uniqueIndex("intake_id_engagement_id_uq").on(t.id, t.engagementId),
+		foreignKey({
+			name: "intake_consent_file_fk",
+			columns: [t.id, t.consentFileId],
+			foreignColumns: [intakeFiles.intakeId, intakeFiles.fileId],
+		}),
 		foreignKey({
 			name: "intake_drafted_by_canon_session_fk",
 			columns: [t.draftedByCanonSessionId, t.id],

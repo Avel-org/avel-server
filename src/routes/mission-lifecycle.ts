@@ -11,16 +11,19 @@ import {
 	resolveWritablePaths,
 } from "../contract";
 import { logActivity } from "../db/activity";
+import { clientIdOfIntake } from "../db/client-id";
 import {
 	agentTemplate,
 	client,
 	engagement,
+	file,
+	intake,
 	mission,
 	playbook,
 	rosterEntry,
 } from "../db/schema";
 import { live, touch } from "../db/schema/columns";
-import { type Executor, type Tx, withTx } from "../db/tx";
+import { type Executor, type Tx, withClientScope, withTx } from "../db/tx";
 import { checkPlan } from "../lib/plan-check";
 import { identitySupported } from "../lib/roles";
 import { ApiError } from "../middleware/errors";
@@ -137,6 +140,7 @@ async function blockersFor(
 		.select({
 			wavesApplicable: playbook.wavesApplicable,
 			gates: playbook.gates,
+			requiredFields: playbook.requiredFields,
 		})
 		.from(playbook)
 		.where(and(eq(playbook.missionType, m.type), live(playbook)));
@@ -194,7 +198,59 @@ async function blockersFor(
 		});
 	}
 
+	if (book?.requiredFields.includes("consent")) {
+		const missing = await consentMissing(db, m.id, lock);
+		if (missing) blockers.push({ reason: "consent_missing", ...missing });
+	}
+
 	return blockers;
+}
+
+/**
+ * Null when the mission's one approved intake marks a live, unpurged file
+ * as the client's consent. Otherwise where to fix it: the intake (null when
+ * there is not exactly one approved), and the marked file when it was purged.
+ * Start locks both rows FOR SHARE, so an unmark (which locks the intake FOR
+ * UPDATE) or a purge (which updates the file) waits for start, or start
+ * waits for it and reads what it wrote.
+ */
+async function consentMissing(
+	db: Executor | Tx,
+	missionId: string,
+	lock: boolean,
+): Promise<{ intakeId: string | null; consentFileId: string | null } | null> {
+	const intakes = db
+		.select({ id: intake.id, consentFileId: intake.consentFileId })
+		.from(intake)
+		.where(
+			and(
+				eq(intake.missionId, missionId),
+				eq(intake.status, "approved"),
+				live(intake),
+			),
+		);
+	const approved = await (lock ? intakes.for("share") : intakes);
+	const [only] = approved;
+	if (approved.length !== 1 || !only) {
+		return { intakeId: null, consentFileId: null };
+	}
+	if (only.consentFileId === null) {
+		return { intakeId: only.id, consentFileId: null };
+	}
+	const clientId = await clientIdOfIntake(db, only.id);
+	if (clientId === null) throw new Error(`intake ${only.id} has no client`);
+	// file is under row-level security: read it in its client's scope.
+	const [marked] = await withClientScope(db, clientId, (s) => {
+		const q = s
+			.select({ purgedAt: file.purgedAt, deletedAt: file.deletedAt })
+			.from(file)
+			.where(eq(file.id, only.consentFileId as string));
+		return lock ? q.for("share") : q;
+	});
+	if (marked && marked.purgedAt === null && marked.deletedAt === null) {
+		return null;
+	}
+	return { intakeId: only.id, consentFileId: only.consentFileId };
 }
 
 /** What readiness shows without blocking start. */
@@ -210,6 +266,8 @@ const MESSAGES: Record<ReadinessBlocker["reason"], string> = {
 	plan_check_failed: "The mission's plan does not pass its check",
 	coherence_blocked: "The roster cannot staff the playbook's first wave",
 	estimate_missing: "An active agent has no token estimate",
+	consent_missing:
+		"The mission's playbook requires the client's consent, marked on the mission's one approved intake",
 };
 
 export function missionLifecycleRoutes(deps: RouteDeps & RunnerDeps) {

@@ -235,8 +235,11 @@ recommended_roster?         jsonb [{ agentTemplateId, territory?, reason }] — 
 approved_by?                FK → User
 approved_at?
 mission_id?                 FK → Mission, set on approval
+consent_file_id?            the intake file that is the client's written consent to build with AI agents [built] 2026-10-28; (id, consent_file_id) → intake_files, so only one of the intake's own files
 deleted_at · timestamps
 ```
+
+*As built 2026-10-28 (J):* when a mission's playbook lists `consent` in `requiredFields`, start blocks on `consent_missing` until the mission's one approved intake marks a live, unpurged file as consent (`PUT /api/intakes/:id/consent`; `DELETE` clears it). A purge keeps the mark, pointing at the tombstone, so start blocks again. `consent` is the only required field anything enforces; the others are labels.
 
 *As built 2026-10-05:* the four `derived_*` fields and `proposed_brief` are nullable until the repository is read and Canon has written. A CHECK requires `approved_by`, `approved_at` and `mission_id` when `status = 'approved'`.
 

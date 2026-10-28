@@ -24,7 +24,7 @@ import {
 	mission,
 } from "../db/schema";
 import { live, stamp, touch } from "../db/schema/columns";
-import { type Executor, type Tx, withTx } from "../db/tx";
+import { type Executor, type Tx, withClientScope, withTx } from "../db/tx";
 import type { RepoSource } from "../gateways/repo-source";
 import {
 	applyDecisions,
@@ -103,6 +103,7 @@ function toWire(row: Row, openCanonSessionId: string | null): Intake {
 		draftedByCanonSessionId: row.draftedByCanonSessionId,
 		openCanonSessionId,
 		recommendedRoster: row.recommendedRoster ?? null,
+		consentFileId: row.consentFileId,
 		createdAt: row.createdAt.toISOString(),
 		updatedAt: row.updatedAt.toISOString(),
 	};
@@ -688,6 +689,71 @@ export function intakeRoutes(deps: RouteDeps & { repos: RepoSource }) {
 						confirmed: count("confirm"),
 						rejected: count("reject"),
 					},
+				);
+			});
+			return { status: 200, body: ok(await wireOf(deps.db(), row)) };
+		},
+
+		markConsent: async ({ params, body }, ctx) => {
+			const row = await withTx(deps.db(), async (tx) => {
+				const current = await lockIntake(tx, params.id);
+				if (current.status === "rejected") {
+					throw wrongState(current, "given a consent record");
+				}
+				const clientId = await clientIdOfIntake(tx, current.id);
+				if (clientId === null)
+					throw new Error(`intake ${current.id} has no client`);
+				// file is under row-level security: read it in its client's scope.
+				const [linked] = await withClientScope(tx, clientId, (s) =>
+					s
+						.select({ purgedAt: file.purgedAt })
+						.from(file)
+						.innerJoin(intakeFiles, eq(intakeFiles.fileId, file.id))
+						.where(
+							and(
+								eq(file.id, body.fileId),
+								eq(intakeFiles.intakeId, current.id),
+								live(file),
+							),
+						),
+				);
+				if (!linked) throw notFound("file", body.fileId);
+				if (linked.purgedAt !== null) {
+					throw new ApiError(
+						"PRECONDITION_FAILED",
+						"A purged file cannot be the consent record",
+						{
+							details: {
+								reason: "consent_file_purged",
+								consentFileId: body.fileId,
+							},
+						},
+					);
+				}
+				if (current.consentFileId === body.fileId) return current;
+				return transition(
+					tx,
+					ctx,
+					current,
+					{ consentFileId: body.fileId, status: current.status },
+					"intake.updated",
+					{ fields: ["consentFileId"], consentFileId: body.fileId },
+				);
+			});
+			return { status: 200, body: ok(await wireOf(deps.db(), row)) };
+		},
+
+		unmarkConsent: async ({ params }, ctx) => {
+			const row = await withTx(deps.db(), async (tx) => {
+				const current = await lockIntake(tx, params.id);
+				if (current.consentFileId === null) return current;
+				return transition(
+					tx,
+					ctx,
+					current,
+					{ consentFileId: null, status: current.status },
+					"intake.updated",
+					{ fields: ["consentFileId"], consentFileId: null },
 				);
 			});
 			return { status: 200, body: ok(await wireOf(deps.db(), row)) };

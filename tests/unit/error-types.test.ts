@@ -157,6 +157,8 @@ describe("the error envelope is a discriminated union on code", () => {
 			"proposal_action_not_built",
 			"export_not_pr_open",
 			"skill_not_role_layer",
+			"consent_missing",
+			"consent_file_purged",
 		]);
 	});
 

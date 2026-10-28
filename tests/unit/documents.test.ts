@@ -33,7 +33,7 @@ describe("sniffDocument", () => {
 describe("zipDirectory", () => {
 	it("reads every name and the inflated sizes the directory states", () => {
 		const dir = zipDirectory(zipOf({ a: "12345", "b/c.xml": "123" }));
-		expect(dir).toEqual({ names: ["a", "b/c.xml"], inflatedBytes: 8 });
+		expect(dir).toMatchObject({ names: ["a", "b/c.xml"], inflatedBytes: 8 });
 	});
 });
 
@@ -77,6 +77,25 @@ describe("documentText", () => {
 	it("refuses a docx whose directory claims more than the cap, before inflating it", async () => {
 		const bomb = docxOf(["x"], { claimInflated: DOCX_MAX_INFLATED_BYTES + 1 });
 		expect(await documentText(bomb, DOCX_MIME)).toEqual({
+			refused: "The Word file is too large once unpacked",
+		});
+	});
+
+	it("reads a docx whose entries are deflated, as Word writes them", async () => {
+		expect(
+			await documentText(docxOf(["Scope"], { deflate: true }), DOCX_MIME),
+		).toEqual({ text: "Scope" });
+	});
+
+	it("refuses a docx whose directory lies about its size, by inflating it against the cap", async () => {
+		// 60 MiB of spaces deflate to about 60 KiB; the directory claims 100 bytes.
+		const liar = docxOf(["x"], {
+			deflate: true,
+			padding: 60 * 1024 * 1024,
+			claimInflated: 100,
+		});
+		expect(liar.length).toBeLessThan(1024 * 1024);
+		expect(await documentText(liar, DOCX_MIME)).toEqual({
 			refused: "The Word file is too large once unpacked",
 		});
 	});

@@ -192,6 +192,11 @@ export const PRECONDITION_REASONS = [
 	"export_not_pr_open",
 	// Role skills (2026-10-24): only a role-layer skill attaches to roles.
 	"skill_not_role_layer",
+	// Client consent (2026-10-28): a playbook that requires consent starts
+	// only with a live consent file on the approved intake; a purged file
+	// cannot be marked as one.
+	"consent_missing",
+	"consent_file_purged",
 ] as const;
 
 export const preconditionReason = z.enum(PRECONDITION_REASONS);
@@ -210,6 +215,10 @@ export const preconditionDetails = z
 		connectionId: z.string().uuid().optional(),
 		/** The mission the precondition was about, where there is one. */
 		missionId: z.string().uuid().optional(),
+		/** consent_missing: the mission's one approved intake, null when there is not exactly one. */
+		intakeId: z.string().uuid().nullable().optional(),
+		/** consent_missing: the marked consent file when it was purged; null when none is marked. consent_file_purged: the file. */
+		consentFileId: z.string().uuid().nullable().optional(),
 		/** The dispatch the precondition was about, where there is one. */
 		dispatchId: z.string().uuid().optional(),
 		/** roster_entry_not_found, roster_entry_inactive, agent_identity_missing, estimate_missing, template_not_rosterable: the entries at fault, in roster order. */

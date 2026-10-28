@@ -1,3 +1,4 @@
+import { inflateRawSync } from "node:zlib";
 import mammoth from "mammoth";
 import { extractText } from "unpdf";
 
@@ -7,11 +8,11 @@ export const DOCX_MIME =
 export type DocumentMime = typeof PDF_MIME | typeof DOCX_MIME;
 
 /**
- * A docx's limits, read from its zip directory before anything inflates it:
- * a few megabytes of zip can claim gigabytes once inflated. A [hypothesis]
- * sized well above any brief: 50 MiB inflated, 2000 entries. The sizes are
- * the directory's claim: a zip that lies is inflated in full by mammoth.
- * [attestation], on an upload only the operator can make.
+ * A docx's limits: a few megabytes of zip can inflate to gigabytes. A
+ * [hypothesis] sized well above any brief: 50 MiB inflated, 2000 entries.
+ * The directory's claimed sizes are checked first; then every entry is
+ * actually inflated against the same budget, which stops at the cap, so a
+ * zip that lies about its sizes is refused before mammoth opens it.
  */
 export const DOCX_MAX_INFLATED_BYTES = 50 * 1024 * 1024;
 export const DOCX_MAX_ENTRIES = 2000;
@@ -80,6 +81,13 @@ async function docxText(
 	) {
 		return { refused: "The Word file is too large once unpacked" };
 	}
+	const inflated = inflatedWithin(bytes, dir.entries, DOCX_MAX_INFLATED_BYTES);
+	if (inflated === "over") {
+		return { refused: "The Word file is too large once unpacked" };
+	}
+	if (inflated === "unreadable") {
+		return { refused: "The Word file could not be read" };
+	}
 	try {
 		const { value } = await mammoth.extractRawText({
 			buffer: Buffer.from(bytes),
@@ -99,9 +107,11 @@ function startsWith(bytes: Uint8Array, magic: readonly number[]): boolean {
  * inflated sizes, as the directory states them. Null when there is no
  * well-formed directory. Zip64 archives are null too: no docx needs one.
  */
-export function zipDirectory(
-	bytes: Uint8Array,
-): { names: string[]; inflatedBytes: number } | null {
+export function zipDirectory(bytes: Uint8Array): {
+	names: string[];
+	inflatedBytes: number;
+	entries: ZipEntry[];
+} | null {
 	const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 	// The end-of-directory record is the last 22 bytes plus a comment of up
 	// to 65535 bytes; search backwards for its signature.
@@ -121,21 +131,74 @@ export function zipDirectory(
 		return null;
 	}
 	const names: string[] = [];
+	const entries: ZipEntry[] = [];
 	let inflatedBytes = 0;
 	let at = offset;
 	const decoder = new TextDecoder();
 	for (let n = 0; n < count; n++) {
 		if (at + 46 > end || view.getUint32(at, true) !== 0x02014b50) return null;
+		const method = view.getUint16(at + 10, true);
+		const compressed = view.getUint32(at + 20, true);
 		const inflated = view.getUint32(at + 24, true);
 		const nameLength = view.getUint16(at + 28, true);
 		const extraLength = view.getUint16(at + 30, true);
 		const commentLength = view.getUint16(at + 32, true);
 		if (inflated === 0xffffffff) return null;
+		const local = view.getUint32(at + 42, true);
 		const nameEnd = at + 46 + nameLength;
 		if (nameEnd > end) return null;
 		names.push(decoder.decode(bytes.subarray(at + 46, nameEnd)));
+		entries.push({ method, compressed, local });
 		inflatedBytes += inflated;
 		at = nameEnd + extraLength + commentLength;
 	}
-	return { names, inflatedBytes };
+	return { names, inflatedBytes, entries };
+}
+
+/** One central-directory entry: how its data is stored, how long it is, and where its local header is. */
+type ZipEntry = { method: number; compressed: number; local: number };
+
+/**
+ * Inflates every entry against one budget, as a reader would, and stops the
+ * moment the total passes it. "over" past the budget; "unreadable" for a
+ * header that does not parse, data past the end, or a method other than
+ * stored (0) and deflate (8).
+ */
+function inflatedWithin(
+	bytes: Uint8Array,
+	entries: readonly ZipEntry[],
+	budget: number,
+): "ok" | "over" | "unreadable" {
+	const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+	let left = budget;
+	for (const e of entries) {
+		if (e.local + 30 > bytes.length) return "unreadable";
+		if (view.getUint32(e.local, true) !== 0x04034b50) return "unreadable";
+		const start =
+			e.local +
+			30 +
+			view.getUint16(e.local + 26, true) +
+			view.getUint16(e.local + 28, true);
+		if (start + e.compressed > bytes.length) return "unreadable";
+		const data = bytes.subarray(start, start + e.compressed);
+		let size: number;
+		if (e.method === 0) {
+			size = data.length;
+		} else if (e.method === 8) {
+			try {
+				// Throws once the output would pass what is left of the budget.
+				size = inflateRawSync(data, {
+					maxOutputLength: Math.max(1, left),
+				}).length;
+			} catch (err) {
+				if (err instanceof RangeError) return "over";
+				return "unreadable";
+			}
+		} else {
+			return "unreadable";
+		}
+		left -= size;
+		if (left < 0) return "over";
+	}
+	return "ok";
 }

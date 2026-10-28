@@ -93,6 +93,34 @@ const TEXT_MIME = /^text\//;
 class TurnFailed extends Error {}
 
 /**
+ * A PDF's or Word file's text by its bytes' sha256, so a turn does not
+ * parse every document again. The sha names the bytes, so a hit is the
+ * same text a parse would give. The oldest entry goes past 32.
+ */
+const documentTexts = new Map<
+	string,
+	Awaited<ReturnType<typeof documentText>>
+>();
+const DOCUMENT_TEXTS_MAX = 32;
+
+async function cachedDocumentText(
+	sha256: string,
+	bytes: Uint8Array,
+	mime: typeof PDF_MIME | typeof DOCX_MIME,
+) {
+	const key = `${mime}:${sha256}`;
+	const hit = documentTexts.get(key);
+	if (hit) return hit;
+	const read = await documentText(bytes, mime);
+	documentTexts.set(key, read);
+	if (documentTexts.size > DOCUMENT_TEXTS_MAX) {
+		const oldest = documentTexts.keys().next().value;
+		if (oldest !== undefined) documentTexts.delete(oldest);
+	}
+	return read;
+}
+
+/**
  * The sweep, then one turn for every open session mid-turn, scope by scope:
  * canon_session is under row-level security, so it is read in the open
  * scope, then in each client's own. Scopes and sessions run in a stable order.
@@ -220,7 +248,11 @@ async function loadTurn(deps: CanonDeps, scope: CanonScope, sessionId: string) {
 	});
 }
 
-/** The live files' text, through the blob gateway. A missing blob fails the turn. */
+/**
+ * The live files' text, through the blob gateway. A missing blob fails the
+ * turn. A file whose text cannot be read is left out, and logged by id, so
+ * the operator can see Canon answered without it.
+ */
 async function readFiles(
 	blobs: BlobStore,
 	files: ReadonlyArray<{
@@ -230,6 +262,7 @@ async function readFiles(
 		sha256: string;
 		storageKey: string | null;
 	}>,
+	log: Logger,
 ): Promise<KnowledgeFile[]> {
 	const out: KnowledgeFile[] = [];
 	for (const f of files) {
@@ -242,15 +275,25 @@ async function readFiles(
 		if (bytes === null) throw new TurnFailed(`file ${f.id} has no bytes`);
 		let contentMd: string;
 		if (document) {
-			// The upload refused one with no text, so a refusal here means the
-			// bytes changed under their sha; it is left out, as bad UTF-8 is.
-			const read = await documentText(bytes, document);
-			if ("refused" in read) continue;
+			// The upload refused one with no text, so this is a parser or a
+			// limit that changed since the upload.
+			const read = await cachedDocumentText(f.sha256, bytes, document);
+			if ("refused" in read) {
+				log.warn(
+					{ fileId: f.id, mime: f.mime, refused: read.refused },
+					"Canon left out a file whose text could not be read",
+				);
+				continue;
+			}
 			contentMd = read.text;
 		} else {
 			try {
 				contentMd = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
 			} catch {
+				log.warn(
+					{ fileId: f.id, mime: f.mime },
+					"Canon left out a file that is not UTF-8",
+				);
 				continue;
 			}
 		}
@@ -634,7 +677,7 @@ export async function runCanonTurn(
 		await writeStep({ kind: "text", label: "Writing", detail: { text } });
 	};
 	try {
-		const files = await readFiles(deps.blobs, turn.files);
+		const files = await readFiles(deps.blobs, turn.files, log);
 		const built = buildCanonPrompt({
 			mode: turn.turn.mode,
 			scope: scope.kind,
