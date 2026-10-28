@@ -44,6 +44,34 @@ export function checkRunsFromEnv(value: string | undefined): number {
 	return n;
 }
 
+/** A dollar backstop: unset or empty is the default; anything but a positive number refuses to start. */
+function dollarsFromEnv(
+	name: string,
+	value: string | undefined,
+	fallback: number,
+): number {
+	if (value === undefined || value === "") return fallback;
+	const n = Number(value);
+	if (!Number.isFinite(n) || n <= 0) {
+		throw new Error(`${name} must be a positive number of dollars`);
+	}
+	return n;
+}
+
+/** A turn backstop: unset or empty is the default; anything but a positive whole number refuses to start. */
+function turnsFromEnv(
+	name: string,
+	value: string | undefined,
+	fallback: number,
+): number {
+	if (value === undefined || value === "") return fallback;
+	const n = Number(value);
+	if (!Number.isSafeInteger(n) || n <= 0) {
+		throw new Error(`${name} must be a positive whole number`);
+	}
+	return n;
+}
+
 export function harnessFromEnv(
 	env: NodeJS.ProcessEnv,
 	options: {
@@ -88,8 +116,16 @@ export function harnessFromEnv(
 		clock: options.clock,
 		checkRunner: options.checkRunner,
 		agentRooms,
-		maxBudgetUsd: Number(env.AVEL_HARNESS_MAX_BUDGET_USD ?? 2),
-		maxTurns: Number(env.AVEL_HARNESS_MAX_TURNS ?? 60),
+		maxBudgetUsd: dollarsFromEnv(
+			"AVEL_HARNESS_MAX_BUDGET_USD",
+			env.AVEL_HARNESS_MAX_BUDGET_USD,
+			2,
+		),
+		maxTurns: turnsFromEnv(
+			"AVEL_HARNESS_MAX_TURNS",
+			env.AVEL_HARNESS_MAX_TURNS,
+			60,
+		),
 		maxCheckRuns: checkRunsFromEnv(env.AVEL_MAX_CHECK_RUNS),
 		...(options.query ? { query: options.query } : {}),
 	});
@@ -97,8 +133,16 @@ export function harnessFromEnv(
 		apiKey,
 		configDir: path.join(options.stateDir, "canon-config"),
 		logger,
-		maxBudgetUsd: Number(env.AVEL_CANON_MAX_BUDGET_USD ?? 1),
-		maxTurns: Number(env.AVEL_CANON_MAX_TURNS ?? 30),
+		maxBudgetUsd: dollarsFromEnv(
+			"AVEL_CANON_MAX_BUDGET_USD",
+			env.AVEL_CANON_MAX_BUDGET_USD,
+			1,
+		),
+		maxTurns: turnsFromEnv(
+			"AVEL_CANON_MAX_TURNS",
+			env.AVEL_CANON_MAX_TURNS,
+			30,
+		),
 	});
 	return { harness: sdk, sdk, canonModel };
 }

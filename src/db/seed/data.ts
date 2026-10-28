@@ -1,6 +1,5 @@
 import { generateIdentity } from "../../lib/identity";
 import type { IdGenerator } from "../../lib/ids";
-import { DEV_BOOKING_SHA } from "../../lib/templates";
 import type {
 	agentIdentityVersion,
 	agentTemplate,
@@ -45,9 +44,6 @@ export function seedIds(): IdGenerator {
 
 /** The first id seedIds() hands out: the operator's template. Its presence means "already seeded". */
 export const SEED_MARKER_ID = seedId(1);
-
-/** The template-booking commit the playbook's template is read at: the dev fixture's head. */
-export const BOOKING_TEMPLATE_SHA = DEV_BOOKING_SHA;
 
 type Row<T extends { $inferInsert: unknown }> = T["$inferInsert"];
 

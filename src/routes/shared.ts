@@ -1,5 +1,6 @@
 import { and, eq, lt, or, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
+import type { Context } from "hono";
 import { z } from "zod";
 import type { Operator } from "../auth";
 import type { ActivityEntry } from "../db/activity";
@@ -33,6 +34,28 @@ export function operatorOf(ctx: RequestContext): Operator {
 	if (!ctx.operator)
 		throw new Error("protected route reached without an operator");
 	return ctx.operator;
+}
+
+/**
+ * The signed-in operator on a raw Hono route, one outside the contract (a
+ * stream of bytes). No caller is 401 and any other caller is 403, each with
+ * the route's own message.
+ */
+export function operatorOfRaw(
+	ctx: Context,
+	messages: { unauthenticated: string; forbidden: string },
+): Operator {
+	const caller = ctx.get("caller") as Caller | undefined;
+	if (!caller) throw new ApiError("UNAUTHENTICATED", messages.unauthenticated);
+	if (caller.kind !== "operator") {
+		throw new ApiError("FORBIDDEN", messages.forbidden);
+	}
+	return caller.operator;
+}
+
+/** A raw timestamp, whichever form the driver handed back. */
+export function asDate(v: Date | string): Date {
+	return v instanceof Date ? v : new Date(v);
 }
 
 /**

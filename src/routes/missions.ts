@@ -40,6 +40,7 @@ import { ApiError } from "../middleware/errors";
 import { activityActor, actorColumns } from "./activity";
 import { jobsAhead, toJob } from "./gate";
 import {
+	asDate,
 	containsPattern,
 	notFound,
 	operatorOf,
@@ -251,7 +252,7 @@ function after(
 
 function iso(d: Date | string | null): string | null {
 	if (d === null) return null;
-	return (d instanceof Date ? d : new Date(d)).toISOString();
+	return asDate(d).toISOString();
 }
 
 type ListRow = {

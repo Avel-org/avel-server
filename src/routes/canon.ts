@@ -23,6 +23,7 @@ import {
 	canonContract,
 	ok,
 	type PreconditionReason,
+	page,
 	type RunStep,
 } from "../contract";
 import { logActivity } from "../db/activity";
@@ -68,6 +69,7 @@ import type { Harness } from "../runner/harness";
 import { activityActor } from "./activity";
 import {
 	after,
+	asDate,
 	containsPattern,
 	decodeCursor,
 	encodeCursor,
@@ -393,11 +395,6 @@ type IndexRow = {
 	opened_at: Date | string;
 	turn_started_at: Date | string | null;
 };
-
-/** A raw timestamp, whichever form the driver handed back. */
-function asDate(v: Date | string): Date {
-	return v instanceof Date ? v : new Date(v);
-}
 
 function listItemOf(r: IndexRow): CanonSessionListItem {
 	if (r.halt_reason === "spend_ceiling") {
@@ -1001,12 +998,12 @@ export function canonRoutes(deps: CanonDeps) {
 			}
 			const where = sql.join(filters, sql` and `);
 			const cursor = query.cursor ? decodeCursor(query.cursor) : null;
-			const page = cursor
+			const after = cursor
 				? sql`and (last_activity_at, id) < (${cursor.createdAt.toISOString()}::timestamptz, ${cursor.id}::uuid)`
 				: sql``;
 			const rows = await db.execute<IndexRow>(
 				sql`select id, scope, client_id, engagement_id, intake_id, title, mode, status, halt_reason, archived_at, last_activity_at, opened_at, turn_started_at
-					from ${index} where ${where} ${page}
+					from ${index} where ${where} ${after}
 					order by last_activity_at desc, id desc limit ${query.limit + 1}`,
 			);
 			const [counted] = await db.execute<{ n: number }>(
@@ -1023,11 +1020,7 @@ export function canonRoutes(deps: CanonDeps) {
 					: null;
 			return {
 				status: 200,
-				body: {
-					success: true as const,
-					data: items.map(listItemOf),
-					meta: { nextCursor, total: counted?.n ?? 0 },
-				},
+				body: page(items.map(listItemOf), nextCursor, counted?.n ?? 0),
 			};
 		},
 
@@ -1294,11 +1287,7 @@ export function canonRoutes(deps: CanonDeps) {
 				const { items, nextCursor } = toPage(rows, query.limit);
 				return {
 					status: 200,
-					body: {
-						success: true as const,
-						data: await sessionWires(s, items),
-						meta: { nextCursor, total: counted?.n ?? 0 },
-					},
+					body: page(await sessionWires(s, items), nextCursor, counted?.n ?? 0),
 				};
 			});
 		},
@@ -1641,11 +1630,7 @@ export function canonRoutes(deps: CanonDeps) {
 				const { items, nextCursor } = toPage(rows, query.limit);
 				return {
 					status: 200,
-					body: {
-						success: true as const,
-						data: await memoryWires(s, items),
-						meta: { nextCursor, total: counted?.n ?? 0 },
-					},
+					body: page(await memoryWires(s, items), nextCursor, counted?.n ?? 0),
 				};
 			});
 		},

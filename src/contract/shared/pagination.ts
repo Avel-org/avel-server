@@ -44,6 +44,21 @@ export function pageEnvelope<T extends z.ZodTypeAny>(item: T) {
 	});
 }
 
+/** A list envelope. Given a total, the meta keeps it as a number, for a contract that requires one. */
+export function page<T>(
+	items: T[],
+	nextCursor: string | null,
+	total: number,
+): {
+	success: true;
+	data: T[];
+	meta: { nextCursor: string | null; total: number };
+};
+export function page<T>(
+	items: T[],
+	nextCursor: string | null,
+	total?: number,
+): { success: true; data: T[]; meta: PageMeta };
 export function page<T>(
 	items: T[],
 	nextCursor: string | null,

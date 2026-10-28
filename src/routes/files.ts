@@ -1,8 +1,7 @@
 import { tsr } from "@ts-rest/serverless/fetch";
 import { and, asc, eq, gt, isNull, ne, or, type SQL, sql } from "drizzle-orm";
 import type { Context } from "hono";
-import type { Operator } from "../auth";
-import { type IntakeFile, intakeFileContract } from "../contract";
+import { type IntakeFile, intakeFileContract, page } from "../contract";
 import { logActivity } from "../db/activity";
 import { lockBlobKey } from "../db/blob-lock";
 import { clientIdOfIntake } from "../db/client-id";
@@ -17,17 +16,21 @@ import {
 import { live, stamp } from "../db/schema/columns";
 import { type Executor, type Tx, withClientScope, withTx } from "../db/tx";
 import { type BlobStore, blobPrefix, sha256Of } from "../gateways/blob";
-import type { Caller } from "../middleware/caller";
 import { ApiError } from "../middleware/errors";
 import { activityActor } from "./activity";
 import {
 	decodeCursor,
 	notFound,
+	operatorOfRaw,
 	type RequestContext,
 	type RouteDeps,
 	toPage,
 } from "./shared";
 
+const FILES_CALLER = {
+	unauthenticated: "Files need a signed-in operator",
+	forbidden: "Only an operator may reach files",
+};
 /**
  * The Drive's byte routes (DATA-CONTRACTS-V2, *File*). Bytes are not
  * envelopes, so these sit outside the ts-rest contract, the way the template
@@ -141,17 +144,6 @@ function checkName(raw: string | undefined): string {
 	return name;
 }
 
-function operatorFrom(ctx: Context): Operator {
-	const caller = ctx.get("caller") as Caller | undefined;
-	if (!caller) {
-		throw new ApiError("UNAUTHENTICATED", "Files need a signed-in operator");
-	}
-	if (caller.kind !== "operator") {
-		throw new ApiError("FORBIDDEN", "Only an operator may reach files");
-	}
-	return caller.operator;
-}
-
 /**
  * A write needs an Origin the auth config trusts. The upload's raw body is
  * a "simple" request that no CORS preflight guards, so this is what keeps
@@ -263,7 +255,7 @@ export function fileRoutes(deps: FileDeps) {
 	const { blobs, maxBytes } = deps.drive;
 
 	const upload = async (ctx: Context) => {
-		const operator = operatorFrom(ctx);
+		const operator = operatorOfRaw(ctx, FILES_CALLER);
 		checkOrigin(ctx, deps.trustedOrigins);
 		const db = deps.db();
 		const scope = await intakeScope(db, ctx.req.param("intakeId"));
@@ -329,7 +321,7 @@ export function fileRoutes(deps: FileDeps) {
 	};
 
 	const download = async (ctx: Context) => {
-		operatorFrom(ctx);
+		operatorOfRaw(ctx, FILES_CALLER);
 		const db = deps.db();
 		const scope = await intakeScope(db, ctx.req.param("intakeId"));
 		const row = await withClientScope(db, scope.clientId, (tx) =>
@@ -361,7 +353,7 @@ export function fileRoutes(deps: FileDeps) {
 	};
 
 	const purge = async (ctx: Context) => {
-		const operator = operatorFrom(ctx);
+		const operator = operatorOfRaw(ctx, FILES_CALLER);
 		checkOrigin(ctx, deps.trustedOrigins);
 		const db = deps.db();
 		const scope = await intakeScope(db, ctx.req.param("intakeId"));
@@ -502,13 +494,7 @@ export function intakeFileRoutes(deps: RouteDeps) {
 			);
 			return {
 				status: 200,
-				// The contract makes total required, so the envelope is written
-				// out rather than built by page(), whose total is optional.
-				body: {
-					success: true as const,
-					data: items.map(toListWire),
-					meta: { nextCursor, total },
-				},
+				body: page(items.map(toListWire), nextCursor, total),
 			};
 		},
 	});

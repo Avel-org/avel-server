@@ -5,8 +5,8 @@ import { afterAll, describe, expect, it } from "vitest";
 import { buildDevTemplateBooking } from "../../src/db/seed/dev-template";
 import { DEV_BOOKING_SHA } from "../../src/lib/templates";
 
-// The seeded missions pin DEV_BOOKING_SHA. If the fixture's files change
-// and the constant does not, every dispatch start on avel_dev refuses
+// A mission on the dev template pins DEV_BOOKING_SHA. If the fixture's files
+// change and the constant does not, every dispatch start on avel_dev refuses
 // source_unavailable, because no clone holds that commit.
 describe("template-booking dev fixture", () => {
 	const root = mkdtempSync(path.join(tmpdir(), "avel-dev-template-"));

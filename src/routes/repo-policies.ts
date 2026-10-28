@@ -1,6 +1,6 @@
 import { tsr } from "@ts-rest/serverless/fetch";
 import { and, desc, eq, sql } from "drizzle-orm";
-import { ok, type RepoPolicy, repoPolicyContract } from "../contract";
+import { ok, page, type RepoPolicy, repoPolicyContract } from "../contract";
 import { logActivity } from "../db/activity";
 import { repoPolicyUrl } from "../db/repo-policy";
 import { repoPolicy } from "../db/schema";
@@ -55,11 +55,7 @@ export function repoPolicyRoutes(deps: RouteDeps) {
 			const { items, nextCursor } = toPage(rows, query.limit);
 			return {
 				status: 200,
-				body: {
-					success: true as const,
-					data: items.map(toWire),
-					meta: { nextCursor, total: counted?.n ?? 0 },
-				},
+				body: page(items.map(toWire), nextCursor, counted?.n ?? 0),
 			};
 		},
 

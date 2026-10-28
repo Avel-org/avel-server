@@ -68,9 +68,8 @@ export type StartCommit =
  * The commit a new dispatch of the mission starts from, and the complete
  * dispatches it was built from. The base itself when none has completed.
  * Refused, as the gate refuses, when two of them changed a path neither
- * saw the other change. A complete dispatch with no result commit (dev
- * seed rows, or one closed before result commits) holds nothing to lay
- * down, so it is left out and not listed; the gate still refuses it.
+ * saw the other change. A complete dispatch with no result commit (one
+ * closed before result commits) holds nothing to lay down, so it is left out and not listed; the gate still refuses it.
  */
 export async function startCommit(
 	db: Executor,

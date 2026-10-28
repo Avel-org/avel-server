@@ -8,6 +8,7 @@ import {
 	type IntakeStatus,
 	intakeContract,
 	ok,
+	page,
 	parseGitHubRepoUrl,
 } from "../contract";
 import { logActivity } from "../db/activity";
@@ -318,11 +319,11 @@ export function intakeRoutes(deps: RouteDeps & { repos: RepoSource }) {
 			);
 			return {
 				status: 200,
-				body: {
-					success: true as const,
-					data: items.map((r) => toWire(r, open.get(r.id) ?? null)),
-					meta: { nextCursor, total: counted?.n ?? 0 },
-				},
+				body: page(
+					items.map((r) => toWire(r, open.get(r.id) ?? null)),
+					nextCursor,
+					counted?.n ?? 0,
+				),
 			};
 		},
 

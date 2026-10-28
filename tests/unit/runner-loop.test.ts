@@ -371,6 +371,41 @@ describe("harnessFromEnv", () => {
 			);
 		}
 	});
+
+	it("refuses to start on a budget or turn limit that is not a positive number, and takes the default when unset or empty", () => {
+		const start = (name: string, value: string | undefined) =>
+			harnessFromEnv(
+				{
+					AVEL_HARNESS: "agent-sdk",
+					ANTHROPIC_API_KEY: "sk-test",
+					[name]: value,
+				},
+				options(),
+			);
+		for (const name of [
+			"AVEL_HARNESS_MAX_BUDGET_USD",
+			"AVEL_CANON_MAX_BUDGET_USD",
+		]) {
+			for (const fine of [undefined, "", "0.5", "3"]) {
+				expect(() => start(name, fine), `${name}=${fine}`).not.toThrow();
+			}
+			for (const bad of ["0", "-1", "two", "Infinity"]) {
+				expect(() => start(name, bad), `${name}=${bad}`).toThrow(
+					`${name} must be a positive number of dollars`,
+				);
+			}
+		}
+		for (const name of ["AVEL_HARNESS_MAX_TURNS", "AVEL_CANON_MAX_TURNS"]) {
+			for (const fine of [undefined, "", "1", "40"]) {
+				expect(() => start(name, fine), `${name}=${fine}`).not.toThrow();
+			}
+			for (const bad of ["0", "-1", "1.5", "many"]) {
+				expect(() => start(name, bad), `${name}=${bad}`).toThrow(
+					`${name} must be a positive whole number`,
+				);
+			}
+		}
+	});
 });
 
 describe("shutdown", () => {

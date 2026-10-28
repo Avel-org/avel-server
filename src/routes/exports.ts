@@ -1,10 +1,10 @@
 import { tsr } from "@ts-rest/serverless/fetch";
 import { and, asc, count, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Context } from "hono";
-import type { Operator } from "../auth";
 import {
 	type ExportWire,
 	exportContract,
+	page,
 	parseGitHubRepoUrl,
 	resolveWritablePaths,
 } from "../contract";
@@ -62,7 +62,6 @@ import {
 	type Violation,
 } from "../lib/export/delivery";
 import { localTree } from "../lib/export/tree";
-import type { Caller } from "../middleware/caller";
 import { ApiError } from "../middleware/errors";
 import { IntegrationRefused } from "../rooms/snapshot";
 import type { RoomSourceResolver } from "../rooms/sources";
@@ -74,6 +73,7 @@ import {
 	after,
 	notFound,
 	operatorOf,
+	operatorOfRaw,
 	type RequestContext,
 	type RouteDeps,
 	toPage,
@@ -1422,25 +1422,10 @@ export function exportRoutes(deps: ExportDeps) {
 			const { items, nextCursor } = toPage(rows, query.limit);
 			return {
 				status: 200,
-				body: {
-					success: true as const,
-					data: items.map(toWire),
-					meta: { nextCursor, total: counted?.total ?? 0 },
-				},
+				body: page(items.map(toWire), nextCursor, counted?.total ?? 0),
 			};
 		},
 	});
-}
-
-function operatorFrom(ctx: Context): Operator {
-	const caller = ctx.get("caller") as Caller | undefined;
-	if (!caller) {
-		throw new ApiError("UNAUTHENTICATED", "Exports need a signed-in operator");
-	}
-	if (caller.kind !== "operator") {
-		throw new ApiError("FORBIDDEN", "Only an operator may download an export");
-	}
-	return caller.operator;
 }
 
 /**
@@ -1452,7 +1437,10 @@ function operatorFrom(ctx: Context): Operator {
  */
 export function exportZipRoute(deps: ExportDeps) {
 	return async (ctx: Context) => {
-		operatorFrom(ctx);
+		operatorOfRaw(ctx, {
+			unauthenticated: "Exports need a signed-in operator",
+			forbidden: "Only an operator may download an export",
+		});
 		const db = deps.db();
 		const id = ctx.req.param("id");
 		const [row] = await db
