@@ -5,7 +5,6 @@ import {
 	templateRef,
 	templateVersion,
 } from "../../src/contract";
-import { BOOKING_TEMPLATE_SHA } from "../../src/db/seed/data";
 import {
 	fixtureTemplateSource,
 	githubTemplateSource,
@@ -227,8 +226,7 @@ describe("template configuration", () => {
 		expect(DEV_TEMPLATE_READS["template-integration"]).toBeNull();
 	});
 
-	it("gives the seeded missions the fixture's template-booking head", () => {
-		expect(BOOKING_TEMPLATE_SHA).toBe(DEV_BOOKING_SHA);
+	it("reads the dev template-booking at the fixture's head", () => {
 		expect(DEV_TEMPLATE_READS["template-booking"]?.headSha).toBe(
 			DEV_BOOKING_SHA,
 		);

@@ -5,8 +5,6 @@ import * as schema from "../schema";
 import { withTx } from "../tx";
 import { buildSeed, SEED_MARKER_ID, seedIds } from "./data";
 
-export { SEED_EPOCH } from "./data";
-
 export interface SeedResult {
 	status: "seeded" | "already-seeded";
 	/** Row counts per table after the run, soft-deleted rows included. */

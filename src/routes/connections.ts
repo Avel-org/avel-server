@@ -1,6 +1,6 @@
 import { tsr } from "@ts-rest/serverless/fetch";
 import { and, desc, eq, sql } from "drizzle-orm";
-import { type Connection, connectionContract, ok } from "../contract";
+import { type Connection, connectionContract, ok, page } from "../contract";
 import { logActivity } from "../db/activity";
 import { client, connection, engagement } from "../db/schema";
 import { live, stamp } from "../db/schema/columns";
@@ -70,11 +70,7 @@ export function connectionRoutes(deps: RouteDeps) {
 			const { items, nextCursor } = toPage(rows, query.limit);
 			return {
 				status: 200,
-				body: {
-					success: true as const,
-					data: items.map(toWire),
-					meta: { nextCursor, total: counted?.n ?? 0 },
-				},
+				body: page(items.map(toWire), nextCursor, counted?.n ?? 0),
 			};
 		},
 

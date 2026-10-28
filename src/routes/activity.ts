@@ -4,6 +4,7 @@ import {
 	type ActivityActor,
 	type ActivityEntry,
 	activityContract,
+	page,
 } from "../contract";
 import { touchesClient } from "../db/activity";
 import { activityLog, agentTemplate, rosterEntry, user } from "../db/schema";
@@ -190,11 +191,7 @@ export function activityRoutes(deps: RouteDeps) {
 			);
 			return {
 				status: 200,
-				body: {
-					success: true as const,
-					data: items.map(toWire),
-					meta: { nextCursor, total: counted?.n ?? 0 },
-				},
+				body: page(items.map(toWire), nextCursor, counted?.n ?? 0),
 			};
 		},
 	});
