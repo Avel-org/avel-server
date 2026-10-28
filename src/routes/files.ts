@@ -16,6 +16,11 @@ import {
 import { live, stamp } from "../db/schema/columns";
 import { type Executor, type Tx, withClientScope, withTx } from "../db/tx";
 import { type BlobStore, blobPrefix, sha256Of } from "../gateways/blob";
+import {
+	type DocumentMime,
+	documentText,
+	sniffDocument,
+} from "../lib/documents";
 import { ApiError } from "../middleware/errors";
 import { activityActor } from "./activity";
 import {
@@ -54,8 +59,12 @@ export type Drive = {
 
 export const DEFAULT_UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
 
-/** What the Drive accepts: J's uploads are mostly Markdown and artifacts. */
-export type DriveMime = "text/markdown" | "text/plain" | "text/html";
+/** What the Drive accepts: J's uploads are mostly Markdown and artifacts, and client material arrives as PDF and Word files. */
+export type DriveMime =
+	| "text/markdown"
+	| "text/plain"
+	| "text/html"
+	| DocumentMime;
 
 type FileDeps = RouteDeps & {
 	drive: Drive;
@@ -113,6 +122,27 @@ export function detectMime(bytes: Uint8Array, name: string): DriveMime | null {
 		}
 	}
 	return /\.(md|markdown)$/i.test(name) ? "text/markdown" : "text/plain";
+}
+
+/**
+ * The upload's type, or a 400 saying why it has none. A PDF or Word file
+ * first, by its magic, since a PDF can be all ASCII and so read as text;
+ * it is taken only with text Canon can read. Then text, as detectMime reads it.
+ */
+async function uploadMime(bytes: Uint8Array, name: string): Promise<DriveMime> {
+	const document = sniffDocument(bytes);
+	if (document) {
+		const read = await documentText(bytes, document);
+		if ("refused" in read)
+			throw new ApiError("VALIDATION_FAILED", read.refused);
+		return document;
+	}
+	const text = detectMime(bytes, name);
+	if (text) return text;
+	throw new ApiError(
+		"VALIDATION_FAILED",
+		"Only UTF-8 Markdown, plain text, HTML, PDF and Word (.docx) files are accepted",
+	);
 }
 
 // Tab, newline, form feed and carriage return: the control characters text keeps.
@@ -261,13 +291,7 @@ export function fileRoutes(deps: FileDeps) {
 		const scope = await intakeScope(db, ctx.req.param("intakeId"));
 		const name = checkName(ctx.req.query("name"));
 		const bytes = await readCapped(ctx, maxBytes);
-		const mime = detectMime(bytes, name);
-		if (!mime) {
-			throw new ApiError(
-				"VALIDATION_FAILED",
-				"Only UTF-8 Markdown, plain text and HTML are accepted",
-			);
-		}
+		const mime = await uploadMime(bytes, name);
 		const sha256 = sha256Of(bytes);
 		const prefix = blobPrefix(scope.clientId);
 		const key = `${prefix}/${sha256}`;
@@ -337,12 +361,13 @@ export function fileRoutes(deps: FileDeps) {
 		return new Response(bytes, {
 			status: 200,
 			headers: {
-				// HTML is never sent as text/html, so nothing can render it in
-				// place even if the attachment is ignored.
+				// Only Markdown and plain text go out as their own type. HTML,
+				// PDF and Word files are octet streams, so nothing can render
+				// them in place even if the attachment is ignored.
 				"content-type":
-					row.mime === "text/html"
-						? "application/octet-stream"
-						: `${row.mime}; charset=utf-8`,
+					row.mime === "text/markdown" || row.mime === "text/plain"
+						? `${row.mime}; charset=utf-8`
+						: "application/octet-stream",
 				"content-length": String(bytes.byteLength),
 				"content-disposition": attachment(row.name),
 				"x-content-type-options": "nosniff",

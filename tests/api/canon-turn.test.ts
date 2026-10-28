@@ -24,6 +24,7 @@ import {
 } from "../../src/db/tx";
 import { blobPrefix, memoryBlobs } from "../../src/gateways/blob";
 import { sourceFor, splitKnowledge } from "../../src/lib/canon";
+import { DOCX_MIME, PDF_MIME } from "../../src/lib/documents";
 import { randomIds } from "../../src/lib/ids";
 import { silentLogger } from "../../src/lib/logger";
 import { PRICE_VERSION } from "../../src/lib/prices";
@@ -45,6 +46,7 @@ import {
 	type Tenant,
 } from "../db/canon-fixtures";
 import { clock, inRollback } from "../db/fixtures";
+import { docxOf, pdfOf } from "../unit/document-fixtures";
 
 // Whole Canon turns, played by the FakeCanonModel, as avel_app so row-level
 // security applies. No real model is ever called here.
@@ -858,15 +860,15 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 		});
 	});
 
-	it("reads only the intake's live text files", async () => {
+	it("reads only the intake's live text files, and a PDF's or Word file's text", async () => {
 		await asApp(async (tx) => {
 			const s = await seed(tx);
 			const extra = async (
 				name: string,
 				mime: string,
 				over: Partial<typeof file.$inferInsert> = {},
+				bytes: Uint8Array = new TextEncoder().encode(`${name} body text`),
 			) => {
-				const bytes = new TextEncoder().encode(`${name} body text`);
 				const put = await s.deps.blobs.put(blobPrefix(s.a.clientId), bytes);
 				const id = randomUUID();
 				await withClientScope(tx, s.a.scope, async (x) => {
@@ -892,6 +894,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 			};
 			await extra("notes.txt", "text/plain");
 			await extra("photo.png", "image/png");
+			await extra("brief.pdf", PDF_MIME, {}, pdfOf(["PDF scope line"]));
+			await extra("brief.docx", DOCX_MIME, {}, docxOf(["Word scope line"]));
 			await extra("deleted.md", "text/markdown", { deletedAt: clock.now() });
 			await extra("purged.md", "text/markdown", {
 				purgedAt: clock.now(),
@@ -901,6 +905,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 			await runCanonTurn(s.deps, inClient(s.a.scope), s.a.sessionId);
 			const prompt = JSON.stringify(s.model.prompts[0]);
 			expect(prompt).toContain("notes.txt body text");
+			expect(prompt).toContain("PDF scope line");
+			expect(prompt).toContain("Word scope line");
 			for (const gone of ["photo.png", "deleted.md", "purged.md"]) {
 				expect(prompt, gone).not.toContain(gone);
 			}

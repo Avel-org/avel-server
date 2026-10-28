@@ -7,12 +7,16 @@ const c = initContract();
 
 /**
  * The types an upload may be. Detected from the bytes, never from the
- * request. HTML is downloaded as an attachment and never rendered inline.
+ * request. HTML, PDF and Word files are downloaded as attachments and never
+ * rendered inline. Canon reads a PDF's or Word file's text, so one with
+ * none (a scan) is refused at upload.
  */
 export const INTAKE_FILE_MIMES = [
 	"text/markdown",
 	"text/plain",
 	"text/html",
+	"application/pdf",
+	"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ] as const;
 
 /**
