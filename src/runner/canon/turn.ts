@@ -31,6 +31,7 @@ import {
 	validateCitations,
 } from "../../lib/canon";
 import type { Clock } from "../../lib/clock";
+import { DOCX_MIME, documentText, PDF_MIME } from "../../lib/documents";
 import type { IdGenerator } from "../../lib/ids";
 import type { Logger } from "../../lib/logger";
 import type { TokenSplit } from "../../lib/prices";
@@ -86,7 +87,7 @@ export type TurnOutcome =
 
 export type TurnResult = { outcome: TurnOutcome; promptSha256: string | null };
 
-/** Only text files are read into the prompt. Others are left out of it. [hypothesis] */
+/** Text files are read into the prompt as they are, PDF and Word files as their text. Others are left out of it. [hypothesis] */
 const TEXT_MIME = /^text\//;
 
 class TurnFailed extends Error {}
@@ -219,7 +220,7 @@ async function loadTurn(deps: CanonDeps, scope: CanonScope, sessionId: string) {
 	});
 }
 
-/** The live text files' bytes, through the blob gateway. A missing blob fails the turn. */
+/** The live files' text, through the blob gateway. A missing blob fails the turn. */
 async function readFiles(
 	blobs: BlobStore,
 	files: ReadonlyArray<{
@@ -232,14 +233,26 @@ async function readFiles(
 ): Promise<KnowledgeFile[]> {
 	const out: KnowledgeFile[] = [];
 	for (const f of files) {
-		if (!TEXT_MIME.test(f.mime) || f.storageKey === null) continue;
+		const document =
+			f.mime === PDF_MIME || f.mime === DOCX_MIME ? f.mime : null;
+		if ((!TEXT_MIME.test(f.mime) && !document) || f.storageKey === null) {
+			continue;
+		}
 		const bytes = await blobs.get(f.storageKey);
 		if (bytes === null) throw new TurnFailed(`file ${f.id} has no bytes`);
 		let contentMd: string;
-		try {
-			contentMd = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-		} catch {
-			continue;
+		if (document) {
+			// The upload refused one with no text, so a refusal here means the
+			// bytes changed under their sha; it is left out, as bad UTF-8 is.
+			const read = await documentText(bytes, document);
+			if ("refused" in read) continue;
+			contentMd = read.text;
+		} else {
+			try {
+				contentMd = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+			} catch {
+				continue;
+			}
 		}
 		out.push({ fileId: f.id, sha256: f.sha256, name: f.name, contentMd });
 	}

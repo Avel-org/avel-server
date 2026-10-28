@@ -14,10 +14,12 @@ import {
 	memoryBlobs,
 	sha256Of,
 } from "../../src/gateways/blob";
+import { DOCX_MIME, PDF_MIME } from "../../src/lib/documents";
 import { sequentialIds } from "../../src/lib/ids";
 import { MAX_BODY_BYTES } from "../../src/middleware/body-limit";
 import { DEFAULT_UPLOAD_MAX_BYTES, detectMime } from "../../src/routes/files";
 import { seedTenants } from "../db/app-role";
+import { docxOf, pdfOf } from "../unit/document-fixtures";
 import { BASE_URL } from "../unit/support";
 import { type ApiHarness, closeApi, withApi } from "./support";
 
@@ -403,6 +405,63 @@ describe.skipIf(!process.env.DATABASE_URL)("the Drive's byte routes", () => {
 				expect(data.bytes).toBe(big.byteLength);
 			},
 			{ asApp: true, drive: { blobs, maxBytes: DEFAULT_UPLOAD_MAX_BYTES } },
+		);
+	});
+
+	it("takes a PDF or Word file with text, whatever it is called, and serves it only as an attachment", async () => {
+		await withApi(
+			async (h) => {
+				const { a, upload, download } = await setUp(h);
+				for (const [name, bytes, mime] of [
+					["brief.pdf", pdfOf(["Scope"]), PDF_MIME],
+					["brief.txt", pdfOf(["Scope"]), PDF_MIME],
+					["brief.docx", docxOf(["Scope"]), DOCX_MIME],
+				] as const) {
+					const data = await uploaded(await upload(a.intakeId, name, bytes));
+					expect(data.mime, name).toBe(mime);
+					expect(data.bytes, name).toBe(bytes.byteLength);
+					const res = await download(a.intakeId, data.id);
+					expect(res.headers.get("content-type"), name).toBe(
+						"application/octet-stream",
+					);
+					expect(res.headers.get("content-disposition"), name).toMatch(
+						/^attachment;/,
+					);
+					expect(new Uint8Array(await res.arrayBuffer())).toEqual(bytes);
+				}
+			},
+			{ asApp: true },
+		);
+	});
+
+	it("refuses a PDF or Word file Canon could not read, saying why, and writes nothing", async () => {
+		await withApi(
+			async (h) => {
+				const { a, upload } = await setUp(h);
+				const ole = new Uint8Array([
+					0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1,
+				]);
+				for (const [name, bytes, message] of [
+					["scan.pdf", pdfOf([null]), "The PDF has no text layer"],
+					[
+						"locked.pdf",
+						pdfOf(["x"], { encrypted: true }),
+						"The PDF is encrypted",
+					],
+					["old.doc", ole, "Word (.docx)"],
+					["empty.docx", docxOf([]), "The Word file has no text"],
+				] as const) {
+					const res = await upload(a.intakeId, name, bytes);
+					expect(res.status, name).toBe(400);
+					const body = (await res.json()) as { error: { message: string } };
+					expect(body.error.message, name).toContain(message);
+				}
+				const rows = await withClientScope(h.tx, a.scope, (t) =>
+					t.select().from(file),
+				);
+				expect(rows).toEqual([]);
+			},
+			{ asApp: true },
 		);
 	});
 

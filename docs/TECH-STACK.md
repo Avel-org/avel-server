@@ -26,6 +26,7 @@
 | Jobs | **pg-boss** | Verification outlives a request; uses the Postgres already present. |
 | Testing | Vitest · Playwright · **Stryker** | Stryker supplies the mutation score the gate reads. |
 | Contract diffing | **oasdiff** in CI | Exit 1 on a breaking change to AVEL's own API. |
+| Document text | **unpdf** (pdf.js) · **mammoth** | The text of an uploaded PDF or Word file, for Canon. |
 | Observability | **Pino** | ActivityLog records business events; this is operational logging. |
 | Tooling | **Biome** | Lint and format. `pnpm lint` runs in CI and blocks. |
 
