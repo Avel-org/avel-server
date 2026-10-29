@@ -15,8 +15,9 @@ import { sha256Hex } from "../../lib/tokens";
  * section per mode and scope, and naming an untitled session. 3
  * (2026-10-21): sources on every requirement and criterion, and a reply
  * that cites each requirement, after the first live turn returned none.
+ * 4 (2026-10-28): playbook and preset proposals, only when asked.
  */
-export const CANON_INSTRUCTIONS_VERSION = 3;
+export const CANON_INSTRUCTIONS_VERSION = 4;
 
 /**
  * What Canon is told on a draft turn, after its identity (DECISIONS-V2,
@@ -35,6 +36,8 @@ When you cannot decide something from the documents, ask the operator with the a
 Cite every claim you make about the project from the documents. A claim with no passage behind it is a guess; ask instead.
 
 Propose a memory with propose_memory only for a lasting fact about this client that the operator should keep. Recommend a roster with recommend_roster only when the operator asks for one.
+
+Propose a playbook with draft_playbook, or a preset with draft_preset, only when the operator asks for one. Take the gates and their policies, the waves, the deliverable, the required fields and the agents from the documents, and ask where they are silent. A proposal waits for the operator's approval: never say it is live.
 
 You never choose the cut: it is derived from the repository. You never approve anything, start anything, or act outside your tools. The operator decides.`;
 

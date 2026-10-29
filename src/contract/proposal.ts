@@ -1,5 +1,7 @@
 import { initContract } from "@ts-rest/core";
 import { z } from "zod";
+import { createPlaybookBody } from "./playbook";
+import { createPresetBody } from "./preset";
 import { successEnvelope } from "./shared/envelope";
 import { pageMeta, pageQuery } from "./shared/pagination";
 
@@ -14,7 +16,73 @@ export const PROPOSAL_KINDS = [
 	"calibration",
 	"post_delivery",
 	"intake_questions",
+	"playbook",
+	"preset",
 ] as const;
+
+/**
+ * What Canon drafts for a playbook (J, 2026-10-28: Canon drafts, the operator
+ * approves). The playbook as POST /api/playbooks takes it, except that it
+ * names an existing preset or carries a new one in newPreset, never both.
+ */
+export const playbookProposalFields = {
+	playbook: createPlaybookBody.extend({ defaultPresetId: uuid.nullable() }),
+	newPreset: createPresetBody.nullable(),
+};
+
+/** The refusal when a playbook draft names both presets or neither, or null. */
+export function presetChoiceIssue(draft: {
+	playbook: { defaultPresetId: string | null };
+	newPreset: unknown;
+}): string | null {
+	const named = draft.playbook.defaultPresetId !== null;
+	const carried = draft.newPreset !== null;
+	if (named === carried) {
+		return named
+			? "Name an existing preset or carry a new one, not both"
+			: "Name an existing preset in defaultPresetId or carry a new one in newPreset";
+	}
+	return null;
+}
+
+/**
+ * A playbook proposal's payload. replacesVersion is null for a new mission
+ * type, and otherwise the live playbook's version when Canon drafted, so an
+ * approval after that playbook changed is refused (proposal_premise_changed).
+ */
+export const playbookProposalPayload = z
+	.object({
+		...playbookProposalFields,
+		replacesVersion: z.number().int().positive().nullable(),
+	})
+	.strict()
+	.superRefine((p, ctx) => {
+		const issue = presetChoiceIssue(p);
+		if (issue)
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ["newPreset"],
+				message: issue,
+			});
+	});
+
+/** A preset proposal's payload: a new preset, as POST /api/presets takes it. */
+export const presetProposalPayload = z
+	.object({ preset: createPresetBody })
+	.strict();
+
+/** Why Canon proposed it: its session, the intake it was briefing, and its reason. */
+export const canonProposalPremise = z
+	.object({
+		canonSessionId: uuid,
+		intakeId: uuid,
+		reason: z.string(),
+	})
+	.strict();
+
+export type PlaybookProposalPayload = z.infer<typeof playbookProposalPayload>;
+export type PresetProposalPayload = z.infer<typeof presetProposalPayload>;
+export type CanonProposalPremise = z.infer<typeof canonProposalPremise>;
 /** The proposal_source pgEnum is built from this list. */
 export const PROPOSAL_SOURCES = ["code", "model"] as const;
 /** The proposal_status pgEnum is built from this list. */
@@ -79,8 +147,8 @@ const byId = z.object({ id: uuid });
 /**
  * The operator's queue (module 14; J, 2026-10-24: the queue before any
  * source). Only a pending proposal is decided, once. Approving starts its
- * kind's action through the normal path, and no kind's action is built
- * yet, so approve refuses proposal_action_not_built.
+ * kind's action through the normal path. Only playbook and preset have one;
+ * every other kind refuses proposal_action_not_built.
  */
 export const proposalContract = c.router({
 	list: {
@@ -97,7 +165,7 @@ export const proposalContract = c.router({
 		body: c.noBody(),
 		responses: { 200: successEnvelope(proposalSchema) },
 		summary:
-			"pending → approved, starting the kind's action (no kind's action is built yet)",
+			"pending → approved, starting the kind's action: a playbook or preset is written as its own route would write it, in one transaction. Other kinds refuse (422 proposal_action_not_built); a playbook whose live version moved since the draft refuses (422 proposal_premise_changed)",
 	},
 	dismiss: {
 		method: "POST",

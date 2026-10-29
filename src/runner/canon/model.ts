@@ -10,12 +10,17 @@ import type { CanonPrompt } from "./prompt";
  * model; the Agent SDK one (sdk-model.ts) is never run by tests.
  */
 
-/** Draft mode's tools: they write the intake's brief, questions, memory and roster. */
+/**
+ * Draft mode's tools: they write the intake's brief, questions, memory and
+ * roster, and propose playbooks and presets for the operator to approve.
+ */
 export const DRAFT_TOOL_NAMES = [
 	"ask_operator",
 	"draft_brief",
 	"propose_memory",
 	"recommend_roster",
+	"draft_playbook",
+	"draft_preset",
 ] as const;
 
 /**

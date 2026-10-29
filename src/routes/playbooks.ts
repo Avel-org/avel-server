@@ -1,6 +1,7 @@
 import { tsr } from "@ts-rest/serverless/fetch";
 import { and, desc, eq, ilike, inArray, type SQL, sql } from "drizzle-orm";
 import {
+	type CreatePlaybookBody,
 	earliestWave,
 	ok,
 	type Playbook,
@@ -49,6 +50,9 @@ function filtersFor(query: PlaybookListQuery): SQL | undefined {
 	);
 }
 
+/** Who wrote it: the operator, through a route or by approving Canon's proposal. */
+export type OperatorWrite = { actorUserId: string; requestId: string };
+
 function noPlaybook(missionType: string): ApiError {
 	return new ApiError(
 		"NOT_FOUND",
@@ -56,7 +60,7 @@ function noPlaybook(missionType: string): ApiError {
 	);
 }
 
-function typeTaken(missionType: string): ApiError {
+export function typeTaken(missionType: string): ApiError {
 	return new ApiError(
 		"CONFLICT",
 		`A live playbook already exists for mission type ${missionType}`,
@@ -64,7 +68,7 @@ function typeTaken(missionType: string): ApiError {
 }
 
 /** The live playbook for a type. mission_type is unique among live rows (playbook_mission_type_live_uq). */
-async function livePlaybook(
+export async function livePlaybook(
 	db: Executor,
 	missionType: string,
 	lock = false,
@@ -83,7 +87,7 @@ async function livePlaybook(
  * earliest wave the playbook declares, so applying it can clear the
  * first-wave block. One earliestWave serves this check and coherence.
  */
-async function requireUsablePreset(
+export async function requireUsablePreset(
 	tx: Tx,
 	body: Pick<UpdatePlaybookBody, "defaultPresetId" | "wavesApplicable">,
 ): Promise<void> {
@@ -130,7 +134,7 @@ async function requireNotInUse(tx: Tx, missionType: string): Promise<void> {
  * unique index stops the second. Postgres aborts the transaction on that
  * error, so it is translated outside withTx, never caught inside it.
  */
-function isTypeViolation(err: unknown): boolean {
+export function isTypeViolation(err: unknown): boolean {
 	for (let e = err; e instanceof Error; e = e.cause) {
 		const pg = e as Error & { code?: string; constraint_name?: string };
 		if (
@@ -140,6 +144,88 @@ function isTypeViolation(err: unknown): boolean {
 			return true;
 	}
 	return false;
+}
+
+/**
+ * Writes a new playbook at version 1. A live playbook of the same type is 409;
+ * the caller translates the unique-index race (isTypeViolation) outside its
+ * transaction.
+ */
+export async function createPlaybook(
+	tx: Tx,
+	deps: Pick<RouteDeps, "clock" | "ids">,
+	body: CreatePlaybookBody,
+	by: OperatorWrite,
+): Promise<Row> {
+	const [taken] = await tx
+		.select({ id: playbook.id })
+		.from(playbook)
+		.where(and(eq(playbook.missionType, body.missionType), live(playbook)))
+		.limit(1);
+	if (taken) throw typeTaken(body.missionType);
+	await requireUsablePreset(tx, body);
+	const values = {
+		id: deps.ids.next(),
+		missionType: body.missionType,
+		name: body.name,
+		wavesApplicable: body.wavesApplicable,
+		gates: body.gates,
+		deliverable: body.deliverable,
+		requiredFields: body.requiredFields,
+		defaultPresetId: body.defaultPresetId,
+		version: 1,
+		deletedAt: null,
+		...stamp(deps.clock),
+	};
+	await tx.insert(playbook).values(values);
+	await logActivity(tx, deps, {
+		actorKind: "operator",
+		actorUserId: by.actorUserId,
+		action: "playbook.created",
+		entityType: "playbook",
+		entityId: values.id,
+		requestId: by.requestId,
+		// The whole playbook as written: versions reads it back.
+		payload: toWire(values),
+	});
+	return values;
+}
+
+/** Replaces `current`, which the caller has locked FOR UPDATE, and adds 1 to its version. */
+export async function replacePlaybook(
+	tx: Tx,
+	deps: Pick<RouteDeps, "clock" | "ids">,
+	current: Row,
+	body: UpdatePlaybookBody,
+	by: OperatorWrite,
+): Promise<Row> {
+	await requireNotInUse(tx, current.missionType);
+	await requireUsablePreset(tx, body);
+	const [updated] = await tx
+		.update(playbook)
+		.set({
+			name: body.name,
+			wavesApplicable: body.wavesApplicable,
+			gates: body.gates,
+			deliverable: body.deliverable,
+			requiredFields: body.requiredFields,
+			defaultPresetId: body.defaultPresetId,
+			version: current.version + 1,
+			...touch(deps.clock),
+		})
+		.where(eq(playbook.id, current.id))
+		.returning();
+	if (!updated) throw new Error("a locked playbook was not updatable");
+	await logActivity(tx, deps, {
+		actorKind: "operator",
+		actorUserId: by.actorUserId,
+		action: "playbook.updated",
+		entityType: "playbook",
+		entityId: updated.id,
+		requestId: by.requestId,
+		payload: toWire(updated),
+	});
+	return updated;
 }
 
 export function playbookRoutes(deps: RouteDeps) {
@@ -174,42 +260,12 @@ export function playbookRoutes(deps: RouteDeps) {
 		create: async ({ body }, ctx) => {
 			const operator = operatorOf(ctx);
 			try {
-				const row = await withTx(deps.db(), async (tx) => {
-					const [taken] = await tx
-						.select({ id: playbook.id })
-						.from(playbook)
-						.where(
-							and(eq(playbook.missionType, body.missionType), live(playbook)),
-						)
-						.limit(1);
-					if (taken) throw typeTaken(body.missionType);
-					await requireUsablePreset(tx, body);
-					const values = {
-						id: deps.ids.next(),
-						missionType: body.missionType,
-						name: body.name,
-						wavesApplicable: body.wavesApplicable,
-						gates: body.gates,
-						deliverable: body.deliverable,
-						requiredFields: body.requiredFields,
-						defaultPresetId: body.defaultPresetId,
-						version: 1,
-						deletedAt: null,
-						...stamp(deps.clock),
-					};
-					await tx.insert(playbook).values(values);
-					await logActivity(tx, deps, {
-						actorKind: "operator",
+				const row = await withTx(deps.db(), (tx) =>
+					createPlaybook(tx, deps, body, {
 						actorUserId: operator.id,
-						action: "playbook.created",
-						entityType: "playbook",
-						entityId: values.id,
 						requestId: ctx.requestId,
-						// The whole playbook as written: versions reads it back.
-						payload: toWire(values),
-					});
-					return values;
-				});
+					}),
+				);
 				return { status: 201, body: ok(toWire(row)) };
 			} catch (err) {
 				if (isTypeViolation(err)) throw typeTaken(body.missionType);
@@ -222,33 +278,10 @@ export function playbookRoutes(deps: RouteDeps) {
 			const row = await withTx(deps.db(), async (tx) => {
 				// Locked FOR UPDATE, so concurrent updates bump the version one at a time.
 				const current = await livePlaybook(tx, params.missionType, true);
-				await requireNotInUse(tx, params.missionType);
-				await requireUsablePreset(tx, body);
-				const [updated] = await tx
-					.update(playbook)
-					.set({
-						name: body.name,
-						wavesApplicable: body.wavesApplicable,
-						gates: body.gates,
-						deliverable: body.deliverable,
-						requiredFields: body.requiredFields,
-						defaultPresetId: body.defaultPresetId,
-						version: current.version + 1,
-						...touch(deps.clock),
-					})
-					.where(eq(playbook.id, current.id))
-					.returning();
-				if (!updated) throw new Error("a locked playbook was not updatable");
-				await logActivity(tx, deps, {
-					actorKind: "operator",
+				return replacePlaybook(tx, deps, current, body, {
 					actorUserId: operator.id,
-					action: "playbook.updated",
-					entityType: "playbook",
-					entityId: updated.id,
 					requestId: ctx.requestId,
-					payload: toWire(updated),
 				});
-				return updated;
 			});
 			return { status: 200, body: ok(toWire(row)) };
 		},

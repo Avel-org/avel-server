@@ -30,13 +30,15 @@ import {
 import type { CanonPrompt } from "./prompt";
 import {
 	draftBriefInput,
+	draftPlaybookInput,
+	draftPresetInput,
 	proposeMemoryInput,
 	recommendRosterInput,
 } from "./tools";
 
 /**
  * Canon on the Claude Agent SDK, the way agent-sdk-harness.ts runs a
- * dispatch: Canon's four tools on an in-process MCP server and nothing
+ * dispatch: Canon's tools on an in-process MCP server and nothing
  * else, no built-in tool, no settings, no CLAUDE.md, a hook denying every
  * other tool, and an environment with no database URL. Never run by tests:
  * they script the query.
@@ -127,6 +129,18 @@ function canonServer(
 				"Recommend the agents for this project, each with why.",
 				recommendRosterInput.shape,
 				async (a) => result(await callTool("recommend_roster", a)),
+			),
+			tool(
+				"draft_playbook",
+				"Propose a playbook for one mission type: waves, gates (each mandatory or warn), deliverable, required fields, and either the id of a live preset in playbook.defaultPresetId or a new preset in newPreset, never both. It waits for the operator's approval; nothing is live until then. Give why in reason.",
+				draftPlaybookInput.shape,
+				async (a) => result(await callTool("draft_playbook", a)),
+			),
+			tool(
+				"draft_preset",
+				"Propose a new preset: a named squad of agent templates, each with its waves, territory and writable paths. It waits for the operator's approval. Give why in reason.",
+				draftPresetInput.shape,
+				async (a) => result(await callTool("draft_preset", a)),
 			),
 			tool(
 				"fetch",

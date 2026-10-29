@@ -14,6 +14,9 @@ import {
 	file,
 	intake,
 	intakeFiles,
+	playbook,
+	proposal,
+	rosterPreset,
 } from "../../src/db/schema";
 import { stamp } from "../../src/db/schema/columns";
 import {
@@ -617,6 +620,200 @@ describe.skipIf(!process.env.DATABASE_URL)("a Canon turn", () => {
 						agentCount: 1,
 					},
 				],
+			]);
+		});
+	});
+
+	it("proposes a playbook and a preset for the operator to approve, never writing either", async () => {
+		await asApp(async (tx) => {
+			const s = await seed(tx);
+			const [template] = await tx
+				.select({ id: agentTemplate.id })
+				.from(agentTemplate)
+				.where(eq(agentTemplate.name, "Canon"));
+			if (!template) throw new Error("no template");
+			const agent = (waves: Array<"A" | "B">) => ({
+				agentTemplateId: template.id,
+				waves,
+				territory: null,
+				writablePaths: null,
+				estimatedTokens: null,
+			});
+			const preset = (waves: Array<"A" | "B">) => ({
+				name: "Landing page",
+				description: null,
+				cut: "vertical" as const,
+				agents: [agent(waves)],
+			});
+			const suffix = randomUUID().slice(0, 8);
+			const fresh = `landing-page-${suffix}`;
+			const taken = `taken-${suffix}`;
+			const fields = (missionType: string) => ({
+				missionType,
+				name: "Landing page",
+				wavesApplicable: ["A", "B"],
+				gates: [{ gate: "security", policy: "mandatory" }],
+				deliverable: "pr",
+				requiredFields: ["consent"],
+			});
+			// A live playbook for `taken`, so a draft for it replaces version 3.
+			const livePreset = randomUUID();
+			await tx.insert(rosterPreset).values({
+				id: livePreset,
+				name: "Live",
+				description: null,
+				cut: "vertical",
+				agents: [{ agent_template_id: template.id, waves: ["A"] }],
+				version: 1,
+				deletedAt: null,
+				...stamp(clock),
+			});
+			await tx.insert(playbook).values({
+				id: randomUUID(),
+				...fields(taken),
+				wavesApplicable: ["A", "B"],
+				gates: [{ gate: "security", policy: "mandatory" }],
+				deliverable: "pr",
+				defaultPresetId: livePreset,
+				version: 3,
+				deletedAt: null,
+				...stamp(clock),
+			});
+			const playbooksBefore = await tx
+				.select({ id: playbook.id })
+				.from(playbook);
+			const presetsBefore = await tx
+				.select({ id: rosterPreset.id })
+				.from(rosterPreset);
+
+			s.model.script(s.a.sessionId, [
+				{
+					tool: "draft_playbook",
+					input: {
+						playbook: { ...fields(fresh), defaultPresetId: null },
+						newPreset: preset(["A", "B"]),
+						reason: "The brief's section 11.",
+					},
+				},
+				{
+					tool: "draft_playbook",
+					input: {
+						playbook: { ...fields(taken), defaultPresetId: livePreset },
+						newPreset: null,
+						reason: "Tighten the gates.",
+					},
+				},
+				{
+					tool: "draft_preset",
+					input: { preset: preset(["B"]), reason: "A squad." },
+				},
+				// Refused: both presets; neither; a new preset missing wave A; an unknown template.
+				{
+					tool: "draft_playbook",
+					input: {
+						playbook: { ...fields(fresh), defaultPresetId: livePreset },
+						newPreset: preset(["A"]),
+						reason: "x",
+					},
+				},
+				{
+					tool: "draft_playbook",
+					input: {
+						playbook: { ...fields(fresh), defaultPresetId: null },
+						newPreset: null,
+						reason: "x",
+					},
+				},
+				{
+					tool: "draft_playbook",
+					input: {
+						playbook: { ...fields(fresh), defaultPresetId: null },
+						newPreset: preset(["B"]),
+						reason: "x",
+					},
+				},
+				{
+					tool: "draft_preset",
+					input: {
+						preset: {
+							...preset(["A"]),
+							agents: [{ ...agent(["A"]), agentTemplateId: randomUUID() }],
+						},
+						reason: "x",
+					},
+				},
+			]);
+			await runCanonTurn(s.deps, inClient(s.a.scope), s.a.sessionId);
+			expect(s.model.toolCalls.map((c) => Boolean(c.result.isError))).toEqual([
+				false,
+				false,
+				false,
+				true,
+				true,
+				true,
+				true,
+			]);
+			expect(s.model.toolCalls[5]?.result.text).toContain("wave A");
+
+			// Nothing is live: no playbook or preset was written.
+			expect(await tx.select({ id: playbook.id }).from(playbook)).toHaveLength(
+				playbooksBefore.length,
+			);
+			expect(
+				await tx.select({ id: rosterPreset.id }).from(rosterPreset),
+			).toHaveLength(presetsBefore.length);
+
+			const proposed = await tx
+				.select()
+				.from(proposal)
+				.where(eq(proposal.engagementId, s.a.engagementId))
+				.orderBy(proposal.id);
+			const premise = (reason: string) => ({
+				canonSessionId: s.a.sessionId,
+				intakeId: s.a.intakeId,
+				reason,
+			});
+			expect(
+				proposed.map((p) => [p.kind, p.source, p.status, p.summary, p.premise]),
+			).toEqual(
+				expect.arrayContaining([
+					[
+						"playbook",
+						"model",
+						"pending",
+						`New playbook for ${fresh}: Landing page, with a new preset Landing page`,
+						premise("The brief's section 11."),
+					],
+					[
+						"playbook",
+						"model",
+						"pending",
+						`Replace the ${taken} playbook (version 3): Landing page`,
+						premise("Tighten the gates."),
+					],
+					[
+						"preset",
+						"model",
+						"pending",
+						"New preset: Landing page",
+						premise("A squad."),
+					],
+				]),
+			);
+			expect(proposed).toHaveLength(3);
+			const replaces = proposed.map(
+				(p) =>
+					(p.payload as { replacesVersion?: number | null }).replacesVersion,
+			);
+			expect(replaces.sort()).toEqual([3, null, undefined].sort());
+
+			const created = (await activityOf(tx, s.a.sessionId)).filter(
+				(r) => r.action === "proposal.created",
+			);
+			expect(created.map((r) => [r.actorKind, r.entityType])).toEqual([
+				["canon", "proposal"],
+				["canon", "proposal"],
+				["canon", "proposal"],
 			]);
 		});
 	});

@@ -155,6 +155,7 @@ describe("the error envelope is a discriminated union on code", () => {
 			"check_scope_needs_client",
 			"proposal_not_pending",
 			"proposal_action_not_built",
+			"proposal_premise_changed",
 			"export_not_pr_open",
 			"skill_not_role_layer",
 			"consent_missing",

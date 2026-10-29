@@ -154,6 +154,8 @@ describe("AgentSdkCanonModel", () => {
 			"mcp__canon__draft_brief",
 			"mcp__canon__propose_memory",
 			"mcp__canon__recommend_roster",
+			"mcp__canon__draft_playbook",
+			"mcp__canon__draft_preset",
 			"mcp__canon__fetch",
 			"mcp__canon__name_session",
 		]);

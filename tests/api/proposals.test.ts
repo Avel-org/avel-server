@@ -12,8 +12,9 @@ import { stamp } from "../../src/db/schema/columns";
 import { runnerIds } from "./runner-fixtures";
 import { clock, withApi } from "./support";
 
-// The proposal queue (module 14; J, 2026-10-24). No source writes proposals
-// yet, so these tests insert them as a source would.
+// The proposal queue (module 14; J, 2026-10-24). These tests insert
+// proposals as a source would. Approving a kind with no action is refused;
+// playbook and preset approvals are in proposal-approve.test.ts.
 
 async function reasonOf(res: Response) {
 	expect(res.status, await res.clone().text()).toBe(422);
@@ -25,12 +26,12 @@ async function reasonOf(res: Response) {
 describe.skipIf(!process.env.DATABASE_URL)("/api/proposals", () => {
 	afterAll(closeDb);
 
-	it("lists proposals newest first with counts, dismisses a pending one once, and refuses every approval", async () => {
+	it("lists proposals newest first with counts, dismisses a pending one once, and refuses a kind with no action", async () => {
 		await withApi(async (h) => {
 			await h.signIn();
 			const ids = runnerIds(h.ns);
 
-			// Empty is the correct state while nothing writes proposals.
+			// Empty until something proposes.
 			const empty = proposalListEnvelope.parse(
 				await (await h.call("/api/proposals")).json(),
 			);

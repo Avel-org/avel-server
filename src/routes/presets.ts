@@ -11,6 +11,7 @@ import {
 } from "drizzle-orm";
 import { z } from "zod";
 import {
+	type CreatePresetBody,
 	ok,
 	type Preset,
 	type PresetAgent,
@@ -30,7 +31,7 @@ import {
 } from "../db/schema";
 import { live, stamp, touch } from "../db/schema/columns";
 import type { PresetAgent as StoredAgent } from "../db/schema/work";
-import { type Executor, withTx } from "../db/tx";
+import { type Executor, type Tx, withTx } from "../db/tx";
 import { type ActorRow, activityActor, actorColumns } from "./activity";
 import { requirePresetAgents } from "./roster";
 import {
@@ -185,6 +186,41 @@ function filtersFor(query: PresetListQuery): SQL | undefined {
 	);
 }
 
+/** Writes a new preset at version 1, as POST /api/presets or an approved proposal. */
+export async function createPreset(
+	tx: Tx,
+	deps: Pick<RouteDeps, "clock" | "ids">,
+	body: CreatePresetBody,
+	by: { actorUserId: string; requestId: string },
+): Promise<Row> {
+	await requirePresetAgents(tx, body.agents);
+	const values = {
+		id: deps.ids.next(),
+		name: body.name,
+		description: body.description ?? null,
+		cut: body.cut,
+		agents: toStored(body.agents),
+		version: 1,
+		deletedAt: null,
+		...stamp(deps.clock),
+	};
+	await tx.insert(rosterPreset).values(values);
+	await logActivity(tx, deps, {
+		actorKind: "operator",
+		actorUserId: by.actorUserId,
+		action: "preset.created",
+		entityType: "roster_preset",
+		entityId: values.id,
+		requestId: by.requestId,
+		payload: {
+			name: values.name,
+			cut: values.cut,
+			agentCount: values.agents.length,
+		},
+	});
+	return values;
+}
+
 export function presetRoutes(deps: RouteDeps) {
 	return tsr.platformContext<RequestContext>().router(presetContract, {
 		list: async ({ query }) => {
@@ -240,34 +276,12 @@ export function presetRoutes(deps: RouteDeps) {
 
 		create: async ({ body }, ctx) => {
 			const operator = operatorOf(ctx);
-			const row = await withTx(deps.db(), async (tx) => {
-				await requirePresetAgents(tx, body.agents);
-				const values = {
-					id: deps.ids.next(),
-					name: body.name,
-					description: body.description ?? null,
-					cut: body.cut,
-					agents: toStored(body.agents),
-					version: 1,
-					deletedAt: null,
-					...stamp(deps.clock),
-				};
-				await tx.insert(rosterPreset).values(values);
-				await logActivity(tx, deps, {
-					actorKind: "operator",
+			const row = await withTx(deps.db(), (tx) =>
+				createPreset(tx, deps, body, {
 					actorUserId: operator.id,
-					action: "preset.created",
-					entityType: "roster_preset",
-					entityId: values.id,
 					requestId: ctx.requestId,
-					payload: {
-						name: values.name,
-						cut: values.cut,
-						agentCount: values.agents.length,
-					},
-				});
-				return values;
-			});
+				}),
+			);
 			return { status: 201, body: ok(toWire(row)) };
 		},
 

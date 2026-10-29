@@ -233,6 +233,8 @@ describe.skipIf(!process.env.DATABASE_URL)("Canon chat", () => {
 			"draft_brief",
 			"propose_memory",
 			"recommend_roster",
+			"draft_playbook",
+			"draft_preset",
 		]);
 		expect(toolsFor("ask", onIntake)).toEqual([]);
 		expect(toolsFor("fetch", onIntake)).toEqual(["fetch"]);

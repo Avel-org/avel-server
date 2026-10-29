@@ -761,7 +761,7 @@ The operator decided how templates, playbooks and agent permissions work, when t
 
 ### What a playbook owns
 
-A playbook is the process for one kind of mission. The operator writes it, never an agent (`TEMPLATES.md`, *Who builds what*).
+A playbook is the process for one kind of mission. The operator writes it, never an agent (`TEMPLATES.md`, *Who builds what*). *2026-10-28: Canon may draft one as a proposal; it is written only when the operator approves it (*Canon drafts playbooks and presets*).*
 
 - **It owns** which waves run, the gates that apply with their policy, the deliverable, and the required fields.
 - **It names a default preset and never lists agents.** Squad composition is RosterPreset's.
@@ -867,7 +867,7 @@ J decided the first group below on 2026-10-15 to 2026-10-19, before the first mi
 - **Canon's bounds are unchanged, and a CanonSession row now carries them.** It still gets a budget, a hard ceiling, an audit trail and attribution. The 2026-10-06 bounds still hold: Canon reads, drafts, and never acts.
 - **Canon drafts missions only. The operator approves every one.** Canon never approves. Approval stays operator-only in code (`ROLES.md`).
 - **A dispatch starts only when the operator clicks it.** There is no autonomous dispatching and no dispatcher agent. "Creating or starting a dispatch" stays on the list no agent may do (`ROLES.md`).
-- **Canon may recommend a roster, and the recommendation lives outside the presets.** It is shown beside the presets and is visibly a recommendation. A preset is a reusable agency asset. A recommendation is written for one project by a model, and storing it as a preset would make a model's output look like an approved asset.
+- **Canon may recommend a roster, and the recommendation lives outside the presets.** It is shown beside the presets and is visibly a recommendation. A preset is a reusable agency asset. A recommendation is written for one project by a model, and storing it as a preset would make a model's output look like an approved asset. *2026-10-28: Canon may draft a preset as a proposal; it becomes a preset only when the operator approves it, so a model's output still never looks approved (*Canon drafts playbooks and presets*).*
 - **Canon's questions are stored rows that feed the approval check.** When Canon is unsure, it asks through a question with 2 to 4 options and free text, as Claude's question pop-up does. An Intake with an open question cannot be approved.
 - **Uploads are optional, with no minimum.** Most will be Markdown files and artifacts.
 - **No memory and no document may leak between clients.** This is enforced in the database, not only in code.
@@ -1113,6 +1113,18 @@ J chose these on 2026-10-24, when modules 12 and 14 were started.
 - **The export-level `gate_override` stays superseded.** `STATE.md` had listed it as unbuilt after *the gate answers verified, pass or fail* (2026-10-21) removed it.
 
 ---
+
+## Decided 2026-10-28: Canon drafts playbooks and presets, the operator approves
+
+J chose this on 2026-10-28, when asked whether Canon could build the `landing-page` playbook and preset from the GTS brief. Giving Canon tools that write them live was the other option. It was rejected: a model could set a gate's policy, for example drop `security` from `mandatory`, and the next mission of that type would read it at once.
+
+- **Two draft tools write proposals, never playbooks or presets** `[built]`. `draft_playbook` and `draft_preset` are draft-mode tools. Each writes a pending `Proposal` of kind `playbook` or `preset`, from the model, with a `proposal.created` row whose actor is Canon. Nothing else is written. The bounds hold: Canon reads and drafts, and never acts.
+- **A playbook draft names a live preset or carries a new one, never both** `[built]`. A new mission type needs a preset that does not exist yet, so one approval writes both.
+- **The draft is checked as approval will check it** `[built]`. The agents must be live and rosterable, and the preset must staff the playbook's earliest wave, so the operator is never shown a draft that cannot be approved as written.
+- **Approval writes through the routes' own code** `[built]`. `createPlaybook`, `replacePlaybook` and `createPreset` are shared with `POST /api/playbooks`, `PUT /api/playbooks/by-type/:missionType` and `POST /api/presets`. Their activity rows name the approving operator. The writes and the decision commit in one transaction, or nothing does.
+- **A replacement records the version it replaces** `[built]`. If the live playbook has moved on since the draft, approval refuses `proposal_premise_changed` and the proposal stays pending for the operator to dismiss. It is not marked `expired`, because no expiry is built yet.
+- **A Canon proposal names its session in `premise`, not in a column** `[attestation]`. `premise.canonSessionId` is written by the tool, from the session row, never from the model; no foreign key checks it. The `proposed_by_dispatch_id` question in `DATA-CONTRACTS-V2.md` stays open.
+- **Instructions version 4.** Canon proposes a playbook or a preset only when the operator asks for one, and never says it is live.
 
 ## Decided 2026-10-28: the contract owns the shapes, not the tables
 

@@ -421,6 +421,13 @@
       "when": 1793182315173,
       "tag": "0059_intake_consent",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1793231983354,
+      "tag": "0060_canon_proposals",
+      "breakpoints": true
     }
   ]
 }

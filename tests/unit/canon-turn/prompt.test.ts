@@ -47,7 +47,7 @@ describe("buildCanonPrompt", () => {
 			`# Canon\nYou brief projects.\n\n${CANON_INSTRUCTIONS}\n\n${CANON_BOUNDS}`,
 		);
 		expect(prompt.instructionsVersion).toBe(CANON_INSTRUCTIONS_VERSION);
-		expect(CANON_INSTRUCTIONS_VERSION).toBe(3);
+		expect(CANON_INSTRUCTIONS_VERSION).toBe(4);
 		expect(prompt).toMatchObject({ mode: "draft", scope: "client" });
 		expect(prompt.splitVersion).toBe(KNOWLEDGE_SPLIT_VERSION);
 	});
@@ -99,6 +99,9 @@ describe("buildCanonPrompt", () => {
 			"sources list",
 			"citing the passage behind it",
 			"never choose the cut",
+			"draft_playbook",
+			"draft_preset",
+			"waits for the operator's approval",
 		]) {
 			expect(CANON_INSTRUCTIONS, phrase).toContain(phrase);
 		}

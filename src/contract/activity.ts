@@ -93,6 +93,7 @@ export const activityAction = z.enum([
 	"finding.check_set",
 	"proposal.approved",
 	"proposal.dismissed",
+	"proposal.created",
 ]);
 
 /** Must equal the activity_entity_type pgEnum; tests/api/activity.test.ts checks it. */

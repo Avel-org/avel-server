@@ -454,7 +454,7 @@ Anything proactive — from code or from a model — reaches the operator as a p
 
 ```
 id
-kind                   'next_module' | 'calibration' | 'post_delivery' | 'intake_questions'
+kind                   'next_module' | 'calibration' | 'post_delivery' | 'intake_questions' | 'playbook' | 'preset'
 source                 'code' | 'model'
 proposed_by_dispatch_id?  FK → Dispatch — [specced] 2026-10-06; required exactly when source = 'model'
 engagement_id? · mission_id?
@@ -471,6 +471,16 @@ timestamps             created_at, updated_at (as built 2026-10-05); status and 
 **A model proposal names the run that made it.** `proposed_by_dispatch_id` leads to the agent, its version hash and its budget, so a Canon chat suggestion is attributable to one session. A CHECK ties it to `source = 'model'`. *2026-10-19: Canon is not a dispatch, so a Canon proposal needs a session reference instead. Decided with module 14.*
 
 **Approving a proposal starts its action through the normal path.** A `next_module` proposal still creates a dispatch that needs its estimate, its room, and its ceilings. Approval skips nothing.
+
+**Canon's playbook and preset proposals** `[built]` 2026-10-28. Canon's `draft_playbook` and `draft_preset` tools write them; approving writes the playbook or preset through the same code as their routes (`DECISIONS-V2.md`, *Canon drafts playbooks and presets*). The shapes are in `src/contract/proposal.ts`:
+
+```
+playbook payload       { playbook: CreatePlaybookBody with defaultPresetId nullable,
+                         newPreset: CreatePresetBody | null,     exactly one names the preset
+                         replacesVersion: int | null }           null for a new mission type
+preset payload         { preset: CreatePresetBody }
+premise (both)         { canonSessionId, intakeId, reason }
+```
 
 **A proposal expires when its premise stops being true.** If the gate result a next-module proposal followed is reversed, the proposal becomes `expired` and cannot be approved. Stale proposals are the queue's version of a stale preview.
 

@@ -111,6 +111,7 @@ export const activityAction = pgEnum("activity_action", [
 	"finding.check_set",
 	"proposal.approved",
 	"proposal.dismissed",
+	"proposal.created",
 ]);
 
 export const activityEntityType = pgEnum("activity_entity_type", [

@@ -184,10 +184,12 @@ export const PRECONDITION_REASONS = [
 	// check, and a client-scoped check needs the finding's client.
 	"finding_not_confirmed",
 	"check_scope_needs_client",
-	// Module 14 (2026-10-24): only a pending proposal is decided, and no
-	// kind's action is built yet, so none can be approved.
+	// Module 14 (2026-10-24): only a pending proposal is decided, and a kind
+	// with no action built cannot be approved. A playbook proposal whose live
+	// playbook changed since Canon drafted it is refused (2026-10-28).
 	"proposal_not_pending",
 	"proposal_action_not_built",
+	"proposal_premise_changed",
 	// GitHub PR delivery (2026-10-24): refresh reads only a delivering or pr-open github_pr export.
 	"export_not_pr_open",
 	// Role skills (2026-10-24): only a role-layer skill attaches to roles.

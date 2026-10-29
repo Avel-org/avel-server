@@ -1,6 +1,15 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { wave } from "../../contract/agent-template";
+import { createPresetBody } from "../../contract/preset";
+import {
+	type CanonProposalPremise,
+	type PlaybookProposalPayload,
+	type PresetProposalPayload,
+	playbookProposalFields,
+	presetChoiceIssue,
+} from "../../contract/proposal";
+import { earliestWave } from "../../contract/shared/coherence";
 import { logActivity } from "../../db/activity";
 import type { ClientId } from "../../db/client-id";
 import {
@@ -8,8 +17,10 @@ import {
 	canonSession,
 	clientMemory,
 	intake,
+	playbook,
+	proposal,
 } from "../../db/schema";
-import { stamp, touch } from "../../db/schema/columns";
+import { live, stamp, touch } from "../../db/schema/columns";
 import { type Tx, withClientScope } from "../../db/tx";
 import {
 	briefSourceIssues,
@@ -21,6 +32,7 @@ import type { Clock } from "../../lib/clock";
 import type { IdGenerator } from "../../lib/ids";
 import { type CheckIssue, checkIntake } from "../../lib/intake-check";
 import { ApiError } from "../../middleware/errors";
+import { requireUsablePreset } from "../../routes/playbooks";
 import { requirePresetAgents } from "../../routes/roster";
 import type { DraftToolCall, DraftToolName, ToolResult } from "./model";
 
@@ -74,6 +86,19 @@ export const recommendRosterInput = z
 			.min(1)
 			.max(30),
 	})
+	.strict();
+
+/**
+ * A playbook for the operator to approve (J, 2026-10-28: Canon drafts, the
+ * operator approves). It names a live preset or carries a new one.
+ */
+export const draftPlaybookInput = z
+	.object({ ...playbookProposalFields, reason: text })
+	.strict();
+
+/** A new preset for the operator to approve. */
+export const draftPresetInput = z
+	.object({ preset: createPresetBody, reason: text })
 	.strict();
 
 const error = (message: string): ToolResult => ({
@@ -145,6 +170,47 @@ export function canonTools(ctx: CanonToolContext): DraftToolCall {
 			);
 		}
 		return row;
+	}
+
+	/** A pending proposal from this session, and its proposal.created row. */
+	async function propose(
+		tx: Tx,
+		draft:
+			| { kind: "playbook"; payload: PlaybookProposalPayload }
+			| { kind: "preset"; payload: PresetProposalPayload },
+		summary: string,
+		reason: string,
+		counts: Record<string, number | null>,
+	): Promise<void> {
+		const id = ctx.ids.next();
+		const premise: CanonProposalPremise = {
+			canonSessionId: ctx.session.id,
+			intakeId: ctx.session.intakeId,
+			reason,
+		};
+		await tx.insert(proposal).values({
+			id,
+			kind: draft.kind,
+			source: "model",
+			engagementId: ctx.session.engagementId,
+			missionId: null,
+			summary,
+			payload: draft.payload,
+			premise,
+			status: "pending",
+			reason: null,
+			decidedBy: null,
+			decidedAt: null,
+			...stamp(ctx.clock),
+		});
+		await logActivity(tx, ctx, {
+			...actor,
+			...logged,
+			action: "proposal.created",
+			entityType: "proposal",
+			entityId: id,
+			payload: { canonSessionId: ctx.session.id, kind: draft.kind, ...counts },
+		});
 	}
 
 	const tools: Record<DraftToolName, (input: unknown) => Promise<ToolResult>> =
@@ -316,6 +382,79 @@ export function canonTools(ctx: CanonToolContext): DraftToolCall {
 						},
 					});
 					return { text: "Recommended. It is shown beside the presets." };
+				});
+			},
+
+			draft_playbook: async (input) => {
+				const parsed = draftPlaybookInput.safeParse(input);
+				if (!parsed.success) return error(issuesText(parsed.error.issues));
+				const { reason, ...draft } = parsed.data;
+				const choice = presetChoiceIssue(draft);
+				if (choice) return error(choice);
+				return inTurn(async (tx) => {
+					// The checks approval will make, so the operator is never handed
+					// a draft that cannot be approved as written.
+					const { defaultPresetId, wavesApplicable } = draft.playbook;
+					if (draft.newPreset !== null) {
+						await requirePresetAgents(tx, draft.newPreset.agents);
+						const first = earliestWave(draft.playbook);
+						if (
+							first === null ||
+							!draft.newPreset.agents.some((a) => a.waves.includes(first))
+						) {
+							throw new Refused(
+								`The new preset has no agent in wave ${first ?? "(none)"}, the earliest the playbook declares; nothing was written.`,
+							);
+						}
+					} else if (defaultPresetId !== null) {
+						await requireUsablePreset(tx, { defaultPresetId, wavesApplicable });
+					}
+					const { missionType, name } = draft.playbook;
+					const [current] = await tx
+						.select({ version: playbook.version })
+						.from(playbook)
+						.where(and(eq(playbook.missionType, missionType), live(playbook)));
+					const replacesVersion = current?.version ?? null;
+					const withPreset =
+						draft.newPreset !== null
+							? `, with a new preset ${draft.newPreset.name}`
+							: "";
+					await propose(
+						tx,
+						{ kind: "playbook", payload: { ...draft, replacesVersion } },
+						replacesVersion === null
+							? `New playbook for ${missionType}: ${name}${withPreset}`
+							: `Replace the ${missionType} playbook (version ${replacesVersion}): ${name}${withPreset}`,
+						reason,
+						{
+							replacesVersion,
+							gateCount: draft.playbook.gates.length,
+							newPresetAgentCount: draft.newPreset?.agents.length ?? null,
+						},
+					);
+					return {
+						text: "Proposed. The operator approves or dismisses it in the proposal queue; nothing is live until then.",
+					};
+				});
+			},
+
+			draft_preset: async (input) => {
+				const parsed = draftPresetInput.safeParse(input);
+				if (!parsed.success) return error(issuesText(parsed.error.issues));
+				const { reason, preset } = parsed.data;
+				return inTurn(async (tx) => {
+					// As a preset save would check: live, rosterable, once per territory.
+					await requirePresetAgents(tx, preset.agents);
+					await propose(
+						tx,
+						{ kind: "preset", payload: { preset } },
+						`New preset: ${preset.name}`,
+						reason,
+						{ agentCount: preset.agents.length },
+					);
+					return {
+						text: "Proposed. The operator approves or dismisses it in the proposal queue; nothing is live until then.",
+					};
 				});
 			},
 		};
